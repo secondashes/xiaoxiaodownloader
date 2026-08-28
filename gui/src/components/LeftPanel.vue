@@ -317,13 +317,58 @@
           </div>
         </div>
 
+        <!-- xHamster / Pornhub 用 Twitter (X) 站 OAuth 登录（复用 X 站 cookie 自动授权） -->
+        <div v-if="site === 'xhamster' || site === 'pornhub'" class="pawchive-login-form">
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="emit('site-oauth-login', site)"
+          >
+            用 Twitter (X) 登录
+          </n-button>
+          <div class="login-hint">
+            {{ site === 'xhamster' ? 'xHamster' : 'Pornhub' }} 选用 jp 区域版本（{{ site === 'xhamster' ? 'jp.xhamster.com' : 'jp.pornhub.com' }}）；点上方按钮在弹窗内自动用已登录的 X 站 cookie 完成 OAuth 授权
+          </div>
+        </div>
+
+        <!-- XVideos 邮箱密码登录（含人机验证 + 记住装置） -->
+        <div v-if="site === 'xvideos'" class="pawchive-login-form">
+          <n-input
+            v-model:value="xvEmailInput"
+            size="small"
+            placeholder="XVideos 登录邮箱"
+            @keyup.enter="handleXvLogin"
+          />
+          <n-input
+            v-model:value="xvPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+            @keyup.enter="handleXvLogin"
+          />
+          <n-checkbox v-model:checked="xvRemember" size="small">在此装置上记住我（减少后续验证）</n-checkbox>
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="handleXvLogin"
+          >
+            登录（弹窗内完成人机验证）
+          </n-button>
+          <div class="login-hint">
+            XVideos 首次登录可能弹出人机验证（图片选择/点击），在弹窗内按提示完成即可；cookie 加密长期保存
+          </div>
+        </div>
+
         <!-- 登录引导：打开登录页 / 一键抓取 -->
         <div class="login-guide">
           <n-button size="small" block secondary @click="emit('open-login-page', site)">
             打开登录页（浏览器）
           </n-button>
           <n-button
-            v-if="site !== 'iwara' && site !== 'hanime'"
+            v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos'"
             size="small"
             block
             type="primary"
@@ -340,9 +385,13 @@
                   ? 'Iwara 使用邮箱密码登录（cookie 会过期，密码登录自动续期）；国内网络建议在设置里配置 Iwara 代理'
                   : site === 'hanime'
                     ? 'Hanime1 (H站) 使用邮箱密码登录；国内网络必须在设置里配置 H站代理'
-                    : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
+                    : site === 'xhamster' || site === 'pornhub'
+                      ? '推荐用上方 X 站 OAuth 登录；也可打开浏览器手动登录后用"一键抓取Cookie"'
+                      : site === 'xvideos'
+                        ? '推荐用上方邮箱密码登录（人机验证自动弹窗）；也可打开浏览器手动登录后用"一键抓取Cookie"'
+                        : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
           </div>
-          <div v-if="site !== 'iwara' && site !== 'hanime'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
+          <div v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
         </div>
 
         <!-- 未登录但保存过账号档案：直接选择切换即可恢复登录（当前账号过期也能换） -->
@@ -905,6 +954,48 @@
             </div>
           </template>
 
+          <!-- xHamster 专属设置（代理 + 区域，默认 jp） -->
+          <template v-if="site === 'xhamster'">
+            <div class="setting-item">
+              <div class="setting-label">xHamster 代理地址（OAuth + 浏览 + 下载都走此代理）</div>
+              <n-input
+                :value="settings.xhamster_proxy"
+                placeholder="如 http://127.0.0.1:10809"
+                size="small"
+                @change="v => $emit('site-set-proxy', 'xhamster', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">⚠️ 国内必须配置代理；本工具强制使用 jp.xhamster.com（日本区），规避中文区限制</div>
+            </div>
+          </template>
+
+          <!-- Pornhub 专属设置（代理 + 区域，默认 jp） -->
+          <template v-if="site === 'pornhub'">
+            <div class="setting-item">
+              <div class="setting-label">Pornhub 代理地址（OAuth + 浏览 + 下载都走此代理）</div>
+              <n-input
+                :value="settings.pornhub_proxy"
+                placeholder="如 http://127.0.0.1:10809"
+                size="small"
+                @change="v => $emit('site-set-proxy', 'pornhub', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">⚠️ 国内必须配置代理；本工具强制使用 jp.pornhub.com（日本区），规避中文区限制</div>
+            </div>
+          </template>
+
+          <!-- XVideos 专属设置（代理，默认直连） -->
+          <template v-if="site === 'xvideos'">
+            <div class="setting-item">
+              <div class="setting-label">XVideos 代理地址（浏览 + 下载都走此代理，留空 = 直连）</div>
+              <n-input
+                :value="settings.xvideos_proxy"
+                placeholder="如 http://127.0.0.1:10809，留空直连"
+                size="small"
+                @change="v => $emit('site-set-proxy', 'xvideos', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">XVideos 全球可直连；如登录被风控或访问慢再填代理</div>
+            </div>
+          </template>
+
           <!-- 按文件类型分类 -->
           <div class="setting-switch">
             <div>
@@ -1173,6 +1264,10 @@ const props = defineProps({
   // Hanime1 登录用户名（H站，邮箱密码登录）
   hanimeUser: { type: String, default: '' },
   hanimeLoginLoading: { type: Boolean, default: false },
+  // 通用 webview OAuth 三站登录用户名（xhamster/pornhub/xvideos）
+  xhamsterUser: { type: String, default: '' },
+  pornhubUser: { type: String, default: '' },
+  xvideosUser: { type: String, default: '' },
   // 全站点登录信息（后端 login_info 事件：用户名/Cookie/账号档案）
   loginInfo: { type: Object, default: () => ({}) },
   loginLoading: { type: Boolean, default: false },
@@ -1223,6 +1318,10 @@ const emit = defineEmits([
   // ExHentai
   'exhentai-set-cookies', // 粘贴 cookie 登录 EX
   'exhentai-logout',      // 退出 EX 登录
+  // 通用 webview OAuth 三站（xhamster/pornhub/xvideos）
+  'site-oauth-login',     // 触发 webview OAuth 登录弹窗（参数：站点 key）
+  'site-logout',          // 退出登录（参数：站点 key）
+  'site-set-proxy',       // 修改代理（参数：站点 key, 代理地址）
   // 登录引导 / 账号档案
   'open-login-page',      // 打开登录页（参数：站点 key）
   'fetch-cookies',        // 一键抓取浏览器 Cookie 并自动登录（参数：站点 key）
@@ -1251,7 +1350,7 @@ const activePanel = ref('')
 // ============================
 // 登录状态（账号卡片）
 // ============================
-const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime'].includes(props.site))
+const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'xhamster', 'pornhub', 'xvideos'].includes(props.site))
 
 const siteLoggedIn = computed(() => {
   if (props.site === 'pawchive') return !!props.pawchiveUser
@@ -1259,6 +1358,9 @@ const siteLoggedIn = computed(() => {
   if (props.site === 'exhentai') return !!props.exhentaiUser
   if (props.site === 'iwara') return !!props.iwaraUser
   if (props.site === 'hanime') return !!props.hanimeUser
+  if (props.site === 'xhamster') return !!props.xhamsterUser
+  if (props.site === 'pornhub') return !!props.pornhubUser
+  if (props.site === 'xvideos') return !!props.xvideosUser
   return false
 })
 
@@ -1269,6 +1371,9 @@ const loginSubtitle = computed(() => {
   if (props.site === 'exhentai') return props.exhentaiUser ? 'ExHentai 已登录' : 'ExHentai 未登录'
   if (props.site === 'iwara') return props.iwaraUser ? `Iwara 已登录: ${props.iwaraUser}` : 'Iwara 未登录'
   if (props.site === 'hanime') return props.hanimeUser ? `H站已登录: ${props.hanimeUser}` : 'Hanime1 未登录'
+  if (props.site === 'xhamster') return props.xhamsterUser ? `xHamster 已登录: ${props.xhamsterUser}` : 'xHamster 未登录'
+  if (props.site === 'pornhub') return props.pornhubUser ? `Pornhub 已登录: ${props.pornhubUser}` : 'Pornhub 未登录'
+  if (props.site === 'xvideos') return props.xvideosUser ? `XVideos 已登录: ${props.xvideosUser}` : 'XVideos 未登录'
   return ''
 })
 
@@ -1277,6 +1382,9 @@ const siteLoginInfo = computed(() => props.loginInfo[props.site] || {})
 const siteUsername = computed(() => {
   if (props.site === 'twitter' && props.twitterUser) return props.twitterUser
   if (props.site === 'pawchive' && props.pawchiveUser) return props.pawchiveUser
+  if (props.site === 'xhamster' && props.xhamsterUser) return props.xhamsterUser
+  if (props.site === 'pornhub' && props.pornhubUser) return props.pornhubUser
+  if (props.site === 'xvideos' && props.xvideosUser) return props.xvideosUser
   return siteLoginInfo.value.username || ''
 })
 const siteCookieStr = computed(() => siteLoginInfo.value.cookie_str || '')
@@ -1303,6 +1411,10 @@ const SITE_URLS = {
   hanime: 'https://hanime1.me',
   oreno3d: 'https://oreno3d.com',
   erommdtube: 'https://erommdtube.com',
+  // 三次元新站（选用 jp 区域版本，规避国内/中文区限制）
+  xhamster: 'https://jp.xhamster.com',
+  pornhub: 'https://jp.pornhub.com',
+  xvideos: 'https://www.xvideos.com',
 }
 
 // 浏览器选择（默认 = 系统默认浏览器）
@@ -1500,6 +1612,48 @@ EroMMDTube 与 Oreno3D 同架构的 3D 动画（MMD 等）视频索引站，视�
 - 下载实际从 Iwara 源获取（最高画质），无需登录
 - E站一般可直连；无法访问时在左侧设置里填代理
 - 粘贴 erommdtube.com/movies/... 链接可直接解析下载`,
+  xhamster: `🎞️ xHamster（jp.xhamster.com）使用技巧
+
+xHamster 是国际老牌视频站，不同区域子域名内容与限制不同。本工具默认选用 jp.xhamster.com（日本区），规避中文区限制。
+
+🔑 登录（推荐 X 站 OAuth）：
+- 点左侧"用 Twitter (X) 登录"按钮，弹窗内会自动用本工具已登录的 X 站 cookie 完成 OAuth 授权
+- 不需重新输密码；登录后 cookie 加密长期保存
+- 也可"打开网站"在浏览器手动登录后点"一键抓取浏览器 Cookie"
+
+💡 本工具提示：
+- ⚠️ 国内必须配置代理（左侧 xHamster 代理设置，默认 http://127.0.0.1:10809）
+- 区域切换：代理落地不同国家会自动跳转 zh/jp/... 子域；本工具强制使用 jp 域
+- 搜索/解析/下载待 AP2 阶段补全（当前为登录框架占位）
+- 视频直链由 cdn.xhcdn.com 提供，下载走代理`,
+  pornhub: `🎞️ Pornhub（jp.pornhub.com）使用技巧
+
+Pornhub 是国际最大的视频站之一，不同区域子域名内容与限制不同。本工具默认选用 jp.pornhub.com（日本区）。
+
+🔑 登录（推荐 X 站 OAuth）：
+- 点左侧"用 Twitter (X) 登录"按钮，弹窗内会自动用本工具已登录的 X 站 cookie 完成 OAuth 授权
+- 不需重新输密码；登录后 cookie 加密长期保存
+- 也可"打开网站"在浏览器手动登录后点"一键抓取浏览器 Cookie"
+
+💡 本工具提示：
+- ⚠️ 国内必须配置代理（左侧 Pornhub 代理设置，默认 http://127.0.0.1:10809）
+- 区域切换：代理落地不同国家会自动跳转 zh/jp/... 子域；本工具强制使用 jp 域
+- 搜索/解析/下载待 AP3 阶段补全（当前为登录框架占位）
+- 视频直链由 cdn.phncdn.com 提供，下载走代理`,
+  xvideos: `🎞️ XVideos（xvideos.com）使用技巧
+
+XVideos 是国际最大的免费视频站，无区域子域，全球可用，但登录有人机验证 + "在此装置上记住我"。
+
+🔑 登录（邮箱密码）：
+- 在左侧表单填入你的 XVideos 邮箱与密码
+- 第一次登录可能弹出人机验证（选图片/点击等），在弹窗内按提示完成即可
+- 勾选"在此装置上记住我"可减少后续验证频率
+- 登录后 cookie 加密长期保存，重启工具自动恢复
+
+💡 本工具提示：
+- XVideos 一般可直连，也可填代理
+- 搜索/解析/下载待你给出具体要求后再补全（当前为登录框架占位）
+- 机器验证弹窗会通过 webview 自动显示，无需手动开浏览器`,
 }
 
 // 当前站点的帮助内容
@@ -1526,6 +1680,7 @@ function handleSiteLogout() {
   else if (props.site === 'exhentai') emit('exhentai-logout')
   else if (props.site === 'iwara') emit('iwara-logout')
   else if (props.site === 'hanime') emit('hanime-logout')
+  else if (['xhamster', 'pornhub', 'xvideos'].includes(props.site)) emit('site-logout', props.site)
 }
 
 // 清除 Twitter 专属缓存（确认后执行，保留登录与关注分类）
@@ -1582,6 +1737,21 @@ const hanimePasswordInput = ref('')
 function handleHanimeLogin() {
   if (!hanimeEmailInput.value.trim() || !hanimePasswordInput.value) return
   emit('hanime-login', hanimeEmailInput.value.trim(), hanimePasswordInput.value)
+}
+
+// XVideos 邮箱密码登录表单（触发 webview 弹窗由 App.vue 接管）
+const xvEmailInput = ref('')
+const xvPasswordInput = ref('')
+const xvRemember = ref(true)
+
+function handleXvLogin() {
+  if (!xvEmailInput.value.trim() || !xvPasswordInput.value) return
+  // 触发 App.vue 的 webview 登录弹窗（与 xhamster/pornhub OAuth 同入口，自动预填账号）
+  emit('site-oauth-login', 'xvideos', {
+    email: xvEmailInput.value.trim(),
+    password: xvPasswordInput.value,
+    remember: xvRemember.value,
+  })
 }
 
 function handleTwitterLogin() {

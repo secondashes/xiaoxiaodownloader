@@ -78,6 +78,18 @@ contextBridge.exposeInMainWorld('api', {
   // 更新 ExHentai webview 会话的代理设置
   exSetProxy: (proxyRules) => ipcRenderer.invoke('ex-set-proxy', proxyRules),
 
+  // ============================
+  // 通用 webview OAuth 站点（xhamster/pornhub/xvideos 等）
+  // ============================
+  // 抓取目标站 webview 会话的 cookie（OAuth 登录成功后调用，返回给后端持久化）
+  siteGetCookies: (site) => ipcRenderer.invoke('site-get-cookies', site),
+
+  // 设置目标站 webview 会话代理
+  siteSetProxy: (site, proxyRules) => ipcRenderer.invoke('site-set-proxy', site, proxyRules),
+
+  // 向目标站 webview 会话注入 cookie（切换账号/恢复登录态时把后端存的 cookie 灌进 webview）
+  siteSetCookies: (site, cookieStr) => ipcRenderer.invoke('site-set-cookies', site, cookieStr),
+
   // 用系统默认程序打开外部链接（磁力链接 -> 下载器/浏览器）
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   // 用指定浏览器打开网站（'chrome' | 'edge' | 'firefox' | ''=系统默认）

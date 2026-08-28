@@ -24,6 +24,13 @@
               :class="{ on: site === 'coomer' }"
               @click="switchSite('coomer')"
             >Coomer</button>
+            <button
+              v-for="s in ['xhamster', 'pornhub', 'xvideos']"
+              :key="s"
+              class="site-chip"
+              :class="{ on: site === s }"
+              @click="switchSite(s)"
+            >{{ s === 'xhamster' ? 'xHamster' : (s === 'pornhub' ? 'Pornhub' : 'XVideos') }}</button>
           </div>
         </div>
         <div class="site-group">

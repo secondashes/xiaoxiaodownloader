@@ -19,6 +19,12 @@
             @hanime-logout="handleHanimeLogout"
             @hanime-set-proxy="handleHanimeSetProxy"
             @oreno-set-proxy="handleOrenoSetProxy"
+            :xhamster-user="xhamsterUser"
+            :pornhub-user="pornhubUser"
+            :xvideos-user="xvideosUser"
+            @site-oauth-login="handleSiteOAuthLogin"
+            @site-logout="handleSiteLogout"
+            @site-set-proxy="handleSiteSetProxy"
             :login-info="loginInfo"
             :login-loading="pawchiveLoginLoading"
             :search-history="searchHistory"
@@ -297,6 +303,21 @@
             </n-button>
           </template>
         </n-modal>
+
+        <!-- 通用 webview OAuth 登录弹窗（xhamster/pornhub/xvideos 共用） -->
+        <WebviewLoginModal
+          :show="wvLogin.visible"
+          @update:show="v => wvLogin.visible = v"
+          :site="wvLogin.site"
+          :login-url="wvLogin.loginUrl"
+          :home-url="wvLogin.homeUrl"
+          :partition="wvLogin.partition"
+          :success-patterns="wvLogin.successPatterns"
+          :captcha-patterns="wvLogin.captchaPatterns"
+          :title="`${wvLogin.site} webview 登录`"
+          @login-success="handleSiteLoginSuccess"
+          @login-failed="err => message.error(err || '登录失败')"
+        />
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
@@ -308,6 +329,7 @@ import { darkTheme, zhCN, dateZhCN, createDiscreteApi } from 'naive-ui'
 import LeftPanel from './components/LeftPanel.vue'
 import RightPanel from './components/RightPanel.vue'
 import DownloadManagerPanel from './components/DownloadManagerPanel.vue'
+import WebviewLoginModal from './components/WebviewLoginModal.vue'
 
 // 独立的消息提示（用于在非 Provider 组件中弹出 Toast）
 const { message, dialog } = createDiscreteApi(['message', 'dialog'], {
@@ -661,6 +683,25 @@ const asmrDetailLoading = ref(false)
 const asmrBatchRunning = ref(false)
 const asmrBatchProgress = reactive({ done: 0, total: 0, message: '' })
 
+// ============================
+// 通用 webview OAuth 三站（xhamster/pornhub/xvideos）状态
+// AP1 阶段：登录用户名显示 + webview 弹窗状态 + OAuth 配置
+// ============================
+const xhamsterUser = ref('')
+const pornhubUser = ref('')
+const xvideosUser = ref('')
+// webview 登录弹窗（共用 WebviewLoginModal 组件）
+const wvLogin = reactive({
+  visible: false,
+  site: '',                   // xhamster / pornhub / xvideos
+  loginUrl: '',
+  homeUrl: '',
+  partition: 'persist:twitter',
+  successPatterns: [],
+  captchaPatterns: [],
+})
+
+
 // 当前站点对应的后端 site_key（oreno3d → 'oreno3d'，erommdtube → 'erommdtube'）
 const siteKey = computed(() => (settings.site === 'erommdtube' ? 'erommdtube' : 'oreno3d'))
 
@@ -815,6 +856,10 @@ function handlePythonEvent(event) {
         window.api.sendCommand({ cmd: 'exhentai_check_login' })
         // 静默检查 Twitter 登录状态
         window.api.sendCommand({ cmd: 'twitter_check_login' })
+        // 静默检查通用 webview OAuth 三站登录状态（xhamster/pornhub/xvideos，cookie 已持久化时自动恢复）
+        window.api.sendCommand({ cmd: 'xhamster_check_login', silent: true })
+        window.api.sendCommand({ cmd: 'pornhub_check_login', silent: true })
+        window.api.sendCommand({ cmd: 'xvideos_check_login', silent: true })
         // 加载 X 关注分类标签（本地持久化）
         window.api.sendCommand({ cmd: 'twitter_get_follow_tags' })
         // 加载 EX 隐藏标签列表（长期保存）
@@ -1913,6 +1958,32 @@ function handlePythonEvent(event) {
       renameQueue.value.push(event)
       if (!renameModal.visible) showNextRenamePrompt()
       break
+
+    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos）登录结果 ----------
+    case 'site_login_result': {
+      const siteKey = event.site
+      if (event.logout) {
+        if (siteKey === 'xhamster') xhamsterUser.value = ''
+        else if (siteKey === 'pornhub') pornhubUser.value = ''
+        else if (siteKey === 'xvideos') xvideosUser.value = ''
+        if (!event.silent) message.info(event.message || `已退出 ${siteKey} 登录`)
+        addLog('系统', `${siteKey} 已退出登录`)
+      } else if (event.logged_in) {
+        const uname = event.username || '已登录'
+        if (siteKey === 'xhamster') xhamsterUser.value = uname
+        else if (siteKey === 'pornhub') pornhubUser.value = uname
+        else if (siteKey === 'xvideos') xvideosUser.value = uname
+        if (!event.silent) message.success(event.message || `${siteKey} 登录成功`)
+        addLog('系统', `${siteKey} 登录成功: ${uname}`)
+      } else {
+        if (siteKey === 'xhamster') xhamsterUser.value = ''
+        else if (siteKey === 'pornhub') pornhubUser.value = ''
+        else if (siteKey === 'xvideos') xvideosUser.value = ''
+        if (!event.silent) message.warning(event.message || `${siteKey} 未登录或登录失效`)
+        addLog('系统', `${siteKey} 未登录`)
+      }
+      break
+    }
   }
 }
 
@@ -2547,6 +2618,7 @@ function handleRefreshLogin(site) {
   else if (site === 'pawchive') window.api.sendCommand({ cmd: 'pawchive_check_login', notify: true })
   else if (site === 'iwara') window.api.sendCommand({ cmd: 'iwara_check_login' })
   else if (site === 'hanime') window.api.sendCommand({ cmd: 'hanime_check_login' })
+  else if (['xhamster', 'pornhub', 'xvideos'].includes(site)) window.api.sendCommand({ cmd: `${site}_check_login`, notify: true })
 }
 
 // 退出 ExHentai 登录（清除已保存 cookie）
@@ -3104,6 +3176,85 @@ function handleAsmrSetProxy(proxy) {
   if (window.api) {
     window.api.sendCommand({ cmd: 'asmr_set_proxy', proxy: proxy || '' })
   }
+}
+
+// ============================
+// 通用 webview OAuth 三站（xhamster/pornhub/xvideos）登录流程
+// ============================
+// 触发 webview OAuth 登录弹窗（用户点"用 Twitter 登录"/XVideos 登录按钮调用）
+// xvideos 第二参数带邮箱密码/记住装置；xhamster/pornhub 仅 siteKey
+function handleSiteOAuthLogin(siteKey, creds) {
+  // 各站登录页 + 成功/captcha 模式（AP1 阶段先用通用配置，具体业务待用户给出要求后补全）
+  const configs = {
+    xhamster: {
+      loginUrl: 'https://jp.xhamster.com/login',
+      homeUrl: 'https://jp.xhamster.com/',
+      partition: 'persist:twitter',
+      successPatterns: [/xhamster\.com\/(users|my|favorites)/i, /xhamster\.com\/?\?auth=1/i],
+      captchaPatterns: [/challenge|captcha|areyouhuman|check\.xhamster/i],
+    },
+    pornhub: {
+      loginUrl: 'https://jp.pornhub.com/login',
+      homeUrl: 'https://jp.pornhub.com/',
+      partition: 'persist:twitter',
+      successPatterns: [/pornhub\.com\/(users|my|user)/i, /pornhub\.com\/?\?login=/i],
+      captchaPatterns: [/challenge|captcha|areyouhuman|cdn\.pornhub/i],
+    },
+    xvideos: {
+      // xvideos 邮箱密码登录，webview 内自动预填账号 + 处理人机验证
+      loginUrl: 'https://www.xvideos.com/profile/login',
+      homeUrl: 'https://www.xvideos.com/',
+      partition: 'persist:xvideos',
+      successPatterns: [/xvideos\.com\/(profiles|account|favorites)/i],
+      captchaPatterns: [/challenge|captcha|areyouhuman|cdn\.xvideos/i],
+    },
+  }
+  const cfg = configs[siteKey]
+  if (!cfg) return
+  wvLogin.site = siteKey
+  wvLogin.loginUrl = cfg.loginUrl
+  wvLogin.homeUrl = cfg.homeUrl
+  wvLogin.partition = cfg.partition
+  wvLogin.successPatterns = cfg.successPatterns
+  wvLogin.captchaPatterns = cfg.captchaPatterns
+  wvLogin.visible = true
+  // 同时设置 webview 会话代理（复用站点代理设置）
+  const proxyKey = `${siteKey}_proxy`
+  const proxyUrl = settings[proxyKey] || ''
+  if (window.api && proxyUrl) {
+    window.api.siteSetProxy(siteKey, proxyUrl)
+  }
+}
+
+// WebviewLoginModal 抓取 cookie 成功 → 发后端持久化 + 验证
+function handleSiteLoginSuccess({ cookieStr, count }) {
+  if (!window.api || !wvLogin.site) return
+  window.api.sendCommand({
+    cmd: `${wvLogin.site}_set_cookies`,
+    cookie_str: cookieStr,
+  })
+  addLog('系统', `${wvLogin.site} 抓取到 ${count} 个 cookie，已发给后端保存`)
+}
+
+// 通用退出登录
+function handleSiteLogout(siteKey) {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: `${siteKey}_logout` })
+}
+
+// 通用代理修改
+function handleSiteSetProxy(siteKey, proxy) {
+  updateSettings({ [`${siteKey}_proxy`]: proxy })
+  if (window.api) {
+    window.api.sendCommand({ cmd: `${siteKey}_set_proxy`, proxy: proxy || '' })
+    window.api.siteSetProxy(siteKey, proxy || '')
+  }
+}
+
+// 通用检查登录（重启后从缓存恢复时调用）
+function handleSiteCheckLogin(siteKey, silent = true) {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: `${siteKey}_check_login`, silent })
 }
 
 // 热门作品（每页 100，进入站点时自动加载）

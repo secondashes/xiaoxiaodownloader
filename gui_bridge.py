@@ -11126,6 +11126,10 @@ DEFAULT_SETTINGS = {
     "oreno_proxy": "",
     "erommd_proxy": "",
     "asmr_proxy": "",
+    # 三次元新站（xhamster/pornhub 走 OAuth + 代理；xvideos 默认直连）
+    "xhamster_proxy": "http://127.0.0.1:10809",
+    "pornhub_proxy": "http://127.0.0.1:10809",
+    "xvideos_proxy": "",
     # 每站点自定义子文件夹模板（留空=使用上方的组织规则；变量 {date}/{date_full}/{title}/{id}）
     "pawchive_folder_template": "",
     "exhentai_folder_template": "",
@@ -11385,6 +11389,8 @@ def _site_cookie_str(site: str) -> str:
         return "; ".join(f"{k}={v}" for k, v in cookies.items())
     if site == "asmr":
         return _asmr_load_cred().get("token") or ""
+    if site in _GENERIC_OAUTH_SITES:
+        return _generic_cookie_str(site)
     return ""
 
 
@@ -11402,11 +11408,78 @@ def _site_username(site: str) -> str:
         return _hanime_username or (_hanime_load_cred().get("username") or "")
     if site == "asmr":
         return _asmr_username or (_asmr_load_cred().get("username") or "")
+    if site in _GENERIC_OAUTH_SITES:
+        return _generic_load_cookies(site).get("username") or ""
     return ""
 
 
+# 通用 webview OAuth 站点（xhamster/pornhub/xvideos）凭据存取（AP1 阶段）
+# cookie 字符串存 theme_cache.dat 的 creds[site]，具体 check_login/搜索/解析待 AP2/AP3/AP4 填充
+_GENERIC_OAUTH_SITES = ("xhamster", "pornhub", "xvideos")
+
+
+def _generic_save_cookies(site: str, cookie_str: str) -> dict:
+    """保存 webview 抓取的 cookie 字符串到加密凭据库。"""
+    if site not in _GENERIC_OAUTH_SITES:
+        return {"ok": False, "error": f"未知站点: {site}"}
+    # 解析 cookie 字符串为 dict
+    cookies = {}
+    for pair in (cookie_str or "").split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        idx = pair.find("=")
+        if idx <= 0:
+            continue
+        cookies[pair[:idx].strip()] = pair[idx + 1:].strip()
+    cred = {"cookies": cookies, "cookie_str": cookie_str, "saved_at": time.time()}
+    _secure_store_write_cred(site, cred)
+    return {"ok": True, "count": len(cookies)}
+
+
+def _generic_load_cookies(site: str) -> dict:
+    """读取站点 cookie 凭据。"""
+    if site not in _GENERIC_OAUTH_SITES:
+        return {}
+    return _secure_store_read_cred(site)
+
+
+def _generic_cookie_str(site: str) -> str:
+    """读取站点 cookie 字符串。"""
+    return _generic_load_cookies(site).get("cookie_str") or ""
+
+
+def _generic_check_login(site: str, silent: bool = False) -> dict:
+    """通用登录态检查（AP1 阶段占位：仅检查 cookie 是否存在；具体验证待 AP2/AP4 填充）。"""
+    cred = _generic_load_cookies(site)
+    cookies = cred.get("cookies") or {}
+    has_auth = bool(cookies)
+    username = cred.get("username") or ""  # AP2/AP4 时填充实际用户名提取
+    if not silent:
+        emit({
+            "event": "site_login_result",
+            "site": site,
+            "logged_in": has_auth,
+            "username": username,
+            "cookie_count": len(cookies),
+        })
+    return {"logged_in": has_auth, "username": username, "cookie_count": len(cookies)}
+
+
+def _generic_logout(site: str) -> None:
+    """通用退出登录（清缓存凭据）。"""
+    _secure_store_clear_cred(site)
+    emit({
+        "event": "site_login_result",
+        "site": site,
+        "logged_in": False,
+        "username": "",
+        "cookie_count": 0,
+        "logout": True,
+    })
+
+
 def _emit_login_info() -> None:
-    """推送全部站点的登录信息（前端账号卡片数据源：用户名/Cookie/账号档案）。"""
     accounts = _load_accounts()
     pa_cookies = {c.name: c.value for c in _pawchive_session.cookies}
     tw = _twitter_load_cookies()
@@ -11419,6 +11492,9 @@ def _emit_login_info() -> None:
         ("iwara", bool(_iwara_load_token().get("user_token")), _iwara_load_token().get("user_token") or ""),
         ("hanime", bool(_hanime_load_cred().get("cookies")), _site_cookie_str("hanime")),
         ("asmr", bool(_asmr_load_cred().get("token")), _site_cookie_str("asmr")),
+        ("xhamster", bool(_generic_load_cookies("xhamster").get("cookies")), _generic_cookie_str("xhamster")),
+        ("pornhub", bool(_generic_load_cookies("pornhub").get("cookies")), _generic_cookie_str("pornhub")),
+        ("xvideos", bool(_generic_load_cookies("xvideos").get("cookies")), _generic_cookie_str("xvideos")),
     ):
         entry = accounts.get(site) or {}
         sites[site] = {
@@ -12255,6 +12331,31 @@ async def command_loop() -> None:
 
             elif cmd == "delete_favorite":
                 delete_local_favorite(command.get("id", ""))
+
+            # ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos）----------
+            # AP1 阶段：通用 set_cookies/check_login/logout/set_proxy，具体搜索/解析待 AP2/AP3/AP4
+            elif cmd.endswith("_set_cookies") and cmd.rsplit("_set_cookies", 1)[0] in _GENERIC_OAUTH_SITES:
+                site = cmd.rsplit("_set_cookies", 1)[0]
+                cookie_str = command.get("cookie_str", "")
+                result = _generic_save_cookies(site, cookie_str)
+                if result.get("ok"):
+                    _generic_check_login(site)  # 立即推送登录态
+
+            elif cmd.endswith("_check_login") and cmd.rsplit("_check_login", 1)[0] in _GENERIC_OAUTH_SITES:
+                site = cmd.rsplit("_check_login", 1)[0]
+                _generic_check_login(site)
+
+            elif cmd.endswith("_logout") and cmd.rsplit("_logout", 1)[0] in _GENERIC_OAUTH_SITES:
+                site = cmd.rsplit("_logout", 1)[0]
+                _generic_logout(site)
+
+            elif cmd.endswith("_set_proxy") and cmd.rsplit("_set_proxy", 1)[0] in _GENERIC_OAUTH_SITES:
+                # AP1 阶段：代理设置存到 settings，实际应用待 AP2/AP3/AP4 站点模块实现
+                site = cmd.rsplit("_set_proxy", 1)[0]
+                proxy = command.get("proxy", "")
+                settings[f"{site}_proxy"] = proxy
+                _save_settings(settings)
+                emit({"event": "log", "type": "设置", "message": f"{site} 代理已设置: {proxy or '直连'}"})
 
             elif cmd == "cancel":
                 logging.info("收到取消命令")

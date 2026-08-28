@@ -1,0 +1,235 @@
+<template>
+  <!-- 通用 webview OAuth 登录弹窗：嵌入 webview 完成 OAuth 授权 + 机器验证 + 抓取目标站 cookie -->
+  <n-modal
+    v-model:show="visible"
+    preset="card"
+    :title="title"
+    style="width: 90%; max-width: 1100px"
+    :mask-closable="false"
+    @after-leave="onClose"
+  >
+    <!-- 工具栏 -->
+    <div class="wv-toolbar">
+      <n-button-group size="small">
+        <n-button quaternary @click="nav('back')" :disabled="!canBack" title="后退">←</n-button>
+        <n-button quaternary @click="nav('forward')" :disabled="!canForward" title="前进">→</n-button>
+        <n-button quaternary @click="nav('reload')" title="刷新">↻</n-button>
+        <n-button quaternary @click="nav('home')" title="主页">🏠</n-button>
+      </n-button-group>
+      <n-input
+        v-model:value="address"
+        size="small"
+        placeholder="https://..."
+        class="wv-address"
+        @keyup.enter="navigateToAddress"
+      >
+        <template #prefix>
+          <span style="font-size: 12px; color: #63e2b7">{{ loading ? '⏳' : '🔒' }}</span>
+        </template>
+      </n-input>
+      <n-button
+        size="small"
+        type="primary"
+        :loading="grabbing"
+        :disabled="!canGrab"
+        @click="grabCookies"
+        title="手动抓取当前会话的 cookie（用于登录成功后未自动触发的情况）"
+      >完成抓取</n-button>
+      <n-button size="small" quaternary @click="visible = false" title="取消登录">取消</n-button>
+    </div>
+
+    <!-- 状态提示 -->
+    <div class="wv-status">
+      <n-tag v-if="status === 'idle'" size="small" type="default" round>等待开始登录</n-tag>
+      <n-tag v-else-if="status === 'loading'" size="small" type="info" round>加载中...</n-tag>
+      <n-tag v-else-if="status === 'oauth'" size="small" type="info" round>OAuth 授权中（X 站 cookie 自动登录）</n-tag>
+      <n-tag v-else-if="status === 'captcha'" size="small" type="warning" round>⚠ 人机验证，请在下方完成</n-tag>
+      <n-tag v-else-if="status === 'success'" size="small" type="success" round>✓ 登录成功，已抓取 cookie</n-tag>
+      <n-tag v-else-if="status === 'failed'" size="small" type="error" round>✗ {{ errorMsg }}</n-tag>
+    </div>
+
+    <!-- webview 浏览器（partition 共享 persist:twitter，OAuth 跳转 x.com 自动带 X 站 cookie） -->
+    <webview
+      ref="wvRef"
+      :src="currentUrl"
+      :partition="partition"
+      class="login-webview"
+      @did-navigate="onNav"
+      @did-navigate-in-page="onNav"
+      @did-start-loading="loading = true; status = 'loading'"
+      @did-stop-loading="loading = false; onStop()"
+    />
+  </n-modal>
+</template>
+
+<script setup>
+import { ref, computed, watch, nextTick } from 'vue'
+
+const props = defineProps({
+  // 是否显示
+  show: { type: Boolean, default: false },
+  // 站点 key（xhamster/pornhub/xvideos）
+  site: { type: String, required: true },
+  // 弹窗标题
+  title: { type: String, default: 'webview 登录' },
+  // 登录页 URL（OAuth 起点）
+  loginUrl: { type: String, required: true },
+  // 主页 URL（点🏠回到此页）
+  homeUrl: { type: String, default: '' },
+  // webview 会话 partition（共享 persist:twitter 让 X 站 OAuth 自动带 cookie）
+  partition: { type: String, default: 'persist:twitter' },
+  // 登录成功的 URL 匹配模式（RegExp 数组，命中任一即视为登录回跳）
+  successPatterns: { type: Array, default: () => [] },
+  // captcha/机器验证 URL 匹配模式（RegExp 数组，命中即弹提示让用户手动通过）
+  captchaPatterns: { type: Array, default: () => [] },
+})
+
+const emit = defineEmits(['update:show', 'login-success', 'login-failed', 'close'])
+
+const visible = ref(props.show)
+const address = ref('')
+const currentUrl = ref('')
+const loading = ref(false)
+const grabbing = ref(false)
+const status = ref('idle')
+const errorMsg = ref('')
+const canBack = ref(false)
+const canForward = ref(false)
+const wvRef = ref(null)
+
+const canGrab = computed(() => status.value !== 'success' && !grabbing.value)
+
+// 同步外部 show 变化
+watch(() => props.show, (v) => {
+  visible.value = v
+  if (v) startLogin()
+})
+watch(visible, (v) => emit('update:show', v))
+
+// 启动登录：加载登录页
+function startLogin() {
+  status.value = 'loading'
+  errorMsg.value = ''
+  address.value = props.loginUrl
+  currentUrl.value = props.loginUrl
+}
+
+// 导航事件：检测 captcha + 登录成功
+async function onNav(e) {
+  const url = e.url || address.value || ''
+  address.value = url
+  // 更新后退/前进可用状态
+  await nextTick()
+  const wv = wvRef.value
+  if (wv) {
+    try {
+      canBack.value = await wv.canGoBack()
+      canForward.value = await wv.canGoForward()
+    } catch (err) { /* webview 未就绪 */ }
+  }
+  if (!url) return
+  // 1. 检测 captcha/机器验证页
+  if (props.captchaPatterns.some(re => re.test(url))) {
+    status.value = 'captcha'
+    return
+  }
+  // 2. 检测登录成功（URL 在站点域 + 满足成功模式）
+  if (props.successPatterns.some(re => re.test(url))) {
+    // 等页面渲染稳定后抓 cookie（避免 cookie 还没 set 就抓）
+    setTimeout(() => grabCookies(true), 800)
+  }
+  // 3. 检测 OAuth 跳转到 x.com（X 站 cookie 自动授权中）
+  if (/twitter\.com|x\.com/i.test(url)) {
+    status.value = 'oauth'
+  }
+}
+
+function onStop() {
+  if (status.value === 'loading') status.value = 'idle'
+}
+
+// 手动抓取 cookie（用户点"完成抓取"或自动触发）
+async function grabCookies(auto = false) {
+  grabbing.value = true
+  try {
+    const res = await window.api.siteGetCookies(props.site)
+    if (!res.ok) {
+      if (auto) return  // 自动触发时静默失败（用户可手动点）
+      status.value = 'failed'
+      errorMsg.value = res.error || '抓取 cookie 失败'
+      emit('login-failed', res.error || '抓取 cookie 失败')
+      return
+    }
+    if (res.hasAuth) {
+      status.value = 'success'
+      emit('login-success', { cookieStr: res.cookieStr, count: res.count })
+      setTimeout(() => { visible.value = false }, 800)
+    } else {
+      // cookie 数量不足，可能还没登录完成
+      if (auto) return
+      status.value = 'failed'
+      errorMsg.value = `未检测到登录态（cookie 数量 ${res.count}，请先在 webview 中完成登录）`
+      emit('login-failed', errorMsg.value)
+    }
+  } catch (err) {
+    status.value = 'failed'
+    errorMsg.value = err.message || String(err)
+    emit('login-failed', errorMsg.value)
+  } finally {
+    grabbing.value = false
+  }
+}
+
+// 导航控制
+async function nav(action) {
+  const wv = wvRef.value
+  if (!wv) return
+  try {
+    if (action === 'back') await wv.goBack()
+    else if (action === 'forward') await wv.goForward()
+    else if (action === 'reload') await wv.reload()
+    else if (action === 'home') {
+      const home = props.homeUrl || props.loginUrl
+      address.value = home
+      currentUrl.value = home
+    }
+  } catch (err) { /* 忽略 */ }
+}
+
+function navigateToAddress() {
+  if (!address.value) return
+  currentUrl.value = address.value
+}
+
+function onClose() {
+  emit('close')
+  status.value = 'idle'
+  errorMsg.value = ''
+}
+</script>
+
+<style scoped>
+.wv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.wv-address {
+  flex: 1;
+}
+.wv-status {
+  margin-bottom: 8px;
+  min-height: 24px;
+}
+.login-webview {
+  width: 100%;
+  height: 560px;
+  border: 1px solid #2d2d33;
+  border-radius: 4px;
+  background: #fff;
+}
+html.light-mode .login-webview {
+  border-color: #e0e0e6;
+}
+</style>

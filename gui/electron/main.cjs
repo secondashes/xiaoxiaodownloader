@@ -57,6 +57,15 @@ protocol.registerSchemesAsPrivileged([
 // ExHentai webview 使用的独立会话（与主界面隔离，只走代理）
 const EX_SESSION_PARTITION = 'persist:exhentai'
 
+// 通用 webview OAuth 站点会话注册表（用于 xhamster/pornhub 等用 X 站 OAuth 登录的站点）
+// partition='persist:twitter' 共享 X 站 cookie：OAuth 跳转 x.com 时自动带 cookie 完成授权
+// domains 用于抓取目标站登录后的 cookie（不跨域注入 X cookie，仅共享会话）
+const SITE_SESSIONS = {
+  xhamster: { partition: 'persist:twitter', domains: ['.xhamster.com', '.xhcdn.com'] },
+  pornhub:  { partition: 'persist:twitter', domains: ['.pornhub.com', '.phncdn.com'] },
+  xvideos:  { partition: 'persist:xvideos', domains: ['.xvideos.com', '.xvideos-cdn.com'] },
+}
+
 let pythonProcess = null
 let mainWindow = null
 let floatWindow = null
@@ -798,6 +807,94 @@ ipcMain.handle('ex-get-cookies', async () => {
 ipcMain.handle('ex-set-proxy', async (event, proxyRules) => {
   await setupExSession(proxyRules || null)
   return { ok: true }
+})
+
+// ============================
+// 通用 webview OAuth 站点会话（xhamster/pornhub/xvideos 等）
+// ============================
+// 初始化指定站点的 webview 会话：设置代理 + 放行权限 + 持久化
+async function setupSiteSession(site, proxyRules) {
+  const cfg = SITE_SESSIONS[site]
+  if (!cfg) return
+  try {
+    const ses = session.fromPartition(cfg.partition)
+    if (proxyRules) {
+      await ses.setProxy({ proxyRules })
+      debugLog(`${site} 会话代理已设置: ${proxyRules}`)
+    }
+    ses.setPermissionRequestHandler((webContents, permission, callback) => {
+      callback(true)
+    })
+  } catch (err) {
+    debugLog(`${site} 会话初始化失败: ${err.message}`)
+  }
+}
+
+// 抓取目标站 webview 会话的 cookie（登录成功后调用，返回给前端 → 后端持久化）
+// 注意：partition 共享 persist:twitter，所以 x.com 域的 cookie 也会被拿到，
+// 但我们只过滤目标站 domains，避免把 X 站 cookie 误存到目标站档案
+ipcMain.handle('site-get-cookies', async (event, site) => {
+  try {
+    const cfg = SITE_SESSIONS[site]
+    if (!cfg) return { ok: false, error: `未知站点: ${site}` }
+    const ses = session.fromPartition(cfg.partition)
+    const all = []
+    for (const d of cfg.domains) {
+      const cs = await ses.cookies.get({ domain: d })
+      for (const c of cs) {
+        // 去重（同一 cookie 可能被多个 domain 匹配）
+        if (!all.some(x => x.name === c.name && x.value === c.value)) all.push(c)
+      }
+    }
+    const cookieStr = all.map(c => `${c.name}=${c.value}`).join('; ')
+    // 简单判定是否已登录：cookie 数量 > 3 或包含常见的会话 cookie 名
+    const sessionKeys = ['session', 'sessid', 'phpsessid', 'sid', 'uid', 'user', 'login', 'remember', 'auth']
+    const hasAuth = all.length > 3 || all.some(c => sessionKeys.some(k => c.name.toLowerCase().includes(k)))
+    return { ok: true, cookieStr, hasAuth, count: all.length }
+  } catch (err) {
+    debugLog(`读取 ${site} cookie 失败: ${err.message}`)
+    return { ok: false, cookieStr: '', hasAuth: false, count: 0, error: err.message }
+  }
+})
+
+// 设置目标站 webview 会话代理
+ipcMain.handle('site-set-proxy', async (event, site, proxyRules) => {
+  await setupSiteSession(site, proxyRules || null)
+  return { ok: true }
+})
+
+// 向目标站 webview 会话注入 cookie 字符串（用于切换账号/恢复登录态时把后端存的 cookie 灌进 webview）
+ipcMain.handle('site-set-cookies', async (event, site, cookieStr) => {
+  try {
+    const cfg = SITE_SESSIONS[site]
+    if (!cfg) return { ok: false, error: `未知站点: ${site}` }
+    const ses = session.fromPartition(cfg.partition)
+    // 解析 cookie 字符串并逐个 set
+    const pairs = (cookieStr || '').split(';').map(s => s.trim()).filter(Boolean)
+    for (const pair of pairs) {
+      const idx = pair.indexOf('=')
+      if (idx <= 0) continue
+      const name = pair.slice(0, idx)
+      const value = pair.slice(idx + 1)
+      // 用站点主域构造 URL
+      const url = `https://${cfg.domains[0].replace(/^\./, '')}/`
+      try {
+        await ses.cookies.set({
+          url,
+          name,
+          value,
+          domain: cfg.domains[0],
+          path: '/',
+          secure: true,
+          httpOnly: false,
+        })
+      } catch (e) { /* 单个 cookie 失败不阻断 */ }
+    }
+    return { ok: true, count: pairs.length }
+  } catch (err) {
+    debugLog(`注入 ${site} cookie 失败: ${err.message}`)
+    return { ok: false, error: err.message }
+  }
 })
 
 // ============================
