@@ -65,6 +65,7 @@
             @open-favorite="handleOpenFavorite"
             @delete-favorite="handleDeleteFavorite"
             @translate-youdao="handleTranslateYoudao"
+            @translate-free="handleTranslateFree"
             :translate-result="translateResult"
             @check-github-update="handleCheckGithubUpdate"
             :github-update-info="githubUpdateInfo"
@@ -2409,11 +2410,19 @@ function handleDeleteFavorite(id) {
 // ============================
 // 有道翻译（左侧翻译面板）
 // ============================
-function handleTranslateYoudao(payload) {
+function handleTranslateFree(payload) {
   if (!window.api) return
-  const { text = '', from = 'auto', to = 'zh' } = payload || {}
+  const { text = '', from = 'auto', to = 'zh-CN' } = payload || {}
   translateResult.value = null  // 清空旧结果，触发面板 loading
-  window.api.sendCommand({ cmd: 'translate_youdao', text, from, to })
+  // 根据设置里的引擎选择后端命令：默认 google_free（translate_free）
+  const engine = settings.value?.translate_engine || 'google_free'
+  const cmd = engine === 'youdao' ? 'translate_youdao' : 'translate_free'
+  window.api.sendCommand({ cmd, text, from, to })
+}
+
+// 兼容旧 emit 名称（LeftPanel 旧版本可能还在发 translate-youdao）
+function handleTranslateYoudao(payload) {
+  handleTranslateFree(payload)
 }
 
 // ============================

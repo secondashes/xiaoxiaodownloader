@@ -540,7 +540,7 @@
     <!-- 翻译面板（有道智云 API） -->
     <div v-show="activePanel === 'translate'" class="settings-section">
       <div class="settings-content">
-        <div class="section-title">翻译（有道智云）</div>
+        <div class="section-title">翻译（免费 / 自选引擎）</div>
 
         <!-- 翻译方向 -->
         <div class="translate-row">
@@ -587,33 +587,70 @@
         <div v-else-if="trError" class="translate-result-err">{{ trError }}</div>
         <div v-else-if="trOutput" class="translate-result-box">
           <div class="translate-result-text" :title="trOutput">{{ trOutput }}</div>
+          <div class="translate-result-meta" v-if="trDetected || trEngine">
+            <span v-if="trDetected">检测：{{ trDetected }}</span>
+            <span v-if="trEngine">引擎：{{ trEngine }}</span>
+          </div>
           <div class="translate-result-actions">
             <n-button size="tiny" quaternary @click="copyText(trOutput, '翻译结果')">复制</n-button>
           </div>
         </div>
 
-        <!-- API 配置（折叠） -->
+        <!-- 引擎配置（折叠） -->
         <details class="translate-config">
-          <summary>⚙ 有道 API 配置（应用 ID / 密钥）</summary>
+          <summary>⚙ 翻译引擎（默认 Google 免费，国内可能需代理；可选 LibreTranslate / 有道）</summary>
           <div class="translate-config-body">
-            <n-input
+            <n-select
               size="small"
-              :value="settings.youdao_app_id || ''"
-              placeholder="应用 ID（appKey）"
-              @update:value="v => update('youdao_app_id', v.trim())"
+              :value="settings.translate_engine || 'google_free'"
+              :options="[
+                { label: 'Google 免费端点（无需 API key，推荐）', value: 'google_free' },
+                { label: 'LibreTranslate（自建/公开实例，需填 URL）', value: 'libretranslate' },
+                { label: '有道智云（需 app ID / secret）', value: 'youdao' },
+              ]"
+              @update:value="v => update('translate_engine', v)"
             />
-            <n-input
-              size="small"
-              type="password"
-              show-password-on="click"
-              :value="settings.youdao_app_secret || ''"
-              placeholder="应用密钥（appSecret）"
-              @update:value="v => update('youdao_app_secret', v.trim())"
-            />
-            <div class="translate-config-hint">
-              注册 <a href="https://ai.youdao.com/" target="_blank">ai.youdao.com</a> → 实名后创建"文本翻译"应用，复制 ID 和密钥填入。<br>
-              新用户有免费额度。设置保存后即可使用，无需重启。
+            <div v-if="(settings.translate_engine || 'google_free') === 'google_free'" class="translate-config-hint">
+              走 translate.google.com 免费端点，无需 API key；国内网络通常需代理才能访问（在设置-代理里配）。
             </div>
+            <template v-else-if="settings.translate_engine === 'libretranslate'">
+              <n-input
+                size="small"
+                :value="settings.libretranslate_url || ''"
+                placeholder="LibreTranslate 实例 URL，如 https://libretranslate.com"
+                @update:value="v => update('libretranslate_url', v.trim())"
+              />
+              <n-input
+                size="small"
+                type="password"
+                show-password-on="click"
+                :value="settings.libretranslate_api_key || ''"
+                placeholder="API key（公开实例可留空）"
+                @update:value="v => update('libretranslate_api_key', v.trim())"
+              />
+              <div class="translate-config-hint">
+                可自建 LibreTranslate（开源、免费、无限制）；或用公开实例（如 libretranslate.com）。
+              </div>
+            </template>
+            <template v-else-if="settings.translate_engine === 'youdao'">
+              <n-input
+                size="small"
+                :value="settings.youdao_app_id || ''"
+                placeholder="应用 ID（appKey）"
+                @update:value="v => update('youdao_app_id', v.trim())"
+              />
+              <n-input
+                size="small"
+                type="password"
+                show-password-on="click"
+                :value="settings.youdao_app_secret || ''"
+                placeholder="应用密钥（appSecret）"
+                @update:value="v => update('youdao_app_secret', v.trim())"
+              />
+              <div class="translate-config-hint">
+                注册 <a href="https://ai.youdao.com/" target="_blank">ai.youdao.com</a> → 实名后创建"文本翻译"应用，复制 ID 和密钥填入。新用户有免费额度。
+              </div>
+            </template>
           </div>
         </details>
       </div>
@@ -1337,7 +1374,8 @@ const emit = defineEmits([
   'open-favorite',        // 打开收藏（参数：收藏条目）
   'delete-favorite',      // 删除收藏（参数：收藏 id）
   // 有道翻译
-  'translate-youdao',      // 调有道 API 翻译（参数：{text, from, to}）
+  'translate-youdao',      // 调有道 API 翻译（参数：{text, from, to}）[兼容旧名]
+  'translate-free',        // 调免费翻译（参数：{text, from, to}；后端按 settings.translate_engine 选 Google/LibreTranslate/有道）
   // GitHub 仓库更新检查
   'check-github-update',   // 检查 GitHub 仓库 main 分支最新 commit
 ])
@@ -1823,6 +1861,16 @@ const trError = computed(() => {
   const r = props.translateResult
   return r && !r.ok ? (r.error || '翻译失败') : ''
 })
+const trDetected = computed(() => {
+  const r = props.translateResult
+  return r && r.ok ? (r.detected_source || '') : ''
+})
+const trEngine = computed(() => {
+  const r = props.translateResult
+  if (!r || !r.ok) return ''
+  const e = r.engine || ''
+  return e === 'google_free' ? 'Google 免费' : (e === 'libretranslate' ? 'LibreTranslate' : (e === 'youdao' ? '有道' : e))
+})
 
 function doTranslate() {
   const text = trInput.value.trim()
@@ -1833,7 +1881,7 @@ function doTranslate() {
     to = trFrom.value === 'zh-CHS' ? 'en' : 'zh-CHS'
   }
   trReqToken += 1
-  emit('translate-youdao', { text, from: trFrom.value, to })
+  emit('translate-free', { text, from: trFrom.value, to })
 }
 
 async function pasteClipboard() {
@@ -2403,6 +2451,13 @@ html.light-mode .round-btn-active {
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
+}
+.translate-result-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #8b8b93;
 }
 .translate-config {
   margin-top: 10px;

@@ -11156,6 +11156,10 @@ DEFAULT_SETTINGS = {
     # 有道智云翻译 API（用户在设置区填写，留空=未配置）
     "youdao_app_id": "",
     "youdao_app_secret": "",
+    # 免费翻译引擎配置（默认 Google 无 key；可选填 LibreTranslate 自建实例 URL + key）
+    "translate_engine": "google_free",   # "google_free" | "libretranslate" | "youdao"
+    "libretranslate_url": "",             # 如 https://libretranslate.com 或自建实例
+    "libretranslate_api_key": "",
     # GitHub 仓库更新检查代理（国内默认 http://127.0.0.1:10809）
     "github_proxy": "http://127.0.0.1:10809",
 }
@@ -11184,9 +11188,113 @@ def _save_settings(settings: dict) -> None:
 
 
 # ============================
-# 有道智云翻译 API
+# 翻译 API（免费方案优先：Google 翻译无 key 端点；可选 LibreTranslate 自建实例）
 # ============================
 YOUDAO_API = "https://openapi.youdao.com/api"
+GOOGLE_TRANSLATE_URL = "https://translate.google.com/translate_a/single"
+
+
+def _map_lang_code(lang: str) -> str:
+    """统一语言代码：zh-CHS / zh-CHT → zh；其他原样返回。Google 用 zh 即可。"""
+    if not lang or lang == "auto":
+        return "auto"
+    if lang.lower().startswith("zh"):
+        return "zh-CN"
+    return lang
+
+
+def translate_free(text: str, from_lang: str = "auto", to_lang: str = "zh-CN") -> None:
+    """免费翻译：默认走 Google 翻译无 key 端点（client=at 公开接口，自动检测源语言）。
+
+    成功 emit 'translate_result' 事件，带 translation / detected_source / engine。
+    失败时尝试 LibreTranslate 公开实例（如设置里填了 libretranslate_url）。
+    所有路径失败 emit ok=False。
+    """
+    text = text or ""
+    if not text.strip():
+        emit({"event": "translate_result", "ok": False, "error": "请输入要翻译的文本"})
+        return
+    s = _load_settings()
+    sl = _map_lang_code(from_lang)
+    tl = _map_lang_code(to_lang)
+    # 源=目标时改成英文，避免无意义请求
+    if sl != "auto" and sl == tl:
+        tl = "en" if sl == "zh-CN" else "zh-CN"
+
+    # ---------- 1. Google 翻译免费端点 ----------
+    try:
+        params = {
+            "client": "at",
+            "dt": "t",       # 返回翻译片段
+            "dt": "bd",      # 返回备选词
+            "sl": sl,
+            "tl": tl,
+            "q": text,
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+        }
+        resp = requests.get(GOOGLE_TRANSLATE_URL, params=params, headers=headers, timeout=15)
+        data = resp.json()
+        # 响应结构：[[["译文","原文",None,None,1],...], null, "检测到的源语言", ...]
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            segments = data[0]
+            translation = "".join(seg[0] for seg in segments if seg and seg[0])
+            detected = data[2] if len(data) > 2 and data[2] else sl
+            if translation:
+                emit({
+                    "event": "translate_result",
+                    "ok": True,
+                    "translation": translation,
+                    "query": text,
+                    "detected_source": detected,
+                    "engine": "google_free",
+                })
+                return
+        emit({"event": "translate_result", "ok": False, "error": "Google 翻译返回格式异常，请稍后重试"})
+        return
+    except Exception as exc:
+        # Google 失败（国内网络/速率限制）→ 尝试 LibreTranslate 自建实例
+        last_err = f"Google 翻译失败：{exc}"
+
+    # ---------- 2. LibreTranslate（用户自建/公开实例，可选）----------
+    libre_url = (s.get("libretranslate_url") or "").strip()
+    if libre_url:
+        try:
+            api_key = (s.get("libretranslate_api_key") or "").strip()
+            payload = {
+                "q": text,
+                "source": "auto" if sl == "auto" else sl,
+                "target": tl,
+                "format": "text",
+            }
+            if api_key:
+                payload["api_key"] = api_key
+            resp = requests.post(
+                libre_url.rstrip("/") + "/translate",
+                json=payload,
+                timeout=20,
+                headers={"Content-Type": "application/json"},
+            )
+            data = resp.json()
+            translation = data.get("translatedText") or ""
+            if translation:
+                emit({
+                    "event": "translate_result",
+                    "ok": True,
+                    "translation": translation,
+                    "query": text,
+                    "detected_source": data.get("detectedLanguage", {}).get("language", sl) if isinstance(data.get("detectedLanguage"), dict) else sl,
+                    "engine": "libretranslate",
+                })
+                return
+            emit({"event": "translate_result", "ok": False, "error": f"LibreTranslate 未返回结果：{data}"})
+            return
+        except Exception as exc2:
+            last_err = f"{last_err}；LibreTranslate 也失败：{exc2}"
+
+    emit({"event": "translate_result", "ok": False, "error": last_err})
 
 
 def translate_youdao(text: str, from_lang: str = "auto", to_lang: str = "zh") -> None:
@@ -12297,6 +12405,15 @@ async def command_loop() -> None:
                     command.get("text", ""),
                     command.get("from", "auto"),
                     command.get("to", "zh"),
+                )
+
+            elif cmd == "translate_free":
+                # 免费翻译（默认 Google 翻译无 key 端点，失败回退 LibreTranslate）
+                await asyncio.to_thread(
+                    translate_free,
+                    command.get("text", ""),
+                    command.get("from", "auto"),
+                    command.get("to", "zh-CN"),
                 )
 
             elif cmd == "check_github_update":
