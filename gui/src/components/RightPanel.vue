@@ -77,6 +77,37 @@
       >
         {{ (searching || inspecting) ? '处理中...' : (isUrl ? '解析' : '搜索') }}
       </n-button>
+      <!-- 全局自动翻译按钮：每站展示界面常驻，翻译当前搜索结果标题到目标语言（默认中文） -->
+      <n-select
+        :value="autoTranslateTo"
+        :options="autoTranslateLangOptions"
+        size="small"
+        style="width: 90px"
+        title="翻译目标语言（点击右侧 🌐 按钮执行翻译）"
+        @update:value="$emit('update:auto-translate-to', $event)"
+      />
+      <n-button
+        size="large"
+        :loading="autoTranslating"
+        :disabled="autoTranslating"
+        :title="autoTranslateMode ? '点击翻译当前搜索结果到目标语言（已开启持续自动翻译：每次搜索后自动翻译）' : '点击翻译当前搜索结果到目标语言'"
+        @click="$emit('auto-translate', autoTranslateTo)"
+      >
+        <span :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">🌐 译</span>
+      </n-button>
+      <n-tooltip placement="bottom">
+        <template #trigger>
+          <n-button
+            size="large"
+            quaternary
+            :title="autoTranslateMode ? '关闭持续自动翻译' : '开启持续自动翻译（每次搜索后自动翻译全部结果）'"
+            @click="$emit('toggle-auto-translate-mode')"
+          >
+            <span :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">{{ autoTranslateMode ? '🔁' : '➿' }}</span>
+          </n-button>
+        </template>
+        持续自动翻译{{ autoTranslateMode ? '（已开启）' : '（已关闭）' }}
+      </n-tooltip>
     </div>
 
     <!-- ExHentai 搜索选项栏：复刻原版搜索页过滤按钮（分类复选/评分/仅种子/页数范围），
@@ -1466,7 +1497,7 @@
                 <span v-if="iwBatchMode" class="iw-batch-check" :class="{ checked: iwBatchChecked.has(item.video_id) }">{{ iwBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
                 <button v-if="!iwBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author" :title="item.author" @click.stop="$emit('iw-open-user', item.author_username)">{{ item.author || '未知作者' }}</span>
                 <span class="iw-card-time">{{ iwTimeAgo(item.created_at) || item.post_date }}</span>
@@ -1690,7 +1721,7 @@
                     <span v-if="haBatchMode" class="iw-batch-check" :class="{ checked: haBatchChecked.has(item.video_id) }">{{ haBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
                     <button v-if="!haBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
                   </div>
-                  <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+                  <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
                   <div class="iw-card-meta">
                     <span class="iw-card-author">{{ item.author || '未知' }}</span>
                     <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
@@ -1743,7 +1774,7 @@
                 <span v-if="haBatchMode" class="iw-batch-check" :class="{ checked: haBatchChecked.has(item.video_id) }">{{ haBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
                 <button v-if="!haBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author">{{ item.author || '未知' }}</span>
                 <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
@@ -1897,7 +1928,7 @@
                 <span v-if="orBatchMode" class="iw-batch-check" :class="{ checked: orBatchChecked.has(item.video_id) }">{{ orBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
                 <button v-if="!orBatchMode" class="card-favorite-btn" title="收藏到本地（再点一次取消）" @click.stop="$emit('or-toggle-favorite', item)">♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author">{{ item.author || '未知作者' }}</span>
               </div>
@@ -2050,7 +2081,7 @@
                 <span v-if="orBatchMode" class="iw-batch-check" :class="{ checked: orBatchChecked.has(item.video_id) }">{{ orBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
                 <button v-if="!orBatchMode" class="card-favorite-btn" :title="orList.type === 'favorites' ? '取消收藏' : '收藏到本地（再点一次取消）'" @click.stop="$emit('or-toggle-favorite', item)">{{ orList.type === 'favorites' ? '✕' : '♥' }}</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author">{{ item.author || '未知作者' }}</span>
               </div>
@@ -2113,7 +2144,7 @@
                 <span v-if="asmrBatchMode" class="iw-batch-check" :class="{ checked: asmrBatchChecked.has(item.video_id) }">{{ asmrBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
                 <button v-if="!asmrBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author" :title="`社团：${item.author || '未知'}`">{{ item.author || '未知社团' }}</span>
                 <span v-if="item.post_date" class="iw-card-time">{{ item.post_date }}</span>
@@ -2395,7 +2426,7 @@
                   </div>
                 </td>
                 <td class="ex-td-info">
-                  <div class="ex-info-title" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+                  <div class="ex-info-title" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
                   <div class="ex-info-tags" v-if="item.tags && item.tags.length">
                     <a
                       v-for="t in item.tags"
@@ -2441,7 +2472,7 @@
                 />
                 <span v-else class="ex-thumb-empty">EX</span>
               </div>
-              <div class="ex-thumb-card-title">{{ item.album_name || '未命名' }}</div>
+              <div class="ex-thumb-card-title">{{ trTitle(item.album_name) }}</div>
               <button
                 class="card-favorite-btn ex-card-fav"
                 title="快速收藏到本地"
@@ -2501,7 +2532,7 @@
                   @click.stop="handleQuickFavorite(item)"
                 >♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
             </div>
           </div>
           <PaginationBar
@@ -2557,7 +2588,7 @@
                   @click.stop="handleQuickFavorite(item)"
                 >♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author" :title="item.author" @click.stop="$emit('iw-open-user', item.author_username)">{{ item.author || '未知作者' }}</span>
                 <span class="iw-card-stats">
@@ -2620,7 +2651,7 @@
                   @click.stop="handleQuickFavorite(item)"
                 >♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author">{{ item.author || '未知' }}</span>
                 <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
@@ -2680,7 +2711,7 @@
                   @click.stop="$emit('or-toggle-favorite', item)"
                 >♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author">{{ item.author || '未知作者' }}</span>
               </div>
@@ -2753,7 +2784,7 @@
                   @click.stop="handleQuickFavorite(item)"
                 >♥</button>
               </div>
-              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
                 <span class="iw-card-author" :title="`社团：${item.author || '未知'}`">{{ item.author || '未知社团' }}</span>
                 <span v-if="item.post_date" class="iw-card-time">{{ item.post_date }}</span>
@@ -2795,7 +2826,7 @@
                 @click.stop="handleQuickFavorite(item)"
               >♥</button>
             </div>
-            <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+            <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
           </div>
         </div>
 
@@ -3220,12 +3251,21 @@ const props = defineProps({
   // 批量下载
   asmrBatchRunning: { type: Boolean, default: false },
   asmrBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
+  // 全局自动翻译（每站搜索结果常驻）
+  autoTranslateTo: { type: String, default: 'zh-CN' },          // 目标语言
+  autoTranslating: { type: Boolean, default: false },          // 翻译进行中
+  autoTranslateMode: { type: Boolean, default: false },        // 持续自动翻译（每次搜索后自动）
+  autoTranslateLangOptions: { type: Array, default: () => [] }, // 目标语言下拉选项
+  translatedTitles: { type: Object, default: () => ({}) },     // {原标题: 译文}，展示时回填
 })
 
 const emit = defineEmits([
   'update:search-query',
   'update:site',
   'update:search-mode',
+  'update:auto-translate-to',  // 目标语言下拉切换
+  'auto-translate',            // 点击 🌐 翻译当前搜索结果（参数：目标语言）
+  'toggle-auto-translate-mode', // 切换持续自动翻译
   'search',
   'load-more',
   'go-page',
@@ -3350,6 +3390,13 @@ function toggleGridSelect(itemPage) {
   if (idx >= 0) checkedKeys.value.splice(idx, 1)
   else checkedKeys.value.push(itemPage)
 }
+
+// 自动翻译：把原标题替换为译文（无译文回退原标题；空值返回 '未命名'）
+function trTitle(name) {
+  if (!name) return '未命名'
+  return props.translatedTitles[name] || name
+}
+
 
 // ============================
 // EX 隐藏标签管理面板

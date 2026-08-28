@@ -18,6 +18,11 @@
             @hanime-login="handleHanimeLogin"
             @hanime-logout="handleHanimeLogout"
             @hanime-set-proxy="handleHanimeSetProxy"
+            :asmr-user="asmrUser"
+            :asmr-login-loading="asmrLoginLoading"
+            @asmr-login="handleAsmrLogin"
+            @asmr-logout="handleAsmrLogout"
+            @asmr-set-proxy="handleAsmrSetProxy"
             @oreno-set-proxy="handleOrenoSetProxy"
             :xhamster-user="xhamsterUser"
             :pornhub-user="pornhubUser"
@@ -184,6 +189,31 @@
             :or-detail-loading="orDetailLoading"
             :or-batch-running="orBatchRunning"
             :or-batch-progress="orBatchProgress"
+            :asmr-view="asmrView"
+            :asmr-items="asmrItems"
+            :asmr-list-loading="asmrListLoading"
+            :asmr-has-more="asmrHasMore"
+            :asmr-error="asmrError"
+            :asmr-label="asmrLabel"
+            :asmr-total="asmrTotal"
+            :asmr-orders="asmrOrders"
+            :asmr-filter="asmrFilter"
+            :asmr-index-items="asmrIndexItems"
+            :asmr-index-loading="asmrIndexLoading"
+            :asmr-detail="asmrDetail"
+            :asmr-files="asmrFiles"
+            :asmr-detail-loading="asmrDetailLoading"
+            :asmr-logged-in="asmrLoggedIn"
+            :asmr-batch-running="asmrBatchRunning"
+            :asmr-batch-progress="asmrBatchProgress"
+            :auto-translate-to="autoTranslateTo"
+            @update:auto-translate-to="handleUpdateAutoTranslateTo"
+            :auto-translating="autoTranslating"
+            :auto-translate-mode="autoTranslateMode"
+            :auto-translate-lang-options="autoTranslateLangOptions"
+            :translated-titles="translatedTitles"
+            @auto-translate="handleAutoTranslate"
+            @toggle-auto-translate-mode="handleToggleAutoTranslateMode"
             @update:tw-local-search="twLocalSearch = $event; handleTwLocalSearch($event)"
             @tw-follow-list="handleTwFollowList"
             @tw-follow-load-more="handleTwFollowLoadMore"
@@ -240,6 +270,20 @@
             @or-toggle-favorite="handleOrenoToggleFavorite"
             @or-sort-update="handleOrenoSortUpdate"
             @or-batch-download="handleOrenoBatchDownload"
+            @asmr-popular="handleAsmrPopular"
+            @asmr-works="handleAsmrWorks"
+            @asmr-favorites="handleAsmrFavorites"
+            @asmr-more="handleAsmrMore"
+            @update:asmr-search="handleAsmrSearchUpdate"
+            @asmr-index="handleAsmrIndex"
+            @asmr-index-pick="handleAsmrIndexPick"
+            @asmr-open-detail="handleAsmrOpenDetail"
+            @asmr-detail-back="handleAsmrDetailBack"
+            @asmr-toggle-favorite="handleAsmrToggleFavorite"
+            @asmr-search-tag="handleAsmrSearchTag"
+            @asmr-open-circle="handleAsmrOpenCircle"
+            @asmr-open-va="handleAsmrOpenVa"
+            @asmr-batch-download="handleAsmrBatchDownload"
             @search="handleSearch"
             @load-more="handleLoadMore"
             @go-page="handleGoPage"
@@ -304,6 +348,26 @@
             <n-button size="small" @click="renameModal.visible = false">跳过该文件</n-button>
             <n-button size="small" type="primary" :disabled="!renameModal.newName.trim()" @click="confirmRenameDownload">
               改名并下载
+            </n-button>
+          </template>
+        </n-modal>
+
+        <!-- EX 批量下载母文件夹命名弹窗（确定批量下载时弹出） -->
+        <n-modal v-model:show="exBatchFolderVisible" preset="dialog" title="批量下载 - 母文件夹命名" style="width: 520px">
+          <div class="rename-modal">
+            <div class="rename-tip">是否将搜索词「{{ lastSearchKeyword || '（无搜索词）' }}」作为新的母文件夹名称？</div>
+            <div class="rename-hint">每个画廊将按其标题作为子文件夹归入母文件夹下；留空则不使用母文件夹。</div>
+            <n-input
+              v-model:value="exBatchFolderName"
+              size="small"
+              placeholder="母文件夹名称（可修改，留空 = 不使用母文件夹）"
+              @keyup.enter="confirmExBatchFolder(true)"
+            />
+          </div>
+          <template #action>
+            <n-button size="small" @click="confirmExBatchFolder(false)">不用母文件夹</n-button>
+            <n-button size="small" type="primary" @click="confirmExBatchFolder(true)">
+              使用并批量解析
             </n-button>
           </template>
         </n-modal>
@@ -406,6 +470,9 @@ const settings = reactive({
   ignore: [],
   include: [],
   float_visible: true,
+  // 全局自动翻译（每站搜索结果常驻）：目标语言 + 持续自动翻译开关
+  auto_translate_to: 'zh-CN',
+  auto_translate_mode: false,
 })
 
 function saveSettings() {
@@ -519,6 +586,28 @@ const localFavorites = ref([])
 // 有道翻译结果（左侧翻译面板）
 // {ok, translation, query, error, raw}
 const translateResult = ref(null)
+
+// 全局自动翻译（每站搜索结果常驻）：把搜索/列表结果标题翻译到目标语言
+// translatedTitles: {原标题: 译文}；展示时由 RightPanel.trTitle() 回填
+const translatedTitles = ref({})
+const autoTranslating = ref(false)
+// 目标语言（持久化到 settings.auto_translate_to，默认中文）
+const autoTranslateTo = ref('zh-CN')
+// 持续自动翻译模式（每次搜索后自动翻译全部结果）
+const autoTranslateMode = ref(false)
+// 目标语言下拉选项（可修改：用户可在设置里增减）
+const autoTranslateLangOptions = ref([
+  { label: '中文', value: 'zh-CN' },
+  { label: '英文', value: 'en' },
+  { label: '日文', value: 'ja' },
+  { label: '韩文', value: 'ko' },
+  { label: '繁中', value: 'zh-TW' },
+  { label: '法文', value: 'fr' },
+  { label: '德文', value: 'de' },
+  { label: '俄文', value: 'ru' },
+  { label: '西班牙文', value: 'es' },
+])
+
 
 // GitHub 仓库更新检查结果（左侧设置区）
 // {ok, latest_sha, latest_message, latest_date, latest_author, latest_url, local_sha, has_update, is_first_check, release, repo_url, commits_url, error}
@@ -761,6 +850,14 @@ const renameModal = reactive({
 // 等待处理的改名请求队列（一次弹一个）
 const renameQueue = ref([])
 
+// EX 批量下载母文件夹命名弹窗（确定下载时弹出，问是否用搜索词作母文件夹名）
+// exBatchParentFolder 非空 → 下载时把文件归入 <下载目录>/<母文件夹>/<画廊名>/ 下
+const exBatchFolderVisible = ref(false)
+const exBatchFolderName = ref('')          // 输入框值（默认 = 当前搜索词）
+const exBatchParentFolder = ref('')        // 确认后保存的母文件夹名（传给下载 options）
+const exBatchFolderPendingUrls = ref([])   // 待批量下载的画廊 URL（确认后继续解析）
+
+
 // RightPanel 组件引用（转发 ExHentai 种子/磁力事件）
 const rightPanelRef = ref(null)
 
@@ -899,8 +996,11 @@ function handlePythonEvent(event) {
       albumInfo.is_album = event.is_album
       // EX 批量下载进行中时追加到 fileList，否则替换
       if (exBatchDownloading.value || exBatchPending.value > 0) {
+        // 批量模式：给每个文件标记所属画廊名（供"用搜索词作母文件夹"时按画廊分文件夹）
+        const galleryTitle = event.album_name || ''
         const newItems = (event.items || []).map((item) => ({
           ...item,
+          gallery_title: galleryTitle,
           selected: item.status === 'ok',
           size_text: formatSize(item.size),
           file_type: getFileType(item.filename),
@@ -953,6 +1053,8 @@ function handlePythonEvent(event) {
       exFavMode.value = event.query === '__ex_favorites__'
       const displayQuery = exFavMode.value ? '我的收藏' : event.query
       addLog('搜索', `「${displayQuery}」第 ${event.page}${event.total_pages ? `/${event.total_pages}` : ''} 页，${(event.items || []).length} 个结果`)
+      // 持续自动翻译模式：搜索结果到达后自动翻译一次
+      maybeAutoTranslateAfterSearch()
       break
 
     case 'search_error':
@@ -1027,6 +1129,9 @@ function handlePythonEvent(event) {
       if (window.api && window.api.setFloatVisible) {
         window.api.setFloatVisible(floatVisible.value)
       }
+      // 全局自动翻译：从设置恢复目标语言 + 持续自动翻译开关
+      if (settings.auto_translate_to) autoTranslateTo.value = settings.auto_translate_to
+      autoTranslateMode.value = !!settings.auto_translate_mode
       // P3：设置加载完成后，把已保存的快捷键注册到主进程 + 应用不息屏状态
       syncP3SettingsToMain()
       break
@@ -1861,6 +1966,23 @@ function handlePythonEvent(event) {
       translateResult.value = event
       break
 
+    case 'translate_batch_result': {
+      // 全局自动翻译：批量译文回填到 translatedTitles 映射
+      autoTranslating.value = false
+      if (event.ok && Array.isArray(event.translations)) {
+        const titles = collectCurrentTitles()
+        const map = { ...translatedTitles.value }
+        // 按收集顺序对位覆盖（后端保证顺序一致）
+        for (let i = 0; i < titles.length && i < event.translations.length; i++) {
+          const orig = titles[i]
+          const tr = event.translations[i]
+          if (orig && tr && tr !== orig) map[orig] = tr
+        }
+        translatedTitles.value = map
+      }
+      break
+    }
+
     case 'github_update_info':
       // GitHub 仓库更新检查结果
       githubUpdateInfo.value = event
@@ -2149,6 +2271,10 @@ function doSearch(query, page) {
     searchResults.value = []
     searchPage.value = 1
     lastSearchKeyword.value = query
+    // 新搜索：清空旧译文，避免上一搜索的标题译文错位
+    translatedTitles.value = {}
+    // 新搜索：清空 EX 批量母文件夹，避免误套用
+    exBatchParentFolder.value = ''
   }
   // 退出 X 关注视图 / Iwara 主页等视图，展示搜索结果
   twFollowMode.value = ''
@@ -2243,6 +2369,8 @@ function handleInspect() {
     return
   }
   fileList.value = []
+  // 单次解析（非批量）：清空 EX 批量母文件夹，避免误套用到本次下载
+  exBatchParentFolder.value = ''
   // reactive 对象是 Proxy，无法被 IPC 克隆，必须先转成纯对象
   const options = JSON.parse(JSON.stringify(settings))
   console.log('[App] 发送 inspect 命令')
@@ -2282,6 +2410,11 @@ async function handleDownload(selectedItems) {
   // 转成纯对象，避免 Proxy 无法被 IPC 克隆
   const plainItems = JSON.parse(JSON.stringify(selectedItems))
   const options = JSON.parse(JSON.stringify(settings))
+  // EX 批量下载母文件夹：非空时把文件归入 <母文件夹>/<画廊名>/ 下
+  // （在单次解析 handleInspect / 新搜索 doSearch 时清空，此处保留以便同批次多次下载）
+  if (exBatchParentFolder.value) {
+    options.batch_parent_folder = exBatchParentFolder.value
+  }
   window.api.sendCommand({
     cmd: 'download',
     url: url.value.trim(),
@@ -2483,6 +2616,73 @@ function handleTranslateYoudao(payload) {
 }
 
 // ============================
+// 全局自动翻译（每站搜索结果常驻）
+// ============================
+// 收集当前视图所有结果项的标题（album_name），用于批量翻译
+function collectCurrentTitles() {
+  const titles = []
+  const push = (items) => {
+    if (!Array.isArray(items)) return
+    for (const it of items) {
+      const name = it && (it.album_name || it.title)
+      if (name && !titles.includes(name)) titles.push(name)
+    }
+  }
+  push(searchResults.value)
+  push(iwHomeItems.value)
+  push(iwFollowItems.value)
+  push(iwFriendItems.value)
+  push(haUserItems.value)
+  push(orHomeItems.value)
+  if (Array.isArray(orList.items)) push(orList.items)
+  if (Array.isArray(haSections.value)) {
+    for (const sec of haSections.value) push(sec && sec.items)
+  }
+  push(asmrItems.value)
+  return titles
+}
+
+// 目标语言下拉切换：保存到 settings 持久化
+function handleUpdateAutoTranslateTo(v) {
+  autoTranslateTo.value = v || 'zh-CN'
+  settings.auto_translate_to = autoTranslateTo.value
+  saveSettings()
+}
+
+// 切换持续自动翻译模式（持久化）
+function handleToggleAutoTranslateMode() {
+  autoTranslateMode.value = !autoTranslateMode.value
+  settings.auto_translate_mode = autoTranslateMode.value
+  saveSettings()
+  // 开启后立即翻译一次当前结果
+  if (autoTranslateMode.value) handleAutoTranslate(autoTranslateTo.value)
+}
+
+// 点击 🌐 按钮：把当前搜索/列表结果标题批量翻译到目标语言
+function handleAutoTranslate(toLang) {
+  if (!window.api) return
+  const titles = collectCurrentTitles()
+  if (!titles.length) return
+  autoTranslating.value = true
+  const batchId = `auto_${Date.now()}`
+  window.api.sendCommand({
+    cmd: 'translate_batch',
+    texts: titles,
+    from: 'auto',
+    to: toLang || autoTranslateTo.value || 'zh-CN',
+    batch_id: batchId,
+  })
+}
+
+// 搜索完成后若开启持续自动翻译，自动触发一次
+function maybeAutoTranslateAfterSearch() {
+  if (autoTranslateMode.value && searchResults.value.length) {
+    handleAutoTranslate(autoTranslateTo.value)
+  }
+}
+
+
+// ============================
 // P3 设置功能：快捷键 / 不息屏 / 拟态模式
 // ============================
 // 快捷键变更：保存 settings + 通知主进程注册/注销
@@ -2628,14 +2828,31 @@ function handleExOpenGallery(galleryUrl) {
 // EX 批量下载：把多个画廊的全部图片解析后追加到 fileList，统一勾选下载
 async function handleExBatchDownload(urls) {
   if (!window.api || !Array.isArray(urls) || !urls.length) return
+  // 弹出母文件夹命名弹窗：默认填入当前搜索词，用户可修改/留空
+  exBatchFolderPendingUrls.value = urls.filter(u => u)
+  exBatchFolderName.value = lastSearchKeyword.value || ''
+  exBatchFolderVisible.value = true
+}
+
+// EX 批量下载母文件夹弹窗确认后执行：开始顺序解析画廊（加入文件列表）
+async function confirmExBatchFolder(useFolder) {
+  exBatchFolderVisible.value = false
+  // 记录母文件夹名（非空 → 下载时按 <母文件夹>/<画廊名>/ 归档）
+  exBatchParentFolder.value = useFolder ? (exBatchFolderName.value || '').trim() : ''
+  const urls = exBatchFolderPendingUrls.value
+  exBatchFolderPendingUrls.value = []
+  if (!urls.length) return
   // 进入文件列表视图（如果还没进入）
   cameFromSearch.value = true
   // 清空 fileList 并发解析多个画廊
   fileList.value = []
   exGalleryDetail.value = null
   exBatchDownloading.value = true
-  exBatchPending.value = urls.filter(u => u).length
-  message.info(`开始批量解析 ${exBatchPending.value} 个画廊，请稍候（图片将逐个加入文件列表）`)
+  exBatchPending.value = urls.length
+  const tip = exBatchParentFolder.value
+    ? `母文件夹「${exBatchParentFolder.value}」，`
+    : ''
+  message.info(`开始批量解析 ${exBatchPending.value} 个画廊，${tip}请稍候（图片将逐个加入文件列表）`)
   const options = JSON.parse(JSON.stringify(settings))
   // 顺序解析（并发会触发 EX 限流 509）；解析结果会通过 inspect_complete 累加进 fileList
   for (const u of urls) {
@@ -2784,6 +3001,7 @@ function handleRefreshLogin(site) {
   else if (site === 'pawchive') window.api.sendCommand({ cmd: 'pawchive_check_login', notify: true })
   else if (site === 'iwara') window.api.sendCommand({ cmd: 'iwara_check_login' })
   else if (site === 'hanime') window.api.sendCommand({ cmd: 'hanime_check_login' })
+  else if (site === 'asmr') window.api.sendCommand({ cmd: 'asmr_check_login', notify: true })
   else if (['xhamster', 'pornhub', 'xvideos'].includes(site)) window.api.sendCommand({ cmd: `${site}_check_login`, notify: true })
 }
 
@@ -3435,7 +3653,7 @@ function handleAsmrPopular(page = 1) {
     asmrPage.value = 1
     searchResults.value = []
   }
-  window.api.sendCommand({ cmd: 'asmr_popular', page })
+  window.api.sendCommand({ cmd: 'asmr_popular', page, subtitle: !!settings.asmr_subtitle })
 }
 
 // 媒体库（最新入库等排序 + 仅带字幕 + 社团/标签/声优筛选）
@@ -3478,8 +3696,11 @@ function handleAsmrSearchUpdate(opts) {
   // 有筛选：刷新筛选列表；在媒体库/热门：刷新对应列表；搜索态且有结果：重新搜索
   if (asmrView.value === 'works') {
     handleAsmrWorks(1)
-  } else if (asmrView.value === 'popular' || asmrView.value === 'favorites') {
-    // 排序仅作用于媒体库，其他视图不刷新
+  } else if (asmrView.value === 'popular') {
+    // 热门作品也支持"仅带字幕"过滤（后端按 has_subtitle 过滤后返回）
+    handleAsmrPopular(1)
+  } else if (asmrView.value === 'favorites') {
+    // 服务器收藏无字幕筛选，不刷新
   } else if (searchResults.value.length > 0 && lastSearchKeyword.value && !searching.value) {
     doSearch(lastSearchKeyword.value, 1)
   }

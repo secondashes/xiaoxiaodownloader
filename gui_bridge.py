@@ -7812,8 +7812,8 @@ def _asmr_tracks_flatten(nodes: list, parent: str = "") -> list[dict]:
     return files
 
 
-async def asmr_popular(page: int = 1) -> None:
-    """热门作品（每页 100，可翻页抓取 100+）。"""
+async def asmr_popular(page: int = 1, subtitle: bool = False) -> None:
+    """热门作品（每页 100，可翻页抓取 100+；可勾选仅带字幕客户端过滤）。"""
     emit({"event": "asmr_list_loading", "loading": True, "view": "popular"})
     try:
         page = max(1, page or 1)
@@ -7823,6 +7823,8 @@ async def asmr_popular(page: int = 1) -> None:
         )
         works = data.get("works") or data or []
         items = [_asmr_work_card(w) for w in works if isinstance(w, dict) and w.get("id")]
+        if subtitle:
+            items = [i for i in items if i.get("has_subtitle")]
         _apply_cached_thumbnails(items)
         asyncio.create_task(_cache_thumbnails(items))
         pagination = data.get("pagination") or {}
@@ -8689,7 +8691,13 @@ async def gui_download(url: str, selected_items: list[dict], options: dict) -> N
             album_id = get_album_id(validated_url) if is_album else None
 
         # 构建相册目录
-        album_path = build_album_directory(album_name, album_id, options)
+        # EX 批量下载母文件夹：用搜索词作母文件夹名，每个画廊按其标题分子文件夹
+        batch_parent = (options.get("batch_parent_folder") or "").strip()
+        if batch_parent:
+            # 用母文件夹名作为顶层目录名（album_id 留空避免拼接后缀）
+            album_path = build_album_directory(batch_parent, None, options)
+        else:
+            album_path = build_album_directory(album_name, album_id, options)
         logging.info("下载目录: %s", album_path)
 
         # 创建速率限制器
@@ -8795,8 +8803,15 @@ async def gui_download(url: str, selected_items: list[dict], options: dict) -> N
                         base_dir, filename, options,
                     )
                 else:
+                    # EX 批量下载：按画廊标题分子文件夹（母文件夹已作顶层目录）
+                    base_dir = album_path
+                    g_title = (item.get("gallery_title") or "").strip()
+                    if g_title and batch_parent:
+                        sub = str(Path(album_path) / sanitize_directory_name(g_title))
+                        Path(sub).mkdir(parents=True, exist_ok=True)
+                        base_dir = sub
                     file_download_path = build_file_download_path(
-                        album_path, filename, options,
+                        base_dir, filename, options,
                     )
 
                 # 创建该文件的 session_info 副本（避免并发修改）
@@ -11308,6 +11323,64 @@ def translate_free(text: str, from_lang: str = "auto", to_lang: str = "zh-CN") -
     emit({"event": "translate_result", "ok": False, "error": last_err})
 
 
+def translate_batch(texts: list, from_lang: str = "auto", to_lang: str = "zh-CN", batch_id: str = "") -> None:
+    """批量翻译（一次请求多个文本，复用 Google 免费端点 q 多值）。
+
+    texts: 字符串列表（最多 50 条/批，超过自动分批）
+    成功 emit 'translate_batch_result' 事件，带 translations 数组（与输入顺序一致）。
+    """
+    if not texts or not isinstance(texts, list):
+        emit({"event": "translate_batch_result", "ok": False, "error": "未提供要翻译的文本",
+              "batch_id": batch_id, "translations": []})
+        return
+    # 过滤空字符串（保留索引位置，空字符串原样返回）
+    non_empty_idx = [i for i, t in enumerate(texts) if t and str(t).strip()]
+    if not non_empty_idx:
+        emit({"event": "translate_batch_result", "ok": True, "translations": list(texts),
+              "batch_id": batch_id})
+        return
+    s = _load_settings()
+    sl = _map_lang_code(from_lang)
+    tl = _map_lang_code(to_lang)
+    if sl != "auto" and sl == tl:
+        tl = "en" if sl == "zh-CN" else "zh-CN"
+
+    translations = list(texts)  # 原样回填，后续只覆盖非空位置
+    # 分批处理（每批 30 条，避免 URL 过长）
+    BATCH = 30
+    for start in range(0, len(non_empty_idx), BATCH):
+        chunk_idx = non_empty_idx[start:start + BATCH]
+        chunk_texts = [str(texts[i]) for i in chunk_idx]
+        try:
+            # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
+            params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+            }
+            # 用 GET 多 q 参数（requests 会自动重复 q）
+            q_params = [("q", t) for t in chunk_texts]
+            # 手动拼 URL（requests params dict 不支持重复 key）
+            from urllib.parse import urlencode
+            url = GOOGLE_TRANSLATE_URL + "?" + urlencode(params) + "&" + urlencode(q_params)
+            resp = requests.get(url, headers=headers, timeout=20)
+            data = resp.json()
+            if isinstance(data, list) and data and isinstance(data[0], list):
+                # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
+                for i, seg in enumerate(data[0]):
+                    if i < len(chunk_idx) and seg and seg[0]:
+                        translations[chunk_idx[i]] = seg[0]
+            # 静默失败：未取到译文的位置保留原文本
+        except Exception as exc:
+            # 单批失败不影响其他批次，继续
+            logging.warning("translate_batch 第 %d 批失败: %s", start, exc)
+            continue
+
+    emit({"event": "translate_batch_result", "ok": True,
+          "translations": translations, "batch_id": batch_id,
+          "detected_source": sl, "engine": "google_free"})
+
+
 def translate_youdao(text: str, from_lang: str = "auto", to_lang: str = "zh") -> None:
     """调用有道智云翻译 API（需用户在设置里填 app_id/app_secret）。
 
@@ -12382,7 +12455,7 @@ async def command_loop() -> None:
                 await asyncio.to_thread(asmr_check_login, bool(command.get("silent")))
 
             elif cmd == "asmr_popular":
-                await asmr_popular(int(command.get("page", 1) or 1))
+                await asmr_popular(int(command.get("page", 1) or 1), bool(command.get("subtitle")))
 
             elif cmd == "asmr_works":
                 await asmr_works(
@@ -12425,6 +12498,16 @@ async def command_loop() -> None:
                     command.get("text", ""),
                     command.get("from", "auto"),
                     command.get("to", "zh-CN"),
+                )
+
+            elif cmd == "translate_batch":
+                # 批量翻译（一次多文本，用于"自动翻译搜索结果"按钮）
+                await asyncio.to_thread(
+                    translate_batch,
+                    command.get("texts", []),
+                    command.get("from", "auto"),
+                    command.get("to", "zh-CN"),
+                    command.get("batch_id", ""),
                 )
 
             elif cmd == "check_github_update":

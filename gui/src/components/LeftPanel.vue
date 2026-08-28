@@ -317,6 +317,39 @@
           </div>
         </div>
 
+        <!-- ASMR-100 用户名密码登录（音声站；登录后可同步收藏） -->
+        <div v-if="site === 'asmr'" class="pawchive-login-form">
+          <n-input
+            v-model:value="asmrNameInput"
+            size="small"
+            placeholder="ASMR-100 用户名"
+            :disabled="asmrLoginLoading"
+            @keyup.enter="handleAsmrLogin"
+          />
+          <n-input
+            v-model:value="asmrPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+            :disabled="asmrLoginLoading"
+            @keyup.enter="handleAsmrLogin"
+          />
+          <n-button
+            size="small"
+            type="primary"
+            block
+            :loading="asmrLoginLoading"
+            :disabled="!asmrNameInput.trim() || !asmrPasswordInput"
+            @click="handleAsmrLogin"
+          >
+            {{ asmrLoginLoading ? '登录中...' : '登录' }}
+          </n-button>
+          <div class="login-hint">
+            ASMR-100 账号密码登录；不登录也可浏览/搜索/下载音声，登录可同步网站收藏夹
+          </div>
+        </div>
+
         <!-- xHamster / Pornhub 用 Twitter (X) 站 OAuth 登录（复用 X 站 cookie 自动授权） -->
         <div v-if="site === 'xhamster' || site === 'pornhub'" class="pawchive-login-form">
           <n-button
@@ -963,6 +996,20 @@
             </div>
           </template>
 
+          <!-- ASMR-100 专属设置（代理，默认直连） -->
+          <template v-if="site === 'asmr'">
+            <div class="setting-item">
+              <div class="setting-label">ASMR-100 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
+              <n-input
+                :value="settings.asmr_proxy"
+                placeholder="如 http://127.0.0.1:10809，留空直连"
+                size="small"
+                @change="v => $emit('asmr-set-proxy', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">ASMR-100 一般可直连；无法访问时再填代理。登录后可同步网站收藏夹</div>
+            </div>
+          </template>
+
           <!-- Oreno3D 专属设置（代理，默认直连） -->
           <template v-if="site === 'oreno3d'">
             <div class="setting-item">
@@ -1427,6 +1474,9 @@ const props = defineProps({
   // Hanime1 登录用户名（H站，邮箱密码登录）
   hanimeUser: { type: String, default: '' },
   hanimeLoginLoading: { type: Boolean, default: false },
+  // ASMR-100 登录用户名（音声站，用户名+密码登录）
+  asmrUser: { type: String, default: '' },
+  asmrLoginLoading: { type: Boolean, default: false },
   // 通用 webview OAuth 三站登录用户名（xhamster/pornhub/xvideos）
   xhamsterUser: { type: String, default: '' },
   pornhubUser: { type: String, default: '' },
@@ -1472,6 +1522,10 @@ const emit = defineEmits([
   'hanime-login',          // 邮箱密码登录（参数：邮箱, 密码）
   'hanime-logout',         // 退出 Hanime1 登录
   'hanime-set-proxy',      // 修改 Hanime1 代理（参数：代理地址，国内必须）
+  // ASMR-100（音声站）
+  'asmr-login',            // 用户名密码登录（参数：用户名, 密码）
+  'asmr-logout',           // 退出 ASMR 登录
+  'asmr-set-proxy',       // 修改 ASMR 代理（参数：代理地址，空=直连）
   // Oreno3D（O3D）/ EroMMDTube（E站）
   'oreno-set-proxy',       // 修改 O3D/E站 代理（参数：代理地址, 可选 site_key 'erommdtube'，空=直连）
   'tw-add-follow-tag',    // 新增关注分类（参数：母类, 子类）
@@ -1517,7 +1571,7 @@ const activePanel = ref('')
 // ============================
 // 登录状态（账号卡片）
 // ============================
-const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'xhamster', 'pornhub', 'xvideos'].includes(props.site))
+const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr', 'xhamster', 'pornhub', 'xvideos'].includes(props.site))
 
 const siteLoggedIn = computed(() => {
   if (props.site === 'pawchive') return !!props.pawchiveUser
@@ -1525,6 +1579,7 @@ const siteLoggedIn = computed(() => {
   if (props.site === 'exhentai') return !!props.exhentaiUser
   if (props.site === 'iwara') return !!props.iwaraUser
   if (props.site === 'hanime') return !!props.hanimeUser
+  if (props.site === 'asmr') return !!props.asmrUser
   if (props.site === 'xhamster') return !!props.xhamsterUser
   if (props.site === 'pornhub') return !!props.pornhubUser
   if (props.site === 'xvideos') return !!props.xvideosUser
@@ -1538,6 +1593,7 @@ const loginSubtitle = computed(() => {
   if (props.site === 'exhentai') return props.exhentaiUser ? 'ExHentai 已登录' : 'ExHentai 未登录'
   if (props.site === 'iwara') return props.iwaraUser ? `Iwara 已登录: ${props.iwaraUser}` : 'Iwara 未登录'
   if (props.site === 'hanime') return props.hanimeUser ? `H站已登录: ${props.hanimeUser}` : 'Hanime1 未登录'
+  if (props.site === 'asmr') return props.asmrUser ? `音声站已登录: ${props.asmrUser}` : 'ASMR-100 未登录'
   if (props.site === 'xhamster') return props.xhamsterUser ? `xHamster 已登录: ${props.xhamsterUser}` : 'xHamster 未登录'
   if (props.site === 'pornhub') return props.pornhubUser ? `Pornhub 已登录: ${props.pornhubUser}` : 'Pornhub 未登录'
   if (props.site === 'xvideos') return props.xvideosUser ? `XVideos 已登录: ${props.xvideosUser}` : 'XVideos 未登录'
@@ -1549,6 +1605,7 @@ const siteLoginInfo = computed(() => props.loginInfo[props.site] || {})
 const siteUsername = computed(() => {
   if (props.site === 'twitter' && props.twitterUser) return props.twitterUser
   if (props.site === 'pawchive' && props.pawchiveUser) return props.pawchiveUser
+  if (props.site === 'asmr' && props.asmrUser) return props.asmrUser
   if (props.site === 'xhamster' && props.xhamsterUser) return props.xhamsterUser
   if (props.site === 'pornhub' && props.pornhubUser) return props.pornhubUser
   if (props.site === 'xvideos' && props.xvideosUser) return props.xvideosUser
@@ -1756,7 +1813,7 @@ Hanime1 是里番（成人动画）视频站，支持邮箱密码登录。
 
 Oreno3D 是日本 3D 动画（MMD 等）视频索引站，视频源托管在 Iwara。
 
-🔑 无需登录：直接浏览/搜索/下载
+🔑 无原站账号体系：浏览/搜索/下载无需登录（站点本身无登录注册功能）
 
 💡 本工具提示：
 - 主页默认按人気排序，可切换 急上昇/高評価/新着/人気
@@ -1764,7 +1821,8 @@ Oreno3D 是日本 3D 动画（MMD 等）视频索引站，视频源托管在 Iwa
 - "角色列表"：人気角色 + 五十音分组查找，点角色看 TA 的视频
 - "人気作者"：按排名分页浏览，点作者看全部作品
 - 点视频卡片进详情：在线播放（iwara 源最高画质）、查看作者/标签/统计
-- 卡片右上角 ♥ 可收藏到本地，"我的收藏"随时回看
+- 卡片右上角 ♥ 可收藏到本地（oreno3d 站本身无服务端账号，本地保存跨设备不同步）
+- 工具栏"♥ 我的收藏"查看本地收藏列表
 - 下载实际从 Iwara 源获取（最高画质），无需登录
 - O3D 一般可直连；无法访问时在左侧设置里填代理
 - 粘贴 oreno3d.com/movies/... 链接可直接解析下载`,
@@ -1852,6 +1910,7 @@ function handleSiteLogout() {
   else if (props.site === 'exhentai') emit('exhentai-logout')
   else if (props.site === 'iwara') emit('iwara-logout')
   else if (props.site === 'hanime') emit('hanime-logout')
+  else if (props.site === 'asmr') emit('asmr-logout')
   else if (['xhamster', 'pornhub', 'xvideos'].includes(props.site)) emit('site-logout', props.site)
 }
 
@@ -1909,6 +1968,15 @@ const hanimePasswordInput = ref('')
 function handleHanimeLogin() {
   if (!hanimeEmailInput.value.trim() || !hanimePasswordInput.value) return
   emit('hanime-login', hanimeEmailInput.value.trim(), hanimePasswordInput.value)
+}
+
+// ASMR-100 用户名密码登录表单
+const asmrNameInput = ref('')
+const asmrPasswordInput = ref('')
+
+function handleAsmrLogin() {
+  if (!asmrNameInput.value.trim() || !asmrPasswordInput.value) return
+  emit('asmr-login', asmrNameInput.value.trim(), asmrPasswordInput.value)
 }
 
 // XVideos 邮箱密码登录表单（触发 webview 弹窗由 App.vue 接管）
