@@ -1357,7 +1357,8 @@
           <!-- 更新信息 -->
           <div v-if="githubChecking" class="github-update-tip">正在连接 GitHub...</div>
           <div v-else-if="githubError" class="github-update-err">{{ githubError }}</div>
-          <div v-else-if="githubInfo" class="github-update-box">
+          <div v-else-if="!githubInfo" class="github-update-tip">未检查（点上方"检查更新"手动获取；仓库未公开前可能无法访问）</div>
+          <div v-else class="github-update-box">
             <div v-if="githubInfo.is_first_check" class="github-update-first">
               首次检查：当前已记录为基准版本（之后有新提交会提示"有更新"）
             </div>
@@ -1602,6 +1603,8 @@ const props = defineProps({
   translateResult: { type: Object, default: null },
   // GitHub 仓库更新检查结果：{ok, latest_sha, latest_message, ...} 或 null（检查中）
   githubUpdateInfo: { type: Object, default: null },
+  // 检查进行中（仅手动点击"检查更新"时为 true；启动后不发任何 GitHub 请求）
+  githubChecking: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -2264,7 +2267,7 @@ watch(() => props.translateResult, (r) => {
 // ============================
 // GitHub 仓库更新检查（设置区）
 // ============================
-const githubChecking = computed(() => props.githubUpdateInfo === null)
+// githubChecking 改为显式 prop（App.vue 传）：启动后 info=null 显示"未检查"，不发任何请求
 const githubInfo = computed(() => {
   const r = props.githubUpdateInfo
   return r && r.ok ? r : null

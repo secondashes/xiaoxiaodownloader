@@ -79,6 +79,7 @@
             :translate-result="translateResult"
             @check-github-update="handleCheckGithubUpdate"
             :github-update-info="githubUpdateInfo"
+            :github-checking="githubChecking"
             @shortcut-change="handleShortcutChange"
             @prevent-sleep-change="handlePreventSleepChange"
           />
@@ -632,6 +633,8 @@ watch(() => settings.auto_translate_to, v => {
 // GitHub 仓库更新检查结果（左侧设置区）
 // {ok, latest_sha, latest_message, latest_date, latest_author, latest_url, local_sha, has_update, is_first_check, release, repo_url, commits_url, error}
 const githubUpdateInfo = ref(null)
+// 检查进行中标志（仅手动点击"检查更新"时为 true；启动后不发任何 GitHub 请求）
+const githubChecking = ref(false)
 
 // X (Twitter) 关注列表 / 关注分类 / 浏览模式
 // twFollowMode: ''=普通视图 | 'following'=关注列表 | 'followers'=关注我的人 | 'follows'=我的分类
@@ -1055,6 +1058,15 @@ function handlePythonEvent(event) {
           if (exBatchPending.value === 0) {
             exBatchDownloading.value = false
             addLog('系统', `批量解析全部完成，共收集 ${fileList.value.length} 个文件`)
+            // 自动提交下载任务（批量下载=解析+下载一步到位，无需手动再点下载）
+            const selected = fileList.value.filter(it => it.selected)
+            if (selected.length) {
+              addLog('系统', `自动开始下载 ${selected.length} 个文件`)
+              message.success(`解析完成，自动开始下载 ${selected.length} 个文件`)
+              handleDownload(selected)
+            } else {
+              message.warning('批量解析完成，但没有可下载的文件')
+            }
           }
         }
       } else {
@@ -2084,12 +2096,15 @@ function handlePythonEvent(event) {
 
     case 'github_update_info':
       // GitHub 仓库更新检查结果
+      githubChecking.value = false
       githubUpdateInfo.value = event
       break
 
     case 'github_update_marked':
-      // 用户已确认更新完成 → 重新检查
-      if (window.api) window.api.sendCommand({ cmd: 'check_github_update' })
+      // 用户已确认更新完成 → 仅记录基准，不再自动连 GitHub（手动点击才检查）
+      if (githubUpdateInfo.value && typeof githubUpdateInfo.value === 'object') {
+        githubUpdateInfo.value = { ...githubUpdateInfo.value, has_update: false }
+      }
       break
 
     case 'local_favorites':
@@ -2897,7 +2912,8 @@ function setupShortcutTriggeredListener() {
 // ============================
 function handleCheckGithubUpdate() {
   if (!window.api) return
-  githubUpdateInfo.value = null  // 清空旧结果，触发 loading
+  githubChecking.value = true       // 显式 loading（请求失败/超时由后端事件复位）
+  githubUpdateInfo.value = null    // 清空旧结果
   window.api.sendCommand({ cmd: 'check_github_update' })
 }
 

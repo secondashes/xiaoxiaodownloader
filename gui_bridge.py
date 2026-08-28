@@ -9991,7 +9991,12 @@ class DownloadManager:
                 album_id = task.get("album_id") or (
                     get_album_id(validated_url) if is_album else None
                 )
-            album_path = build_album_directory(album_name, album_id, options)
+            # 批量下载母文件夹：非空时任务顶层目录 = 母文件夹名（各站子逻辑按画廊/番号分子文件夹）
+            batch_parent = (options.get("batch_parent_folder") or "").strip()
+            if batch_parent:
+                album_path = build_album_directory(batch_parent, None, options)
+            else:
+                album_path = build_album_directory(album_name, album_id, options)
 
             rate_limiter = RateLimiter(args.rate_limit * KB if args.rate_limit else None)
             session_info = SessionInfo(
