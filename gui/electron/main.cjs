@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, shell, Menu, session } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, shell, Menu, session, Tray, globalShortcut, powerSaveBlocker, nativeImage, dialog } = require('electron')
 const { spawn, spawnSync, execSync, execFileSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -71,6 +71,28 @@ let mainWindow = null
 let floatWindow = null
 let downloadsWindow = null
 const isDev = !app.isPackaged
+
+// P3 设置功能状态：托盘 / 全局快捷键 / 不息屏 / 拟态窗口
+let appTray = null                  // Tray 实例（仅在最小化到托盘时创建）
+let mimicWindow = null              // 拟态窗口（伪装面板）
+let preventSleepId = null           // powerSaveBlocker ID（null=未开启）
+const shortcutMap = new Map()       // action → accelerator 字符串
+const shortcutCallbacks = {
+  toggle_prevent_sleep: () => {
+    // 切换不息屏：发 IPC 给前端，让前端改 settings 并同步状态
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('shortcut-triggered', { action: 'toggle_prevent_sleep' })
+    }
+  },
+  quick_minimize: () => quickMinimizeToTray(),
+  toggle_mimic: () => toggleMimicMode(),
+  toggle_float: () => {
+    // 切换悬浮窗显示
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('shortcut-triggered', { action: 'toggle_float' })
+    }
+  },
+}
 
 // 悬浮窗与下载管理窗口的固定尺寸。硬编码并在移动时显式写回，
 // 避免 Windows 上 frameless 透明窗口在频繁移动时因厚边框 inset 累积而“越拖越大”。
@@ -952,6 +974,233 @@ ipcMain.handle('fetch-cookies', async (event, siteKey) => {
   } catch (e) {
     debugLog(`fetch-cookies 执行失败: ${e.message}`)
     return { ok: false, error: `抓取执行失败: ${e.message}` }
+  }
+})
+
+// ============================
+// P3 设置功能：托盘 / 全局快捷键 / 不息屏 / 拟态模式
+// ============================
+// 创建托盘图标（仅在"快速缩小到托盘"时创建，主界面显示时销毁）
+function createTray() {
+  if (appTray && !appTray.isDestroyed()) return
+  // 用 Electron 内置图标（无自定义 png 时用 nativeImage 创建空白图标也行）
+  let icon
+  try {
+    // 优先用程序根目录的 icon.png / icon.ico
+    const ico = path.join(getProjectRootSafe(), 'icon.png')
+    const ico2 = path.join(getProjectRootSafe(), 'icon.ico')
+    if (fs.existsSync(ico)) icon = nativeImage.createFromPath(ico)
+    else if (fs.existsSync(ico2)) icon = nativeImage.createFromPath(ico2)
+    else icon = nativeImage.createEmpty()
+  } catch { icon = nativeImage.createEmpty() }
+
+  appTray = new Tray(icon)
+  appTray.setToolTip('小小下载器（后台运行）')
+  rebuildTrayMenu()
+}
+
+function rebuildTrayMenu() {
+  if (!appTray || appTray.isDestroyed()) return
+  const menu = Menu.buildFromTemplate([
+    {
+      label: '打开主界面',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
+        }
+        // 主界面显示后销毁托盘
+        destroyTray()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '显示拟态面板',
+      click: () => showMimicWindow(),
+    },
+    {
+      label: '退出',
+      click: () => {
+        destroyTray()
+        app.quit()
+      },
+    },
+  ])
+  appTray.setContextMenu(menu)
+  // 双击托盘图标直接显示主界面
+  appTray.on('double-click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    destroyTray()
+  })
+}
+
+function destroyTray() {
+  if (appTray && !appTray.isDestroyed()) {
+    try { appTray.destroy() } catch {}
+  }
+  appTray = null
+}
+
+// 快速缩小：隐藏主窗口 + 关闭悬浮窗 + 显示托盘
+function quickMinimizeToTray() {
+  debugLog('快速缩小到托盘')
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
+  if (floatWindow && !floatWindow.isDestroyed()) {
+    floatWindow.close()
+  }
+  if (downloadsWindow && !downloadsWindow.isDestroyed() && downloadsWindow.isVisible()) {
+    downloadsWindow.hide()
+  }
+  createTray()
+}
+
+// 不息屏：开启 prevent-display-sleep
+ipcMain.handle('prevent-sleep-start', () => {
+  if (preventSleepId === null) {
+    preventSleepId = powerSaveBlocker.start('prevent-display-sleep')
+    debugLog(`不息屏已开启，blocker id=${preventSleepId}`)
+  }
+  return { ok: true, id: preventSleepId }
+})
+
+ipcMain.handle('prevent-sleep-stop', () => {
+  if (preventSleepId !== null) {
+    try { powerSaveBlocker.stop(preventSleepId) } catch {}
+    preventSleepId = null
+    debugLog('不息屏已关闭')
+  }
+  return { ok: true }
+})
+
+// 全局快捷键注册：action ∈ toggle_prevent_sleep | quick_minimize | toggle_mimic | toggle_float
+// accelerator 为 Electron 标准格式：'Ctrl+Shift+M' / 'CommandOrControl+Alt+P' 等
+ipcMain.handle('register-shortcut', (event, action, accelerator) => {
+  if (!shortcutCallbacks[action]) {
+    return { ok: false, error: `未知快捷键动作: ${action}` }
+  }
+  // 先注销旧的
+  const old = shortcutMap.get(action)
+  if (old) {
+    try { globalShortcut.unregister(old) } catch {}
+  }
+  // 空字符串 = 仅注销，不注册新的
+  if (!accelerator) {
+    shortcutMap.delete(action)
+    debugLog(`快捷键 ${action} 已清空`)
+    return { ok: true, cleared: true }
+  }
+  try {
+    const ok = globalShortcut.register(accelerator, shortcutCallbacks[action])
+    if (!ok) {
+      return { ok: false, error: `注册失败，可能已被其他程序占用: ${accelerator}` }
+    }
+    shortcutMap.set(action, accelerator)
+    debugLog(`快捷键 ${action} 注册成功: ${accelerator}`)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// 注销全部快捷键（退出时调用）
+function unregisterAllShortcuts() {
+  for (const [action, acc] of shortcutMap) {
+    try { globalShortcut.unregister(acc) } catch {}
+  }
+  shortcutMap.clear()
+}
+
+// 拟态模式：创建/显示伪装面板窗口
+function showMimicWindow(filePath) {
+  // 已存在则显示
+  if (mimicWindow && !mimicWindow.isDestroyed()) {
+    if (filePath) mimicWindow.loadFile(filePath).catch(() => {})
+    mimicWindow.show()
+    mimicWindow.focus()
+    return
+  }
+  // 没有上传文件时用内置占位页
+  const htmlPath = filePath || path.join(__dirname, 'mimic.html')
+  mimicWindow = new BrowserWindow({
+    width: 900,
+    height: 640,
+    title: '工作面板',
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  try {
+    mimicWindow.loadFile(htmlPath)
+  } catch (err) {
+    debugLog(`拟态窗口加载失败: ${err.message}`)
+  }
+  mimicWindow.on('closed', () => { mimicWindow = null })
+  debugLog(`拟态窗口已创建: ${htmlPath}`)
+}
+
+// 切换拟态模式（快捷键触发）：显示拟态窗口 + 隐藏主窗口 + 关闭悬浮窗
+function toggleMimicMode() {
+  if (mimicWindow && !mimicWindow.isDestroyed() && mimicWindow.isVisible()) {
+    // 已显示 → 隐藏拟态 + 显示主窗口
+    mimicWindow.hide()
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show()
+  } else {
+    // 显示拟态 + 隐藏主窗口 + 关闭悬浮窗
+    showMimicWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
+    if (floatWindow && !floatWindow.isDestroyed()) floatWindow.close()
+    if (!appTray) createTray()
+  }
+}
+
+// IPC：进入拟态模式（前端按钮触发，可选传文件路径）
+ipcMain.handle('enter-mimic-mode', (event, filePath) => {
+  showMimicWindow(filePath)
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
+  if (floatWindow && !floatWindow.isDestroyed()) floatWindow.close()
+  if (!appTray) createTray()
+  return { ok: true }
+})
+
+// IPC：快速缩小到托盘（前端按钮触发）
+ipcMain.handle('quick-minimize', () => {
+  quickMinimizeToTray()
+  return { ok: true }
+})
+
+// IPC：选择拟态文件（系统文件对话框）
+ipcMain.handle('select-mimic-file', async () => {
+  const r = await dialog.showOpenDialog({
+    title: '选择拟态面板文件（txt/word/pdf/图片等）',
+    properties: ['openFile'],
+    filters: [
+      { name: '常用文件', extensions: ['txt', 'md', 'html', 'htm', 'pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'gif', 'bmp'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  })
+  if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true }
+  return { ok: true, path: r.filePaths[0] }
+})
+
+// 退出时清理
+app.on('before-quit', () => {
+  unregisterAllShortcuts()
+  if (preventSleepId !== null) {
+    try { powerSaveBlocker.stop(preventSleepId) } catch {}
+    preventSleepId = null
+  }
+  destroyTray()
+  if (mimicWindow && !mimicWindow.isDestroyed()) {
+    try { mimicWindow.close() } catch {}
   }
 })
 

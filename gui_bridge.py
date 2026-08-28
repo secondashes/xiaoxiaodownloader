@@ -11160,6 +11160,14 @@ DEFAULT_SETTINGS = {
     "translate_engine": "google_free",   # "google_free" | "libretranslate" | "youdao"
     "libretranslate_url": "",             # 如 https://libretranslate.com 或自建实例
     "libretranslate_api_key": "",
+    # P3 设置功能：不息屏 / 快捷键 / 拟态模式
+    "prevent_display_sleep": False,       # 不息屏开关（True=阻止系统休眠）
+    "shortcut_toggle_prevent_sleep": "",  # 切换不息屏（Electron accelerator 格式，如 "Ctrl+Shift+S"）
+    "shortcut_quick_minimize": "",        # 快速缩小到托盘（如 "Ctrl+Shift+M"）
+    "shortcut_toggle_mimic": "",          # 切换拟态模式（如 "Ctrl+Shift+P"）
+    "shortcut_toggle_float": "",         # 切换悬浮窗显示（如 "Ctrl+Shift+F"）
+    "mimic_file_path": "",               # 拟态面板上传的文件路径（txt/word/pdf/图片等）
+    "mimic_enabled": False,              # 拟态模式开关
     # GitHub 仓库更新检查代理（国内默认 http://127.0.0.1:10809）
     "github_proxy": "http://127.0.0.1:10809",
 }

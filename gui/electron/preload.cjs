@@ -98,6 +98,25 @@ contextBridge.exposeInMainWorld('api', {
   // 一键抓取本机浏览器的登录 Cookie（参数：站点 key：twitter/exhentai/pawchive）
   fetchCookies: (siteKey) => ipcRenderer.invoke('fetch-cookies', siteKey),
 
+  // P3 设置功能：托盘 / 全局快捷键 / 不息屏 / 拟态模式
+  // 不息屏：开启/关闭 prevent-display-sleep
+  preventSleepStart: () => ipcRenderer.invoke('prevent-sleep-start'),
+  preventSleepStop: () => ipcRenderer.invoke('prevent-sleep-stop'),
+  // 全局快捷键注册：action ∈ toggle_prevent_sleep | quick_minimize | toggle_mimic | toggle_float
+  registerShortcut: (action, accelerator) => ipcRenderer.invoke('register-shortcut', action, accelerator),
+  // 快速缩小到托盘（按钮触发）
+  quickMinimize: () => ipcRenderer.invoke('quick-minimize'),
+  // 进入拟态模式（按钮触发，可选传文件路径）
+  enterMimicMode: (filePath) => ipcRenderer.invoke('enter-mimic-mode', filePath),
+  // 选择拟态文件（系统文件对话框）
+  selectMimicFile: () => ipcRenderer.invoke('select-mimic-file'),
+  // 监听快捷键触发事件（main → renderer）
+  onShortcutTriggered: (cb) => {
+    const listener = (_, data) => cb(data)
+    ipcRenderer.on('shortcut-triggered', listener)
+    return () => ipcRenderer.removeListener('shortcut-triggered', listener)
+  },
+
   // 查询后端启动错误（页面加载完成时主动拉取，避免错过启动早期的事件）
   getBackendError: () => ipcRenderer.invoke('get-backend-error'),
 })

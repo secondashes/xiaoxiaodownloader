@@ -69,6 +69,8 @@
             :translate-result="translateResult"
             @check-github-update="handleCheckGithubUpdate"
             :github-update-info="githubUpdateInfo"
+            @shortcut-change="handleShortcutChange"
+            @prevent-sleep-change="handlePreventSleepChange"
           />
           <RightPanel
             ref="rightPanelRef"
@@ -847,6 +849,8 @@ function handlePythonEvent(event) {
       requestSettings()
       requestHistory()
       requestTasks()
+      // P3 设置功能：监听主进程触发的快捷键事件
+      setupShortcutTriggeredListener()
       // 加载搜索历史与本地收藏
       if (window.api) {
         window.api.sendCommand({ cmd: 'get_search_history' })
@@ -992,6 +996,8 @@ function handlePythonEvent(event) {
       if (window.api && window.api.setFloatVisible) {
         window.api.setFloatVisible(floatVisible.value)
       }
+      // P3：设置加载完成后，把已保存的快捷键注册到主进程 + 应用不息屏状态
+      syncP3SettingsToMain()
       break
 
     case 'tasks_snapshot':
@@ -2423,6 +2429,81 @@ function handleTranslateFree(payload) {
 // 兼容旧 emit 名称（LeftPanel 旧版本可能还在发 translate-youdao）
 function handleTranslateYoudao(payload) {
   handleTranslateFree(payload)
+}
+
+// ============================
+// P3 设置功能：快捷键 / 不息屏 / 拟态模式
+// ============================
+// 快捷键变更：保存 settings + 通知主进程注册/注销
+function handleShortcutChange(action, accelerator) {
+  if (!settings.value) return
+  const key = `shortcut_${action}`
+  // 通过 updateSettings 触发持久化（与 LeftPanel update() 同路径）
+  updateSettings({ [key]: accelerator || '' })
+  // 通知主进程注册
+  if (window.api && window.api.registerShortcut) {
+    window.api.registerShortcut(action, accelerator || '').catch(() => {})
+  }
+}
+
+// 不息屏开关变更
+async function handlePreventSleepChange(enabled) {
+  if (!window.api) return
+  if (enabled) {
+    if (window.api.preventSleepStart) {
+      const r = await window.api.preventSleepStart()
+      if (!r || !r.ok) {
+        window.api.sendCommand({ cmd: 'set_setting', key: 'prevent_display_sleep', value: false })
+        message?.error?.('不息屏开启失败') || console.warn('preventSleepStart failed')
+      }
+    }
+  } else {
+    if (window.api.preventSleepStop) {
+      await window.api.preventSleepStop()
+    }
+  }
+}
+
+// 启动时同步设置到主进程（注册全部快捷键 + 不息屏状态）
+function syncP3SettingsToMain() {
+  if (!window.api || !settings.value) return
+  const s = settings.value
+  const actions = [
+    'toggle_prevent_sleep',
+    'quick_minimize',
+    'toggle_mimic',
+    'toggle_float',
+  ]
+  for (const a of actions) {
+    const acc = s[`shortcut_${a}`] || ''
+    if (acc && window.api.registerShortcut) {
+      window.api.registerShortcut(a, acc).catch(() => {})
+    }
+  }
+  if (s.prevent_display_sleep && window.api.preventSleepStart) {
+    window.api.preventSleepStart().catch(() => {})
+  }
+}
+
+// 监听主进程触发的快捷键事件（部分动作需要前端处理）
+function setupShortcutTriggeredListener() {
+  if (!window.api || !window.api.onShortcutTriggered) return
+  window.api.onShortcutTriggered((data) => {
+    const action = data?.action
+    if (action === 'toggle_prevent_sleep') {
+      // 切换不息屏开关
+      const next = !settings.value.prevent_display_sleep
+      updateSettings({ prevent_display_sleep: next })
+      handlePreventSleepChange(next)
+    } else if (action === 'toggle_float') {
+      // 切换悬浮窗（复用现有 float_visible 设置）
+      const next = !settings.value.float_visible
+      updateSettings({ float_visible: next })
+      if (next) {
+        window.api.sendCommand({ cmd: 'get_tasks' })  // 触发悬浮窗刷新
+      }
+    }
+  })
 }
 
 // ============================

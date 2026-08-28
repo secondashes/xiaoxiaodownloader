@@ -1261,9 +1261,135 @@
               清除缓存（缩略图 + 相册信息）
             </n-button>
           </div>
+
+          <!-- P3 设置功能 -->
+          <n-divider style="margin: 16px 0 8px" />
+          <div class="section-title">系统功能</div>
+
+          <!-- 不息屏开关 -->
+          <div class="setting-switch">
+            <div>
+              <div class="switch-label">不息屏模式</div>
+              <div class="switch-hint">开启后阻止系统进入休眠状态（下载时不息屏）</div>
+            </div>
+            <n-switch
+              :value="!!settings.prevent_display_sleep"
+              @update:value="v => handlePreventSleepToggle(v)"
+            />
+          </div>
+
+          <!-- 快捷键：切换不息屏 -->
+          <div class="shortcut-row">
+            <div class="shortcut-label">切换不息屏</div>
+            <div class="shortcut-current">{{ formatShortcut(settings.shortcut_toggle_prevent_sleep) }}</div>
+            <n-button size="tiny" quaternary @click="openShortcutRecorder('toggle_prevent_sleep')">
+              ⚙
+            </n-button>
+          </div>
+
+          <!-- 快捷键：快速缩小到托盘 -->
+          <div class="shortcut-row">
+            <div class="shortcut-label">快速缩小到托盘</div>
+            <div class="shortcut-current">{{ formatShortcut(settings.shortcut_quick_minimize) }}</div>
+            <n-button size="tiny" quaternary @click="openShortcutRecorder('quick_minimize')">
+              ⚙
+            </n-button>
+          </div>
+
+          <!-- 快捷键：切换拟态模式 -->
+          <div class="shortcut-row">
+            <div class="shortcut-label">切换拟态模式</div>
+            <div class="shortcut-current">{{ formatShortcut(settings.shortcut_toggle_mimic) }}</div>
+            <n-button size="tiny" quaternary @click="openShortcutRecorder('toggle_mimic')">
+              ⚙
+            </n-button>
+          </div>
+
+          <!-- 快捷键：切换悬浮窗 -->
+          <div class="shortcut-row">
+            <div class="shortcut-label">切换悬浮窗</div>
+            <div class="shortcut-current">{{ formatShortcut(settings.shortcut_toggle_float) }}</div>
+            <n-button size="tiny" quaternary @click="openShortcutRecorder('toggle_float')">
+              ⚙
+            </n-button>
+          </div>
+
+          <!-- 拟态模式 -->
+          <div class="setting-switch" style="margin-top: 12px">
+            <div>
+              <div class="switch-label">拟态模式</div>
+              <div class="switch-hint">开启后可用快捷键唤起"伪装面板"（上传 txt/word/pdf/图片 等），任务栏显示拟态面板，右下角后台运行，不显示悬浮框</div>
+            </div>
+            <n-switch
+              :value="!!settings.mimic_enabled"
+              @update:value="v => update('mimic_enabled', v)"
+            />
+          </div>
+          <div v-if="settings.mimic_enabled" class="setting-item">
+            <div class="setting-label">拟态面板文件</div>
+            <n-input-group>
+              <n-input
+                :value="settings.mimic_file_path || ''"
+                placeholder="未选择文件（点击右侧按钮选择 txt/word/pdf/图片 等）"
+                readonly
+                style="flex: 1"
+              />
+              <n-button @click="selectMimicFile" type="primary" ghost>选择</n-button>
+            </n-input-group>
+            <n-button size="small" block secondary style="margin-top: 6px" @click="enterMimicMode">
+              立即进入拟态模式
+            </n-button>
+          </div>
         </div>
       </n-scrollbar>
     </div>
+
+    <!-- 快捷键录入弹窗 -->
+    <n-modal
+      v-model:show="shortcutRecorder.show"
+      preset="card"
+      style="width: 420px; max-width: 92vw"
+      title="录入快捷键"
+      :mask-closable="false"
+    >
+      <div class="shortcut-recorder">
+        <div class="shortcut-recorder-action">{{ shortcutRecorder.label }}</div>
+        <div class="shortcut-recorder-current">
+          当前：<span class="shortcut-current-big">{{ formatShortcut(shortcutRecorder.current) || '未设置' }}</span>
+        </div>
+        <div class="shortcut-recorder-status" :class="{ recording: shortcutRecorder.recording }">
+          <span v-if="shortcutRecorder.recording">请按下快捷键...</span>
+          <span v-else-if="shortcutRecorder.candidate">已捕获：<strong>{{ formatShortcut(shortcutRecorder.candidate) }}</strong></span>
+          <span v-else>点击下方"开始录入"按钮</span>
+        </div>
+        <div class="shortcut-recorder-actions">
+          <n-button
+            size="small"
+            :type="shortcutRecorder.recording ? 'warning' : 'primary'"
+            @click="toggleRecording"
+          >
+            {{ shortcutRecorder.recording ? '停止录入' : '开始录入' }}
+          </n-button>
+          <n-button
+            size="small"
+            type="error"
+            quaternary
+            :disabled="!shortcutRecorder.current && !shortcutRecorder.candidate"
+            @click="clearShortcut"
+          >清空</n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :disabled="!shortcutRecorder.candidate"
+            @click="confirmShortcut"
+          >完成</n-button>
+        </div>
+        <div class="shortcut-recorder-hint">
+          支持组合键（Ctrl/Shift/Alt+字母/数字/F键）；组合键显示用空格分隔。<br>
+          示例：Ctrl + Shift + M
+        </div>
+      </div>
+    </n-modal>
 
     <!-- 站点使用帮助弹窗（各站点技巧，内容可选中复制 / 一键复制全部） -->
     <n-modal
@@ -1285,7 +1411,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 
 const props = defineProps({
@@ -1378,6 +1504,9 @@ const emit = defineEmits([
   'translate-free',        // 调免费翻译（参数：{text, from, to}；后端按 settings.translate_engine 选 Google/LibreTranslate/有道）
   // GitHub 仓库更新检查
   'check-github-update',   // 检查 GitHub 仓库 main 分支最新 commit
+  // P3 设置功能
+  'shortcut-change',        // 快捷键录入变更（参数：action, accelerator）
+  'prevent-sleep-change',   // 不息屏开关变更（参数：boolean）
 ])
 
 const message = useMessage()
@@ -1959,6 +2088,158 @@ function handleAddFollowTag() {
 
 function handleClearCache() {
   emit('clear-cache')
+}
+
+// ============================
+// P3 设置功能：快捷键录入 / 不息屏 / 拟态模式
+// ============================
+// 快捷键录入弹窗状态
+const shortcutRecorder = reactive({
+  show: false,
+  action: '',                          // toggle_prevent_sleep | quick_minimize | toggle_mimic | toggle_float
+  label: '',                           // 显示名
+  current: '',                         // 当前已保存的 accelerator（Electron "+" 格式）
+  candidate: '',                       // 本次录入捕获的 candidate
+  recording: false,                    // 是否在录入
+  keydownHandler: null,
+})
+const shortcutLabels = {
+  toggle_prevent_sleep: '切换不息屏',
+  quick_minimize: '快速缩小到托盘',
+  toggle_mimic: '切换拟态模式',
+  toggle_float: '切换悬浮窗',
+}
+// Electron accelerator 显示格式：Ctrl+Shift+M → "Ctrl + Shift + M"
+function formatShortcut(accelerator) {
+  if (!accelerator) return ''
+  return String(accelerator).split('+').map(s => s.trim()).filter(Boolean).join(' + ')
+}
+// KeyboardEvent → Electron accelerator 字符串
+function keyEventToAccelerator(e) {
+  const parts = []
+  if (e.ctrlKey) parts.push('Ctrl')
+  if (e.shiftKey) parts.push('Shift')
+  if (e.altKey) parts.push('Alt')
+  if (e.metaKey) parts.push('Super')
+  // 不让单独的修饰键作为快捷键
+  const code = e.code || ''
+  if (!code) return ''
+  let key = ''
+  if (/^Digit\dd?$/.test(code) || /^Digit[0-9]$/.test(code)) {
+    key = code.replace('Digit', '')
+  } else if (/^Key[A-Z]$/.test(code)) {
+    key = code.replace('Key', '')
+  } else if (/^F[1-9]\d?$/.test(code)) {
+    key = code
+  } else if (code === 'Space') {
+    key = 'Space'
+  } else if (code === 'Enter') {
+    key = 'Return'
+  } else if (code === 'Escape') {
+    return ''  // Esc 不作为快捷键
+  } else if (code === 'Backspace') {
+    key = 'Backspace'
+  } else if (code === 'Tab') {
+    key = 'Tab'
+  } else if (/^Arrow(Up|Down|Left|Right)$/.test(code)) {
+    key = code.replace('Arrow', '')
+  } else if (code.startsWith('Numpad')) {
+    key = 'Num' + code.replace('Numpad', '')
+  } else {
+    // 其他特殊键，用 key 名（小写转大写）
+    key = (e.key || '').toUpperCase()
+  }
+  if (!key) return ''
+  // 至少要有修饰键或非可打印字符（避免单字母触发）
+  if (parts.length === 0 && /^[A-Z0-9]$/.test(key)) return ''
+  parts.push(key)
+  return parts.join('+')
+}
+function openShortcutRecorder(action) {
+  shortcutRecorder.action = action
+  shortcutRecorder.label = shortcutLabels[action] || action
+  shortcutRecorder.current = props.settings[`shortcut_${action}`] || ''
+  shortcutRecorder.candidate = ''
+  shortcutRecorder.recording = false
+  shortcutRecorder.show = true
+}
+function toggleRecording() {
+  if (shortcutRecorder.recording) {
+    stopRecording()
+  } else {
+    startRecording()
+  }
+}
+function startRecording() {
+  shortcutRecorder.recording = true
+  shortcutRecorder.candidate = ''
+  // 用原生 keydown 监听器（Naive UI 内部拦截可能影响组合键）
+  if (shortcutRecorder.keydownHandler) {
+    document.removeEventListener('keydown', shortcutRecorder.keydownHandler, true)
+  }
+  shortcutRecorder.keydownHandler = (e) => {
+    // 不阻止修饰键的默认行为，避免影响输入
+    e.preventDefault()
+    e.stopPropagation()
+    const acc = keyEventToAccelerator(e)
+    if (acc) {
+      shortcutRecorder.candidate = acc
+      // 捕获后自动停止录入
+      stopRecording()
+    }
+  }
+  document.addEventListener('keydown', shortcutRecorder.keydownHandler, true)
+}
+function stopRecording() {
+  shortcutRecorder.recording = false
+  if (shortcutRecorder.keydownHandler) {
+    document.removeEventListener('keydown', shortcutRecorder.keydownHandler, true)
+    shortcutRecorder.keydownHandler = null
+  }
+}
+function clearShortcut() {
+  stopRecording()
+  shortcutRecorder.candidate = ''
+  // 通知父组件清空
+  emit('shortcut-change', shortcutRecorder.action, '')
+  shortcutRecorder.show = false
+}
+function confirmShortcut() {
+  const acc = shortcutRecorder.candidate
+  if (!acc) return
+  emit('shortcut-change', shortcutRecorder.action, acc)
+  shortcutRecorder.show = false
+}
+// 关闭弹窗时停止录入
+watch(() => shortcutRecorder.show, (v) => {
+  if (!v) stopRecording()
+})
+
+// 不息屏开关：保存设置 + 通知主进程
+function handlePreventSleepToggle(enabled) {
+  update('prevent_display_sleep', enabled)
+  emit('prevent-sleep-change', enabled)
+}
+
+// 拟态模式：选择文件
+async function selectMimicFile() {
+  if (!window.api || !window.api.selectMimicFile) {
+    message.warning('当前版本不支持拟态文件选择')
+    return
+  }
+  const r = await window.api.selectMimicFile()
+  if (r && r.ok) {
+    update('mimic_file_path', r.path)
+  }
+}
+// 拟态模式：立即进入
+function enterMimicMode() {
+  if (!window.api || !window.api.enterMimicMode) {
+    message.warning('当前版本不支持拟态模式')
+    return
+  }
+  const filePath = props.settings.mimic_file_path || ''
+  window.api.enterMimicMode(filePath || undefined)
 }
 
 // 站点显示名
@@ -2638,6 +2919,103 @@ html.light-mode .github-release-body {
   font-size: 11px;
   color: #7f7f7f;
   margin-top: 2px;
+}
+
+/* P3 设置功能：快捷键行 + 录入弹窗 */
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  margin: 6px 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  gap: 8px;
+}
+.shortcut-row:hover {
+  background: rgba(99, 226, 183, 0.05);
+}
+.shortcut-label {
+  font-size: 12px;
+  color: #d0d0d6;
+  flex: 1;
+}
+.shortcut-current {
+  font-size: 11px;
+  color: #8b8b93;
+  font-family: 'Consolas', 'Monaco', monospace;
+  min-width: 80px;
+  text-align: right;
+}
+.shortcut-recorder {
+  text-align: center;
+}
+.shortcut-recorder-action {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e6;
+  margin-bottom: 8px;
+}
+.shortcut-recorder-current {
+  font-size: 12px;
+  color: #8b8b93;
+  margin-bottom: 16px;
+}
+.shortcut-current-big {
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: #63e2b7;
+}
+.shortcut-recorder-status {
+  font-size: 13px;
+  color: #d0d0d6;
+  padding: 20px 8px;
+  margin-bottom: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+.shortcut-recorder-status.recording {
+  border-color: #63e2b7;
+  background: rgba(99, 226, 183, 0.06);
+  color: #63e2b7;
+}
+.shortcut-recorder-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.shortcut-recorder-hint {
+  font-size: 11px;
+  color: #7f7f7f;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+html.light-mode .shortcut-row {
+  background: rgba(0, 0, 0, 0.03);
+}
+html.light-mode .shortcut-row:hover {
+  background: rgba(99, 226, 183, 0.08);
+}
+html.light-mode .shortcut-label {
+  color: #1d1d1f;
+}
+html.light-mode .shortcut-current {
+  color: #6e6e73;
+}
+html.light-mode .shortcut-recorder-action {
+  color: #1d1d1f;
+}
+html.light-mode .shortcut-recorder-current {
+  color: #6e6e73;
+}
+html.light-mode .shortcut-recorder-status {
+  color: #1d1d1f;
+  border-color: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.03);
+}
+html.light-mode .shortcut-recorder-hint {
+  color: #6e6e73;
 }
 
 .backend-status {
