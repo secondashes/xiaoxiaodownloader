@@ -84,11 +84,12 @@
         size="tiny"
         class="auto-translate-btn"
         :class="{ on: autoTranslateMode }"
-        :loading="autoTranslating"
-        :title="autoTranslateMode ? '翻译已开启（后续内容自动翻译），点击停止并恢复原文' : '点击开始翻译当前页面全部内容（后续内容自动翻译）'"
+        :title="autoTranslateMode ? '翻译进行中/已开启，点击停止并恢复原文' : '点击开始翻译当前页面全部内容（后续内容自动翻译）'"
         @click="$emit('toggle-auto-translate-mode')"
       >
-        <span v-if="!autoTranslating" :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">🌐</span>
+        <!-- 自绘转圈（不用 :loading，避免按钮被禁用无法点击停止） -->
+        <span v-if="autoTranslating" class="tr-spinner"></span>
+        <span v-else :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">🌐</span>
       </n-button>
     </div>
 
@@ -5097,6 +5098,20 @@ defineExpose({
 }
 .auto-translate-btn.on {
   border-color: #63e2b7;
+}
+/* 翻译进行中转圈（自绘，按钮保持可点击以停止翻译） */
+.tr-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(99, 226, 183, 0.25);
+  border-top-color: #63e2b7;
+  border-radius: 50%;
+  animation: tr-spin 0.8s linear infinite;
+  vertical-align: -2px;
+}
+@keyframes tr-spin {
+  to { transform: rotate(360deg); }
 }
 
 .site-switch {

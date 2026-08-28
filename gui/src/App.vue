@@ -1205,9 +1205,9 @@ function handlePythonEvent(event) {
       if (window.api && window.api.setFloatVisible) {
         window.api.setFloatVisible(floatVisible.value)
       }
-      // 全局自动翻译：从设置恢复目标语言 + 持续自动翻译开关
+      // 全局自动翻译：只恢复目标语言；开关每次启动默认关闭（不持久化，避免"默认自动开启"）
       if (settings.auto_translate_to) autoTranslateTo.value = settings.auto_translate_to
-      autoTranslateMode.value = !!settings.auto_translate_mode
+      autoTranslateMode.value = false
       // P3：设置加载完成后，把已保存的快捷键注册到主进程 + 应用不息屏状态
       syncP3SettingsToMain()
       break
@@ -2100,9 +2100,17 @@ function handlePythonEvent(event) {
     case 'translate_batch_result': {
       // 全局自动翻译：批量译文回填到 translatedTitles 映射
       autoTranslating.value = false
+      // 结果到达：清掉看门狗
+      if (translateWatchdog) {
+        clearTimeout(translateWatchdog)
+        translateWatchdog = null
+      }
       // 用发送时记录的标题列表对位（batch_id 关联），避免期间列表变化导致错位
-      const titles = translateBatchPending.get(event.batch_id) || collectCurrentTitles()
+      const pending = translateBatchPending.get(event.batch_id)
+      const titles = (pending && pending.titles) || collectCurrentTitles()
       translateBatchPending.delete(event.batch_id)
+      // 代际校验：用户已关闭翻译开关（gen 已 +1）→ 迟到结果丢弃，不再回填
+      if (pending && pending.gen !== translateBatchGen) break
       if (!event.ok) {
         message.error(event.error || '翻译失败（Google 免费端点不可达，可在左侧翻译面板配置代理或更换引擎）')
         break
@@ -2846,17 +2854,28 @@ function collectCurrentTitles() {
 
 // 翻译开关（右侧缩小版 🌐 按钮）：
 // 开 → 立即翻译当前页面全部内容，后续新增内容自动翻译（转圈动效表示进行中）
-// 关 → 停止翻译，恢复原文
+// 关 → 立即停止转圈并恢复原文（未完成的翻译结果到达后丢弃）
 function handleToggleAutoTranslateMode() {
   autoTranslateMode.value = !autoTranslateMode.value
-  settings.auto_translate_mode = autoTranslateMode.value
-  saveSettings()
+  // 开关不持久化：每次启动默认关闭（用户手动点击才开启）
   if (autoTranslateMode.value) {
     handleAutoTranslate(autoTranslateTo.value)
   } else {
+    // 关闭：立即停止转圈 + 清掉看门狗 + 恢复原文
+    autoTranslating.value = false
+    if (translateWatchdog) {
+      clearTimeout(translateWatchdog)
+      translateWatchdog = null
+    }
+    translateBatchGen += 1  // 让在途的翻译结果失效（关闭后不再回填）
     translatedTitles.value = {}
   }
 }
+
+// 看门狗：批量翻译发出后 45s 未返回强制停止转圈（防"一直转圈"）
+let translateWatchdog = null
+// 代际计数：关闭开关/重新开启时 +1，旧请求的迟到结果按代际丢弃
+let translateBatchGen = 0
 
 // 翻译当前页面所有标题（已翻译过的自动跳过，只翻译新增内容）
 function handleAutoTranslate(toLang) {
@@ -2868,7 +2887,16 @@ function handleAutoTranslate(toLang) {
   if (!titles.length) return
   autoTranslating.value = true
   const batchId = `auto_${Date.now()}`
-  translateBatchPending.set(batchId, titles)
+  // 45s 看门狗：后端快速失败策略下最长 ~40s（Google 3×6s + MyMemory 兜底），超时即停转圈
+  if (translateWatchdog) clearTimeout(translateWatchdog)
+  translateWatchdog = setTimeout(() => {
+    if (autoTranslating.value) {
+      autoTranslating.value = false
+      message.warning('翻译超时已停止（Google 端点不可达且兜底未响应）。可在左侧翻译面板配置代理后重试')
+    }
+    translateWatchdog = null
+  }, 45000)
+  translateBatchPending.set(batchId, { titles, gen: translateBatchGen })
   window.api.sendCommand({
     cmd: 'translate_batch',
     texts: titles,

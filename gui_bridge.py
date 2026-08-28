@@ -11876,7 +11876,7 @@ def translate_free(text: str, from_lang: str = "auto", to_lang: str = "zh-CN") -
                     "Accept": "application/json, text/plain, */*",
                 }
                 resp = requests.get(base_url, params=params, headers=headers,
-                                    proxies=proxies, timeout=15)
+                                    proxies=proxies, timeout=8)
                 data = resp.json()
                 # 响应结构：[[["译文","原文",None,None,1],...], null, "检测到的源语言", ...]
                 if isinstance(data, list) and data and isinstance(data[0], list):
@@ -11910,7 +11910,7 @@ def translate_free(text: str, from_lang: str = "auto", to_lang: str = "zh-CN") -
             "https://api.mymemory.translated.net/get",
             params={"q": text[:500], "langpair": f"{src}|{tl}"},
             headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15,
+            timeout=8,
         )
         data = resp.json()
         tr = (data.get("responseData") or {}).get("translatedText") or ""
@@ -11996,63 +11996,80 @@ def translate_batch(texts: list, from_lang: str = "auto", to_lang: str = "zh-CN"
     batch_total = 0   # 总批数
     batch_failed = 0  # 失败批数
     last_err = ""
+    # 快速失败策略：最多 3 次尝试 × 6s 超时（代理优先 googleapis，再直连 googleapis，
+    # 再代理 translate.google.com）——避免"一直转圈"（旧版 3域名×2代理×20s 最长2分钟+）
+    proxy_attempts = _translate_proxy_attempts()
+    attempt_list = []
+    seen = set()
+    for base_url in GOOGLE_TRANSLATE_URLS[:2]:
+        for proxies in proxy_attempts:
+            key = (base_url, id(proxies) if proxies else None)
+            if key in seen:
+                continue
+            seen.add(key)
+            attempt_list.append((base_url, proxies))
+        if len(attempt_list) >= 3:
+            break
+    attempt_list = attempt_list[:3]
     for start in range(0, len(non_empty_idx), BATCH):
         chunk_idx = non_empty_idx[start:start + BATCH]
         chunk_texts = [str(texts[i]) for i in chunk_idx]
         batch_total += 1
         chunk_ok = False
-        # 多域名 × 先代理后直连，自动回退（国内 Google 必须代理或走 googleapis 直连）
-        for base_url in GOOGLE_TRANSLATE_URLS:
-            if chunk_ok:
-                break
-            for proxies in _translate_proxy_attempts():
-                try:
-                    # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
-                    params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                        "Accept": "application/json, text/plain, */*",
-                    }
-                    # 用 GET 多 q 参数（requests 会自动重复 q）
-                    q_params = [("q", t) for t in chunk_texts]
-                    # 手动拼 URL（requests params dict 不支持重复 key）
-                    from urllib.parse import urlencode
-                    url = base_url + "?" + urlencode(params) + "&" + urlencode(q_params)
-                    resp = requests.get(url, headers=headers, proxies=proxies, timeout=20)
-                    data = resp.json()
-                    if isinstance(data, list) and data and isinstance(data[0], list):
-                        # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
-                        got = 0
-                        for i, seg in enumerate(data[0]):
-                            if i < len(chunk_idx) and seg and seg[0]:
-                                translations[chunk_idx[i]] = seg[0]
-                                got += 1
-                        if got > 0:
-                            chunk_ok = True
-                            break
-                    last_err = "Google 翻译返回格式异常"
-                except Exception as exc:
-                    last_err = str(exc)
-                    continue
+        for base_url, proxies in attempt_list:
+            try:
+                # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
+                params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                }
+                # 用 GET 多 q 参数（requests 会自动重复 q）
+                q_params = [("q", t) for t in chunk_texts]
+                # 手动拼 URL（requests params dict 不支持重复 key）
+                from urllib.parse import urlencode
+                url = base_url + "?" + urlencode(params) + "&" + urlencode(q_params)
+                resp = requests.get(url, headers=headers, proxies=proxies, timeout=6)
+                data = resp.json()
+                if isinstance(data, list) and data and isinstance(data[0], list):
+                    # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
+                    got = 0
+                    for i, seg in enumerate(data[0]):
+                        if i < len(chunk_idx) and seg and seg[0]:
+                            translations[chunk_idx[i]] = seg[0]
+                            got += 1
+                    if got > 0:
+                        chunk_ok = True
+                        break
+                last_err = "Google 翻译返回格式异常"
+            except Exception as exc:
+                last_err = str(exc)
+                continue
         if not chunk_ok:
-            # MyMemory 兜底：逐条翻译该失败批（免配置；0.3s 间隔防限流）
+            # MyMemory 兜底：逐条翻译（限量 20 条防转圈；连续 3 条失败=已限流，中止）
             src = "en" if sl == "auto" else sl
             mm_got = 0
-            for i in chunk_idx:
+            mm_consecutive_fail = 0
+            for i in chunk_idx[:20]:
                 try:
                     r = requests.get(
                         "https://api.mymemory.translated.net/get",
                         params={"q": str(texts[i])[:500], "langpair": f"{src}|{tl}"},
-                        headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
+                        headers={"User-Agent": "Mozilla/5.0"}, timeout=5,
                     )
                     d = r.json()
                     tr = (d.get("responseData") or {}).get("translatedText") or ""
                     if tr and "MYMEMORY WARNING" not in tr:
                         translations[i] = tr
                         mm_got += 1
-                    time.sleep(0.3)
+                        mm_consecutive_fail = 0
+                    else:
+                        mm_consecutive_fail += 1
+                    time.sleep(0.15)
                 except Exception:
-                    pass
+                    mm_consecutive_fail += 1
+                if mm_consecutive_fail >= 3:
+                    break  # MyMemory 已限流/不可用，不再浪费时间
             if mm_got > 0:
                 chunk_ok = True
         if not chunk_ok:
