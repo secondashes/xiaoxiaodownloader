@@ -1061,9 +1061,9 @@ function handlePythonEvent(event) {
             // 自动提交下载任务（批量下载=解析+下载一步到位，无需手动再点下载）
             const selected = fileList.value.filter(it => it.selected)
             if (selected.length) {
-              addLog('系统', `自动开始下载 ${selected.length} 个文件`)
-              message.success(`解析完成，自动开始下载 ${selected.length} 个文件`)
-              handleDownload(selected)
+              addLog('系统', `后台批量解析完成，自动开始下载 ${selected.length} 个文件`)
+              message.success(`批量解析完成，已自动开始下载 ${selected.length} 个文件（失败项会在任务结束后生成清单）`)
+              handleDownload(selected, { fromBatch: true })
             } else {
               message.warning('批量解析完成，但没有可下载的文件')
             }
@@ -1085,6 +1085,22 @@ function handlePythonEvent(event) {
     case 'inspect_error':
       inspecting.value = false
       addLog('错误', event.message)
+      // 后台批量解析中某个画廊失败：同样递减计数，避免批量状态卡死
+      if (exBatchDownloading.value && exBatchPending.value > 0) {
+        exBatchPending.value -= 1
+        message.error(`批量解析中一个画廊失败: ${event.message}`)
+        if (exBatchPending.value === 0) {
+          exBatchDownloading.value = false
+          const selected = fileList.value.filter(it => it.selected)
+          if (selected.length) {
+            addLog('系统', `后台批量解析完成（部分失败），自动开始下载 ${selected.length} 个文件`)
+            message.info(`部分画廊解析失败，已收集 ${selected.length} 个文件自动下载`)
+            handleDownload(selected, { fromBatch: true })
+          } else {
+            message.warning('批量解析全部失败，没有可下载的文件')
+          }
+        }
+      }
       break
 
     case 'search_start':
@@ -2531,7 +2547,7 @@ function handleInspect() {
   })
 }
 
-async function handleDownload(selectedItems) {
+async function handleDownload(selectedItems, opts = {}) {
   console.log('[App] 点击下载, 选中', selectedItems.length, '个文件')
   if (!window.api) {
     console.error('[App] window.api 未定义！')
@@ -2570,8 +2586,10 @@ async function handleDownload(selectedItems) {
     url: url.value.trim(),
     items: plainItems,
     options,
-    album_name: albumInfo.album_name || '',
-    album_id: albumInfo.album_id || undefined,
+    // 批量自动提交（opts.fromBatch）时 album_name 传空：让后端从文件列表取画师名作目录，
+    // 避免多画廊混合任务顶层目录错用"最后一个解析的画廊标题"
+    album_name: opts.fromBatch ? '' : (albumInfo.album_name || ''),
+    album_id: opts.fromBatch ? undefined : (albumInfo.album_id || undefined),
   })
 }
 
@@ -3008,9 +3026,9 @@ async function confirmExBatchFolder(useFolder) {
     return
   }
 
-  // 进入文件列表视图（如果还没进入）
-  cameFromSearch.value = true
-  // 清空 fileList 并发解析多个画廊
+  // 后台批量：不切换视图（用户留在搜索结果页可继续浏览/翻页），解析结果静默收集进 fileList
+  cameFromSearch.value = false
+  // 清空 fileList（后台解析模式，避免与旧文件列表混在一起）
   fileList.value = []
   exGalleryDetail.value = null
   exBatchDownloading.value = true
@@ -3019,7 +3037,7 @@ async function confirmExBatchFolder(useFolder) {
   const tip = exBatchParentFolder.value
     ? `母文件夹「${exBatchParentFolder.value}」，`
     : ''
-  message.info(`开始批量解析 ${exBatchPending.value} 个画廊，${tip}请稍候（图片将逐个加入文件列表）`)
+  message.info(`后台批量解析 ${exBatchPending.value} 个画廊，${tip}完成后自动下载（可继续浏览其他页面）`)
   const options = JSON.parse(JSON.stringify(settings))
   // 顺序解析（并发会触发 EX 限流 509）；解析结果会通过 inspect_complete 累加进 fileList
   for (const u of urls) {
@@ -3029,8 +3047,8 @@ async function confirmExBatchFolder(useFolder) {
     // 间隔 1.5s 防 509
     await new Promise(r => setTimeout(r, 1500))
   }
-  // 注：exBatchPending 异步递减；全部完成后 inspect_complete handler 内会关闭 exBatchDownloading
-  addLog('系统', `批量解析请求已派发（${exBatchPending.value} 个画廊待返回）`)
+  // 注：exBatchPending 异步递减；全部完成后 inspect_complete handler 内自动提交下载任务
+  addLog('系统', `后台批量解析请求已派发（${exBatchPending.value} 个画廊待返回）`)
 }
 
 function handleExCloseDetail() {

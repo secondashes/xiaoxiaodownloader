@@ -1,6 +1,6 @@
 {
   "name": "xiaoxiao-downloader",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "小小下载器（BunkrDownloader GUI）",
   "author": "xiaoxiao",
   "main": "electron/main.cjs",

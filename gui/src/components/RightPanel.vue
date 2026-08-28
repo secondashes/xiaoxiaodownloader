@@ -2597,12 +2597,13 @@
             </tbody>
           </table>
 
-          <!-- 缩略图模式（复刻 EX Thumbnail：网格缩略图 + 标题） -->
+          <!-- 缩略图模式（复刻 EX Thumbnail：网格缩略图 + 标题 + 勾选批量下载） -->
           <div v-else class="ex-thumb-grid">
             <div
               v-for="item in searchResults"
               :key="item.album_url"
               class="ex-thumb-card"
+              :class="{ 'ex-thumb-card-checked': exChecked.includes(item.album_url) }"
               :title="item.album_name"
               @click="$emit('ex-open-gallery', item.album_url)"
             >
@@ -2615,6 +2616,15 @@
                   :alt="item.album_name"
                 />
                 <span v-else class="ex-thumb-empty">EX</span>
+                <!-- 多选勾选框（与列表模式共用 exChecked，勾选后可批量下载） -->
+                <label class="ex-thumb-check" title="勾选后可批量下载" @click.stop>
+                  <input
+                    type="checkbox"
+                    class="ex-check"
+                    :value="item.album_url"
+                    v-model="exChecked"
+                  />
+                </label>
               </div>
               <div class="ex-thumb-card-title">{{ trTitle(item.album_name) }}</div>
               <button
@@ -5780,6 +5790,32 @@ html.light-mode .site-chip.on {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+/* 缩略图模式多选勾选框（左上角，勾选后卡片高亮） */
+.ex-thumb-check {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+.ex-thumb-check .ex-check {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+.ex-thumb-card-checked {
+  outline: 2px solid #3889ff;
+  outline-offset: -2px;
 }
 
 .ex-thumb-card-img img {

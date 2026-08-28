@@ -10026,6 +10026,9 @@ class DownloadManager:
             # 更新增量下载状态（记录已下载文件，下次解析时标记新文件）
             _update_download_state(task.get("album_id") or None, files)
 
+            # 失败清单：任务内剩余文件全部结束后，把失败项（文件名 + 网页链接）写入 txt 供手动下载
+            self._write_failure_report(task, files, album_path, task_id)
+
             # 收尾状态
             if task["status"] not in ("paused", "cancelled", "failed"):
                 task["status"] = "completed"
@@ -10047,6 +10050,44 @@ class DownloadManager:
             self.emit_snapshot(immediate=True)
         finally:
             self._runners.pop(task_id, None)
+
+    def _write_failure_report(
+        self, task: dict, files: list, album_path: str, task_id: str,
+    ) -> None:
+        """任务收尾：汇总失败文件生成 txt 清单（文件名 + 网页链接），供用户手动下载。"""
+        try:
+            failed_items = [f for f in files if f.get("status") == "failed"]
+            if not failed_items:
+                return
+            # 失败原因归类（error 字段可能由各站下载函数写入）
+            lines = [
+                "# 下载失败清单",
+                f"# 任务: {task.get('album') or task.get('url', '')}",
+                f"# 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"# 失败数: {len(failed_items)} / {len(files)}",
+                "",
+                "格式: 文件名 | 网页链接 | 错误信息",
+                "-" * 60,
+            ]
+            for f in failed_items:
+                name = f.get("filename") or f.get("_final_name") or "（未知文件名）"
+                link = f.get("item_page") or task.get("url", "")
+                err = (f.get("error") or "").strip() or "下载失败（网络/解析错误）"
+                lines.append(f"{name} | {link} | {err}")
+            lines += ["-" * 60, "请复制链接到浏览器手动下载。"]
+            report_name = f"下载失败清单_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            report_path = Path(album_path) / report_name
+            # album_path 一定已存在（build_album_directory 创建）；防御性再建一次
+            Path(album_path).mkdir(parents=True, exist_ok=True)
+            report_path.write_text("\n".join(lines), encoding="utf-8-sig")  # BOM 让记事本正确识别 UTF-8
+            logging.info("已生成失败清单: %s（%d 个失败文件）", report_path, len(failed_items))
+            emit({
+                "event": "log",
+                "type": "下载",
+                "message": f"本任务有 {len(failed_items)} 个文件下载失败，已生成清单: {report_name}",
+            })
+        except Exception as exc:
+            logging.exception("生成失败清单出错: %s", task_id)
 
     async def _download_one_file(
         self,
