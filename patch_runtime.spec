@@ -14,9 +14,9 @@ a = Analysis(
     pathex=[os.path.abspath('.')],
     binaries=[],
     datas=[
-        # 内嵌本次全部改动文件：update/ 整体打包到 _MEIPASS/update/
-        # 运行时遍历 update/ → 复制到本体目录同名相对路径
-        ('update', 'update'),
+        # 内嵌本次全部改动文件：bugfile/ 整体打包到 _MEIPASS/update/（patch_runtime.py 遍历 update/）
+        # 注：update/ 文件夹方案已废弃，bugfile/ 是新的统一改动暂存目录
+        ('bugfile', 'update'),
     ],
     hiddenimports=[
         # Tkinter GUI（PyInstaller 默认会自动检测，但显式声明更稳妥）
