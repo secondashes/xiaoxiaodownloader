@@ -2487,9 +2487,9 @@
         />
       </div>
 
-      <!-- 搜索结果视图 -->
+      <!-- 搜索结果视图（解析中让位给"解析中"视图：点击后立即切换 + 显示加载态） -->
       <n-scrollbar
-        v-else-if="searchResults.length > 0"
+        v-else-if="searchResults.length > 0 && !inspecting"
         class="search-results"
         trigger="none"
         :on-scroll="handleScroll"
@@ -3072,6 +3072,19 @@
         </div>
       </n-scrollbar>
 
+      <!-- 解析中/搜索中视图（点击后立即切换到此处，明确反馈已响应） -->
+      <div v-else-if="inspecting || searching" class="inspect-loading-view">
+        <n-spin size="large" />
+        <div class="inspect-loading-title">{{ searching ? '正在搜索...' : '正在解析文件列表...' }}</div>
+        <div class="inspect-loading-sub">
+          {{ searching
+            ? '正在请求源站，请稍候'
+            : (inspectProgress.total > 0
+              ? `已解析 ${inspectProgress.current} / ${inspectProgress.total} 项`
+              : '正在连接源站，首次解析可能需要几秒钟') }}
+        </div>
+      </div>
+
       <!-- 空状态 -->
       <div v-else-if="!inspecting" class="empty-state">
         <div class="empty-icon">🔍</div>
@@ -3323,9 +3336,22 @@
             <span class="preview-volume-text">{{ previewVolumePercent }}%</span>
           </div>
         </div>
-        <!-- 图片预览 -->
+        <!-- 图片预览（加载中显示 spinner，避免大图白屏卡顿感） -->
         <div v-else class="media-preview-image" @click="previewNav(1)">
-          <img :src="previewSrc" referrerpolicy="no-referrer" alt="" />
+          <n-spin v-if="previewSrc && !previewImageLoaded && !previewImageFailed" size="large" class="media-preview-img-loading" />
+          <img
+            v-if="previewSrc && !previewImageFailed"
+            v-show="previewImageLoaded"
+            :src="previewSrc"
+            referrerpolicy="no-referrer"
+            decoding="async"
+            alt=""
+            @load="previewImageLoaded = true"
+            @error="previewImageFailed = true"
+          />
+          <div v-if="previewImageFailed" class="media-preview-tip media-preview-err">
+            图片加载失败（可能被源站防盗链拦截），请直接下载后查看
+          </div>
         </div>
         <!-- 底部信息 + 导航 -->
         <div class="media-preview-footer">
@@ -4732,6 +4758,13 @@ const previewSrc = computed(() => {
   return it.thumbnail || ''
 })
 const previewIsVideo = computed(() => previewItem.value && isVideoItem(previewItem.value))
+// 图片预览加载态：切换图片时复位，加载完成/失败前显示 spinner（大图不再白屏无反馈）
+const previewImageLoaded = ref(false)
+const previewImageFailed = ref(false)
+watch(previewSrc, () => {
+  previewImageLoaded.value = false
+  previewImageFailed.value = false
+})
 const previewLoading = computed(() => {
   const it = previewItem.value
   return !!it && isVideoItem(it) && !it.media_url && !it.media_resolve_failed
@@ -7021,6 +7054,35 @@ html.light-mode .or-group-chip:hover {
 }
 
 /* ============ 空状态 ============ */
+/* 解析中视图：点击后立即切换到此处的明确加载反馈 */
+.inspect-loading-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #7f7f7f;
+}
+
+.inspect-loading-title {
+  font-size: 15px;
+  color: #d0d0d8;
+}
+
+.inspect-loading-sub {
+  font-size: 12px;
+  color: #6f6f78;
+}
+
+/* 点击反馈：卡片/行按下时立即有视觉响应（消除"不知道点没点上"的感觉） */
+.ex-tr:active,
+.search-card:active {
+  transform: scale(0.985);
+  transition: transform 0.08s ease;
+  filter: brightness(1.15);
+}
+
 .empty-state {
   flex: 1;
   display: flex;
@@ -7236,6 +7298,7 @@ html.light-mode .preview-volume-text {
 }
 
 .media-preview-image {
+  position: relative;  /* 供加载 spinner 绝对定位居中 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -7245,6 +7308,14 @@ html.light-mode .preview-volume-text {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 6px;
   overflow: hidden;
+}
+
+/* 图片加载中 spinner 居中 */
+.media-preview-img-loading {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .media-preview-image img {

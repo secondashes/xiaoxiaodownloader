@@ -117,7 +117,8 @@ THRESHOLDS = [
 LARGE_FILE_CHUNK_SIZE = 16 * MB
 
 # Minimum file size required to trigger a parallel chunked download.
-MIN_PARALLEL_SIZE = 64 * MB
+# 8MB：图片/短视频也走多线程分段（IDM/迅雷式），小文件保持单连接避免开销。
+MIN_PARALLEL_SIZE = 8 * MB
 
 # ============================
 # Work-stealing unit sizing

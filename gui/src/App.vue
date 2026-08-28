@@ -532,6 +532,7 @@ watchEffect(() => {
 const url = ref('')
 const backendReady = ref(false)
 const inspecting = ref(false)
+let inspectWatchdog = null  // 解析看门狗：后端长时间无响应时解除 loading
 const inspectProgress = reactive({ current: 0, total: 0 })
 const albumInfo = reactive({ album_name: '', album_id: '', is_album: false })
 const fileList = ref([])
@@ -1031,6 +1032,7 @@ function handlePythonEvent(event) {
         addLog('解析', `后台解析: ${event.url}`)
         break
       }
+      clearTimeout(inspectWatchdog)  // 后端已响应，解除点击时的看门狗
       inspecting.value = true
       fileList.value = []
       inspectProgress.current = 0
@@ -1044,6 +1046,7 @@ function handlePythonEvent(event) {
       break
 
     case 'inspect_complete':
+      clearTimeout(inspectWatchdog)
       inspecting.value = false
       albumInfo.album_name = event.album_name
       albumInfo.album_id = event.album_id
@@ -1096,6 +1099,7 @@ function handlePythonEvent(event) {
       break
 
     case 'inspect_error':
+      clearTimeout(inspectWatchdog)
       inspecting.value = false
       addLog('错误', event.message)
       // 后台批量解析中某个画廊失败：同样递减计数，避免批量状态卡死
@@ -2547,6 +2551,22 @@ function openSearchResult(item) {
   handleInspect()
 }
 
+// 解析反馈：点击瞬间立即进入"解析中"（乐观更新，不等后端 inspect_start 事件），
+// 并挂 120s 看门狗防止后端无响应导致 loading 卡死
+function beginInspectFeedback() {
+  inspecting.value = true
+  inspectProgress.current = 0
+  inspectProgress.total = 0
+  clearTimeout(inspectWatchdog)
+  inspectWatchdog = setTimeout(() => {
+    if (inspecting.value) {
+      inspecting.value = false
+      addLog('错误', '解析超时（后端 120 秒无响应），请检查网络或代理后重试')
+      message.error('解析超时：后端长时间无响应，请检查网络/代理后重试')
+    }
+  }, 120000)
+}
+
 function handleInspect() {
   console.log('[App] 点击解析, url =', url.value)
   if (!url.value.trim()) return
@@ -2556,6 +2576,7 @@ function handleInspect() {
     return
   }
   fileList.value = []
+  beginInspectFeedback()
   // URL 解析也标记来自搜索视图（文件列表显示"返回"按钮，可清空文件列表回主页）
   cameFromSearch.value = true
   // 用户主动解析 → 解锁批量收集的视图锁定（显示文件列表）
@@ -3061,6 +3082,7 @@ function handleExOpenGallery(galleryUrl) {
   }
   // 2) 自动解析全部图片直链，进入文件列表视图（带批量下载）
   fileList.value = []
+  beginInspectFeedback()  // 点击瞬间立即显示"解析中"，不再无反馈
   // 解锁批量视图锁定（批量已结束：单个画廊解析正常显示文件列表）
   batchFileCollected.value = false
   const options = JSON.parse(JSON.stringify(settings))

@@ -903,7 +903,7 @@
 
           <!-- 并发连接数 -->
           <div class="setting-item">
-            <div class="setting-label">并发连接数</div>
+            <div class="setting-label">下载线程数（每文件多线程分段，类似 IDM/迅雷）</div>
             <n-input-number
               :value="settings.connections"
               @update:value="v => update('connections', v)"

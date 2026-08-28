@@ -94,7 +94,12 @@ def detect_range_support(
     url: str,
     headers: dict[str, str],
 ) -> tuple[bool, int]:
-    """Send a HEAD request to detect Range support and retrieve the file size."""
+    """Detect Range support and retrieve the file size.
+
+    Many CDNs do not return Accept-Ranges on HEAD (or reject HEAD outright),
+    so when HEAD is inconclusive we probe with a 1-byte GET Range request:
+    HTTP 206 + Content-Range confirms support and reveals the total size.
+    """
     try:
         response = requests.head(url, headers=headers, timeout=10)
         response.raise_for_status()
@@ -102,9 +107,36 @@ def detect_range_support(
         content_length = int(response.headers.get("Content-Length", -1))
 
     except (RequestException, ValueError):
-        return False, -1
+        supports_range, content_length = False, -1
 
-    return supports_range, content_length
+    if supports_range and content_length > 0:
+        return True, content_length
+
+    # HEAD 不可靠：用 GET Range: bytes=0-0 实测（很多 CDN 只在 GET 上支持 Range）
+    try:
+        probe_headers = dict(headers)
+        probe_headers["Range"] = "bytes=0-0"
+        response = requests.get(url, headers=probe_headers, timeout=10, stream=True)
+        try:
+            response.raise_for_status()
+            if response.status_code == 206:
+                # Content-Range: bytes 0-0/12345
+                content_range = response.headers.get("Content-Range", "")
+                total = -1
+                if "/" in content_range:
+                    try:
+                        total = int(content_range.rsplit("/", 1)[1])
+                    except ValueError:
+                        total = -1
+                return True, total
+            # 200 = 服务器忽略 Range，不支持
+            if content_length <= 0:
+                content_length = int(response.headers.get("Content-Length", -1))
+            return False, content_length
+        finally:
+            response.close()
+    except (RequestException, ValueError):
+        return False, content_length
 
 
 def should_use_parallel_download(

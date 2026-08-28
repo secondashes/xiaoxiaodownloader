@@ -11794,7 +11794,7 @@ DEFAULT_SETTINGS = {
     "manual_rename": False,
     # 界面主题：dark=夜间 / light=日间
     "theme": "dark",
-    "connections": 4,
+    "connections": 8,
     "concurrent_files": 2,
     "rate_limit": None,
     "max_retries": 5,
