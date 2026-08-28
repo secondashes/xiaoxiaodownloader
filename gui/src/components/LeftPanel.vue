@@ -458,11 +458,11 @@
           </svg>
         </n-icon>
       </button>
-      <!-- 翻译（占位：谷歌/Edge 插件翻译全部网页内容，暂未开放） -->
+      <!-- 翻译（有道智云 API） -->
       <button
         class="round-btn"
         :class="{ 'round-btn-active': activePanel === 'translate' }"
-        title="翻译（谷歌/Edge 插件翻译全部网页内容，开发中）"
+        title="翻译（有道智云，文本翻译）"
         @click="activePanel = activePanel === 'translate' ? '' : 'translate'"
       >
         <n-icon size="20">
@@ -488,14 +488,85 @@
         </div>
       </div>
     </div>
-    <!-- 翻译占位面板 -->
+    <!-- 翻译面板（有道智云 API） -->
     <div v-show="activePanel === 'translate'" class="settings-section">
       <div class="settings-content">
-        <div class="section-title">翻译</div>
-        <div class="placeholder-tip">
-          调用谷歌 / Edge 浏览器插件的翻译能力，翻译应用内全部网页内容。<br>
-          该功能正在开发中，敬请期待。
+        <div class="section-title">翻译（有道智云）</div>
+
+        <!-- 翻译方向 -->
+        <div class="translate-row">
+          <n-select
+            size="small"
+            :value="trFrom"
+            :options="trLangOptions"
+            style="width: 110px"
+            @update:value="v => trFrom = v"
+          />
+          <span class="translate-arrow">→</span>
+          <n-select
+            size="small"
+            :value="trTo"
+            :options="trLangOptions"
+            style="width: 110px"
+            @update:value="v => trTo = v"
+          />
         </div>
+
+        <!-- 输入文本 -->
+        <n-input
+          v-model:value="trInput"
+          type="textarea"
+          :rows="5"
+          size="small"
+          placeholder="粘贴或输入要翻译的文本（Ctrl+V 粘贴；Enter 翻译）"
+          @keydown.enter.exact.prevent="doTranslate"
+        />
+        <div class="translate-actions">
+          <n-button size="small" quaternary @click="pasteClipboard">📋 粘贴</n-button>
+          <n-button size="small" quaternary @click="trInput = ''">✕ 清空</n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :loading="translating"
+            :disabled="!trInput.trim()"
+            @click="doTranslate"
+          >翻译</n-button>
+        </div>
+
+        <!-- 翻译结果 -->
+        <div v-if="translating" class="translate-result-tip">翻译中...</div>
+        <div v-else-if="trError" class="translate-result-err">{{ trError }}</div>
+        <div v-else-if="trOutput" class="translate-result-box">
+          <div class="translate-result-text" :title="trOutput">{{ trOutput }}</div>
+          <div class="translate-result-actions">
+            <n-button size="tiny" quaternary @click="copyText(trOutput, '翻译结果')">复制</n-button>
+          </div>
+        </div>
+
+        <!-- API 配置（折叠） -->
+        <details class="translate-config">
+          <summary>⚙ 有道 API 配置（应用 ID / 密钥）</summary>
+          <div class="translate-config-body">
+            <n-input
+              size="small"
+              :value="settings.youdao_app_id || ''"
+              placeholder="应用 ID（appKey）"
+              @update:value="v => update('youdao_app_id', v.trim())"
+            />
+            <n-input
+              size="small"
+              type="password"
+              show-password-on="click"
+              :value="settings.youdao_app_secret || ''"
+              placeholder="应用密钥（appSecret）"
+              @update:value="v => update('youdao_app_secret', v.trim())"
+            />
+            <div class="translate-config-hint">
+              注册 <a href="https://ai.youdao.com/" target="_blank">ai.youdao.com</a> → 实名后创建"文本翻译"应用，复制 ID 和密钥填入。<br>
+              新用户有免费额度。设置保存后即可使用，无需重启。
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -820,6 +891,20 @@
             </div>
           </template>
 
+          <!-- EroMMDTube 专属设置（代理，默认直连） -->
+          <template v-if="site === 'erommdtube'">
+            <div class="setting-item">
+              <div class="setting-label">EroMMDTube (E站) 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
+              <n-input
+                :value="settings.erommd_proxy"
+                placeholder="如 http://127.0.0.1:10809，留空直连"
+                size="small"
+                @change="v => $emit('oreno-set-proxy', v, 'erommdtube')"
+              />
+              <div class="switch-hint" style="margin-top: 4px">EroMMDTube 一般可直连；无法访问时再填代理。视频实际从 Iwara 源下载（最高画质）</div>
+            </div>
+          </template>
+
           <!-- 按文件类型分类 -->
           <div class="setting-switch">
             <div>
@@ -972,6 +1057,71 @@
             </div>
           </div>
 
+          <!-- GitHub 仓库更新检查 -->
+          <n-divider style="margin: 8px 0" />
+          <div class="section-title">检查更新（GitHub）</div>
+          <div class="setting-item">
+            <div class="setting-label">GitHub 代理地址（国内访问需代理）</div>
+            <n-input
+              :value="settings.github_proxy"
+              placeholder="如 http://127.0.0.1:10809"
+              size="small"
+              @change="v => update('github_proxy', v)"
+            />
+          </div>
+          <div class="setting-item">
+            <n-button
+              block
+              secondary
+              type="info"
+              :loading="githubChecking"
+              @click="emit('check-github-update')"
+            >
+              {{ githubChecking ? '检查中...' : '检查更新' }}
+            </n-button>
+          </div>
+          <!-- 更新信息 -->
+          <div v-if="githubChecking" class="github-update-tip">正在连接 GitHub...</div>
+          <div v-else-if="githubError" class="github-update-err">{{ githubError }}</div>
+          <div v-else-if="githubInfo" class="github-update-box">
+            <div v-if="githubInfo.is_first_check" class="github-update-first">
+              首次检查：当前已记录为基准版本（之后有新提交会提示"有更新"）
+            </div>
+            <div v-else-if="githubInfo.has_update" class="github-update-new">
+              ⬆ 有更新！最新提交与本地基准版本不同
+            </div>
+            <div v-else class="github-update-none">
+              ✅ 已是最新（与本地基准一致）
+            </div>
+            <div class="github-update-row">
+              <span class="github-label">最新提交：</span>
+              <span class="github-msg" :title="githubInfo.latest_message">{{ githubInfo.latest_message || '（无）' }}</span>
+            </div>
+            <div class="github-update-row">
+              <span class="github-label">提交者：</span>
+              <span>{{ githubInfo.latest_author || '（未知）' }}</span>
+            </div>
+            <div class="github-update-row">
+              <span class="github-label">提交时间：</span>
+              <span>{{ formatGithubDate(githubInfo.latest_date) }}</span>
+            </div>
+            <div class="github-update-row">
+              <span class="github-label">SHA：</span>
+              <span class="github-sha" :title="githubInfo.latest_sha">{{ (githubInfo.latest_sha || '').slice(0, 7) }}</span>
+            </div>
+            <div v-if="githubInfo.release" class="github-release-box">
+              <div class="github-release-title">📦 最新发布：{{ githubInfo.release.tag || '未命名' }}</div>
+              <div class="github-release-meta">发布于 {{ formatGithubDate(githubInfo.release.published_at) }}</div>
+              <div v-if="githubInfo.release.body" class="github-release-body">{{ githubInfo.release.body }}</div>
+            </div>
+            <div class="github-update-actions">
+              <n-button size="tiny" quaternary @click="openGithubUrl(githubInfo.latest_url)">查看提交</n-button>
+              <n-button size="tiny" quaternary @click="openGithubUrl(githubInfo.commits_url)">提交历史</n-button>
+              <n-button size="tiny" quaternary @click="openGithubUrl(githubInfo.repo_url)">仓库主页</n-button>
+              <n-button v-if="githubInfo.has_update" size="tiny" type="primary" @click="markGithubUpdated">我已更新</n-button>
+            </div>
+          </div>
+
           <!-- 清除缓存 -->
           <div class="setting-item" style="margin-top: 16px">
             <n-button
@@ -1007,7 +1157,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 
 const props = defineProps({
@@ -1037,6 +1187,10 @@ const props = defineProps({
   followTags: { type: Array, default: () => [] },
   // 界面主题：dark=夜间 / light=日间
   themeMode: { type: String, default: 'dark' },
+  // 有道翻译结果：{ok, translation, query, error, raw} 或 null（翻译中）
+  translateResult: { type: Object, default: null },
+  // GitHub 仓库更新检查结果：{ok, latest_sha, latest_message, ...} 或 null（检查中）
+  githubUpdateInfo: { type: Object, default: null },
 })
 
 const emit = defineEmits([
@@ -1060,8 +1214,8 @@ const emit = defineEmits([
   'hanime-login',          // 邮箱密码登录（参数：邮箱, 密码）
   'hanime-logout',         // 退出 Hanime1 登录
   'hanime-set-proxy',      // 修改 Hanime1 代理（参数：代理地址，国内必须）
-  // Oreno3D（O3D）
-  'oreno-set-proxy',       // 修改 Oreno3D 代理（参数：代理地址，空=直连）
+  // Oreno3D（O3D）/ EroMMDTube（E站）
+  'oreno-set-proxy',       // 修改 O3D/E站 代理（参数：代理地址, 可选 site_key 'erommdtube'，空=直连）
   'tw-add-follow-tag',    // 新增关注分类（参数：母类, 子类）
   'tw-delete-follow-tag', // 删除关注分类（参数：母类, 子类）
   'tw-clear-cache',       // 清除 Twitter 专属缓存
@@ -1083,6 +1237,10 @@ const emit = defineEmits([
   // 本地收藏
   'open-favorite',        // 打开收藏（参数：收藏条目）
   'delete-favorite',      // 删除收藏（参数：收藏 id）
+  // 有道翻译
+  'translate-youdao',      // 调有道 API 翻译（参数：{text, from, to}）
+  // GitHub 仓库更新检查
+  'check-github-update',   // 检查 GitHub 仓库 main 分支最新 commit
 ])
 
 const message = useMessage()
@@ -1144,6 +1302,7 @@ const SITE_URLS = {
   iwara: 'https://www.iwara.tv',
   hanime: 'https://hanime1.me',
   oreno3d: 'https://oreno3d.com',
+  erommdtube: 'https://erommdtube.com',
 }
 
 // 浏览器选择（默认 = 系统默认浏览器）
@@ -1316,12 +1475,31 @@ Oreno3D 是日本 3D 动画（MMD 等）视频索引站，视频源托管在 Iwa
 🔑 无需登录：直接浏览/搜索/下载
 
 💡 本工具提示：
-- 主页默认按人気排序，可切换 お気に入り/最新/閲覧数
-- "标签索引"弹窗列出全部标签，点击标签看该分类视频
+- 主页默认按人気排序，可切换 急上昇/高評価/新着/人気
+- "热门分类"弹窗列出分类组与全部标签，点击看该分类视频
+- "角色列表"：人気角色 + 五十音分组查找，点角色看 TA 的视频
+- "人気作者"：按排名分页浏览，点作者看全部作品
 - 点视频卡片进详情：在线播放（iwara 源最高画质）、查看作者/标签/统计
-- 点作者名可查看 TA 的全部作品；点 iwara 链接可跳转原站
+- 卡片右上角 ♥ 可收藏到本地，"我的收藏"随时回看
 - 下载实际从 Iwara 源获取（最高画质），无需登录
-- O3D 一般可直连；无法访问时在左侧设置里填代理`,
+- O3D 一般可直连；无法访问时在左侧设置里填代理
+- 粘贴 oreno3d.com/movies/... 链接可直接解析下载`,
+  erommdtube: `🎬 EroMMDTube（E站）使用技巧
+
+EroMMDTube 与 Oreno3D 同架构的 3D 动画（MMD 等）视频索引站，视频源托管在 Iwara。
+
+🔑 无需登录：直接浏览/搜索/下载
+
+💡 本工具提示：
+- 主页默认按人気排序，可切换 急上昇/高評価/新着/人気
+- "热门分类"弹窗列出分类组与全部标签，点击看该分类视频
+- "角色列表"：人気角色 + 五十音分组查找，点角色看 TA 的视频
+- "人気作者"：按排名分页浏览，点作者看全部作品
+- 点视频卡片进详情：在线播放（iwara 源最高画质）、查看作者/标签/统计
+- 卡片右上角 ♥ 可收藏到本地，"我的收藏"随时回看
+- 下载实际从 Iwara 源获取（最高画质），无需登录
+- E站一般可直连；无法访问时在左侧设置里填代理
+- 粘贴 erommdtube.com/movies/... 链接可直接解析下载`,
 }
 
 // 当前站点的帮助内容
@@ -1448,6 +1626,105 @@ function update(key, value) {
 }
 
 // ============================
+// 有道翻译（文本翻译面板）
+// ============================
+const trLangOptions = [
+  { label: '自动检测', value: 'auto' },
+  { label: '中文', value: 'zh-CHS' },
+  { label: '英文', value: 'en' },
+  { label: '日文', value: 'ja' },
+  { label: '韩文', value: 'ko' },
+  { label: '法文', value: 'fr' },
+  { label: '德文', value: 'de' },
+  { label: '俄文', value: 'ru' },
+  { label: '西班牙文', value: 'es' },
+]
+const trFrom = ref('auto')
+const trTo = ref('zh-CHS')
+const trInput = ref('')
+// 翻译请求 token：每次点翻译自增，用于判断 props.translateResult 是否对应本次请求
+let trReqToken = 0
+const translating = computed(() => !!trReqToken && !props.translateResult)
+const trOutput = computed(() => {
+  const r = props.translateResult
+  return r && r.ok ? (r.translation || '') : ''
+})
+const trError = computed(() => {
+  const r = props.translateResult
+  return r && !r.ok ? (r.error || '翻译失败') : ''
+})
+
+function doTranslate() {
+  const text = trInput.value.trim()
+  if (!text) return
+  // 自动调整目标语言：源=目标时改成英文（避免无意义请求）
+  let to = trTo.value
+  if (trFrom.value !== 'auto' && trFrom.value === to) {
+    to = trFrom.value === 'zh-CHS' ? 'en' : 'zh-CHS'
+  }
+  trReqToken += 1
+  emit('translate-youdao', { text, from: trFrom.value, to })
+}
+
+async function pasteClipboard() {
+  try {
+    const text = await navigator.clipboard.readText()
+    if (text) {
+      trInput.value = (trInput.value ? trInput.value + ' ' : '') + text
+    } else {
+      message.info('剪贴板为空')
+    }
+  } catch (e) {
+    message.warning('读取剪贴板失败，请手动 Ctrl+V 粘贴')
+  }
+}
+
+// 监听翻译结果：失败时 toast 提示（结果区已显示详情，不重复弹框）
+watch(() => props.translateResult, (r) => {
+  if (r && r.ok) {
+    trReqToken = 0
+  } else if (r && !r.ok) {
+    trReqToken = 0
+  }
+})
+
+// ============================
+// GitHub 仓库更新检查（设置区）
+// ============================
+const githubChecking = computed(() => props.githubUpdateInfo === null)
+const githubInfo = computed(() => {
+  const r = props.githubUpdateInfo
+  return r && r.ok ? r : null
+})
+const githubError = computed(() => {
+  const r = props.githubUpdateInfo
+  return r && !r.ok ? (r.error || '检查失败') : ''
+})
+
+function formatGithubDate(s) {
+  if (!s) return '（未知）'
+  // GitHub 返回 ISO 8601：2026-08-28T12:34:56Z
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return s
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function openGithubUrl(url) {
+  if (!url) return
+  if (window.api && window.api.openExternal) {
+    await window.api.openExternal(url)
+  }
+}
+
+function markGithubUpdated() {
+  // 把当前 latest_sha 记为本地基准（更新流程已完成 → 不再提示"有更新"）
+  const sha = props.githubUpdateInfo?.latest_sha
+  if (!sha) return
+  window.api && window.api.sendCommand({ cmd: 'github_mark_update_done', sha })
+  message.success('已记录当前为基准版本')
+}
+
+// ============================
 // X 关注分类管理（母子 tag）
 // ============================
 const newTagParent = ref('')
@@ -1467,7 +1744,7 @@ function handleClearCache() {
 }
 
 // 站点显示名
-const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D' }
+const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站' }
 function siteName(s) {
   return siteNames[s] || (s ? String(s) : '未知')
 }
@@ -1903,6 +2180,201 @@ html.light-mode .round-btn-active {
   border-radius: 8px;
   padding: 14px 12px;
   text-align: center;
+}
+
+/* 有道翻译面板 */
+.translate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.translate-arrow {
+  color: #63e2b7;
+  font-size: 16px;
+}
+.translate-actions {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+.translate-result-tip {
+  font-size: 12px;
+  color: #8b8b93;
+  padding: 10px 4px;
+  text-align: center;
+}
+.translate-result-err {
+  font-size: 12px;
+  color: #e0503c;
+  padding: 10px 8px;
+  background: rgba(224, 80, 60, 0.08);
+  border: 1px solid rgba(224, 80, 60, 0.25);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+.translate-result-box {
+  background: rgba(99, 226, 183, 0.06);
+  border: 1px solid rgba(99, 226, 183, 0.2);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+.translate-result-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #e0e0e6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+.translate-result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.translate-config {
+  margin-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  padding-top: 8px;
+}
+.translate-config summary {
+  font-size: 11px;
+  color: #8b8b93;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+}
+.translate-config summary:hover {
+  color: #63e2b7;
+}
+.translate-config-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.translate-config-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 4px;
+}
+.translate-config-hint a {
+  color: #63e2b7;
+}
+html.light-mode .translate-result-text {
+  color: #2a2a30;
+}
+html.light-mode .translate-config {
+  border-top-color: rgba(0, 0, 0, 0.1);
+}
+html.light-mode .translate-config-hint {
+  color: rgba(0, 0, 0, 0.5);
+}
+html.light-mode .translate-result-err {
+  color: #c93b2c;
+}
+
+/* GitHub 更新检查面板 */
+.github-update-tip {
+  font-size: 12px;
+  color: #8b8b93;
+  padding: 10px 4px;
+  text-align: center;
+}
+.github-update-err {
+  font-size: 12px;
+  color: #e0503c;
+  padding: 10px 8px;
+  background: rgba(224, 80, 60, 0.08);
+  border: 1px solid rgba(224, 80, 60, 0.25);
+  border-radius: 6px;
+}
+.github-update-box {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.github-update-new {
+  color: #f0a020;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.github-update-none {
+  color: #63e2b7;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.github-update-first {
+  color: #63e2b7;
+  margin-bottom: 6px;
+}
+.github-update-row {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0;
+  word-break: break-word;
+}
+.github-label {
+  color: #8b8b93;
+  flex-shrink: 0;
+  min-width: 60px;
+}
+.github-msg {
+  color: #e0e0e6;
+  white-space: pre-wrap;
+}
+.github-sha {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: #63e2b7;
+}
+.github-release-box {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(99, 226, 183, 0.06);
+  border: 1px solid rgba(99, 226, 183, 0.2);
+  border-radius: 4px;
+}
+.github-release-title {
+  font-weight: 600;
+  color: #63e2b7;
+}
+.github-release-meta {
+  font-size: 11px;
+  color: #8b8b93;
+  margin: 2px 0 4px;
+}
+.github-release-body {
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+}
+.github-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+html.light-mode .github-update-box {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+html.light-mode .github-msg {
+  color: #2a2a30;
+}
+html.light-mode .github-label {
+  color: #5a5c66;
+}
+html.light-mode .github-release-body {
+  color: rgba(0, 0, 0, 0.65);
 }
 
 .section-title {

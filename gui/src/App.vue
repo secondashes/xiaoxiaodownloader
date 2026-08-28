@@ -58,6 +58,10 @@
             @clear-history="handleClearHistory"
             @open-favorite="handleOpenFavorite"
             @delete-favorite="handleDeleteFavorite"
+            @translate-youdao="handleTranslateYoudao"
+            :translate-result="translateResult"
+            @check-github-update="handleCheckGithubUpdate"
+            :github-update-info="githubUpdateInfo"
           />
           <RightPanel
             ref="rightPanelRef"
@@ -158,7 +162,15 @@
             :or-list-loading="orListLoading"
             :or-list-error="orListError"
             :or-tags="orTags"
+            :or-tag-groups="orTagGroups"
+            :or-tag-group-title="orTagGroupTitle"
             :or-tags-loading="orTagsLoading"
+            :or-characters="orCharacters"
+            :or-chars-loading="orCharsLoading"
+            :or-authors="orAuthors"
+            :or-authors-page="orAuthorsPage"
+            :or-authors-has-more="orAuthorsHasMore"
+            :or-authors-loading="orAuthorsLoading"
             :or-detail="orDetail"
             :or-detail-loading="orDetailLoading"
             :or-batch-running="orBatchRunning"
@@ -202,13 +214,21 @@
             @hanime-batch-download="handleHanimeBatchDownload"
             @or-home="handleOrHome"
             @or-home-more="handleOrHomeMore"
-            @or-open-detail="item => handleOrenoOpenDetail(item.video_id)"
+            @or-open-detail="item => handleOrenoOpenDetail(item.video_id, item.site_key)"
             @or-detail-back="handleOrDetailBack"
             @or-tag="handleOrenoTag"
             @or-author="handleOrenoAuthor"
+            @or-character="handleOrenoCharacter"
+            @or-origin="handleOrenoOrigin"
             @or-list-back="handleOrListBack"
             @or-list-more="handleOrListMore"
             @or-tags-index="handleOrenoTagsIndex"
+            @or-tag-group="handleOrenoTagGroup"
+            @or-characters="handleOrenoCharacters"
+            @or-authors-index="handleOrenoAuthorsIndex"
+            @or-browse-back="handleOrBrowseBack"
+            @or-favorites="handleOrenoFavorites"
+            @or-toggle-favorite="handleOrenoToggleFavorite"
             @or-sort-update="handleOrenoSortUpdate"
             @or-batch-download="handleOrenoBatchDownload"
             @search="handleSearch"
@@ -315,14 +335,28 @@ const settings = reactive({
   twitter_subfolder: 'date_post',
   // Iwara 专属设置（代理留空 = 直连）
   iwara_proxy: '',
-  // Hanime1 / Oreno3D 专属设置（H站国内需代理；O3D 默认直连）
+  // Hanime1 / Oreno3D / EroMMDTube 专属设置（H站国内需代理；O3D/E站 默认直连）
   hanime_proxy: 'http://127.0.0.1:10809',
   oreno_proxy: '',
+  erommd_proxy: '',
   // H站搜索过滤（分类/排序，随搜索选项发送并长期保存）
   hanime_genre: '',
   hanime_sort: '',
   // O3D 列表排序（hot=人気 / favorites=お気に入り / latest=最新 / popularity=閲覧数）
   oreno_sort: '',
+  // ASMR 音声站（asmr-100.com）专属设置
+  asmr_proxy: '',               // 代理（留空 = 直连）
+  asmr_subtitle: false,         // 仅显示带中文字幕的作品
+  asmr_order: 'create_date',    // 媒体库排序（ASMR_ORDERS：release/create_date/dl_count/price/rate_average_2dp/review_count）
+  asmr_seek_forward: 30,        // 播放器快进秒数
+  asmr_seek_back: 5,            // 播放器倒带秒数
+  asmr_smooth: false,           // 音质流畅优先（优先低码率流畅播放）
+  asmr_smart_path: true,        // 智能路径（按文件夹结构整理下载目录）
+  asmr_sound_effect: '',        // 效果音偏好（如：耳舐め/環境音）
+  asmr_audio_type: 'mp3',       // 音频类型偏好（mp3>flac>wav>opus>m4a>aac 顺序）
+  asmr_show_hot: true,          // 详情页显示热门作品
+  asmr_show_recommend: true,    // 详情页显示推荐作品
+  asmr_show_similar: true,      // 详情页显示相似作品
   // 每站点自定义子文件夹模板（留空=使用组织规则；变量 {date}/{date_full}/{title}/{id}）
   pawchive_folder_template: '',
   exhentai_folder_template: '',
@@ -454,6 +488,14 @@ const searchHistory = ref([])
 // 本地收藏（跨站点）
 const localFavorites = ref([])
 
+// 有道翻译结果（左侧翻译面板）
+// {ok, translation, query, error, raw}
+const translateResult = ref(null)
+
+// GitHub 仓库更新检查结果（左侧设置区）
+// {ok, latest_sha, latest_message, latest_date, latest_author, latest_url, local_sha, has_update, is_first_check, release, repo_url, commits_url, error}
+const githubUpdateInfo = ref(null)
+
 // X (Twitter) 关注列表 / 关注分类 / 浏览模式
 // twFollowMode: ''=普通视图 | 'following'=关注列表 | 'followers'=关注我的人 | 'follows'=我的分类
 //               | 'user'=用户详情（TA的关注/粉丝入口） | 'browse'=浏览模式（最近博主更新）
@@ -552,9 +594,10 @@ const haBatchRunning = ref(false)
 const haBatchProgress = reactive({ done: 0, total: 0, message: '' })
 
 // ============================
-// Oreno3D 主页/标签/作者/详情（O3D，3D 视频索引站）
+// Oreno3D / EroMMDTube 主页/标签/角色/作者/详情（两站共用一套视图状态）
 // ============================
-// orView: ''=普通搜索 | 'home'=主页 | 'list'=标签/作者列表 | 'detail'=视频详情
+// orView: ''=普通搜索 | 'home'=主页 | 'list'=标签/作者/角色/原作列表 | 'characters'=角色列表
+//         | 'authors'=人気作者列表 | 'detail'=视频详情
 const orView = ref('')
 const orHomeItems = ref([])
 const orHomeLoading = ref(false)
@@ -562,19 +605,100 @@ const orHomePage = ref(1)
 const orHomeHasMore = ref(false)
 const orHomeError = ref('')
 const orSorts = ref({})              // 可用排序（{value: label}）
-// 标签/作者列表（type: 'tag' | 'author'）
+// 当前视图数据所属站点（'oreno3d' | 'erommdtube' | ''=尚无数据），切换站点时据此清空旧站数据
+const orDataSite = ref('')
+// 标签/作者/角色/原作/收藏列表（type: 'tag' | 'author' | 'character' | 'origin' | 'favorites'）
 const orList = reactive({ type: '', id: '', name: '', items: [], page: 1, has_more: false })
 const orListLoading = ref(false)
 const orListError = ref('')
-// 标签索引弹窗
+// 热门分类弹窗（标签 + 分类组）
 const orTags = ref([])
+const orTagGroups = ref([])          // 分类组 [{id, name, count}]
+const orTagGroupTitle = ref('')      // 非空 = 正在查看某分类组内的标签
 const orTagsLoading = ref(false)
+// 角色列表视图（人気角色 + 五十音分组）
+const orCharacters = ref({ popular: [], kana_groups: {} })
+const orCharsLoading = ref(false)
+// 人気作者列表视图（分页）
+const orAuthors = ref([])
+const orAuthorsPage = ref(1)
+const orAuthorsHasMore = ref(false)
+const orAuthorsLoading = ref(false)
 // 视频详情（含 iwara 源播放直链）
 const orDetail = ref(null)
 const orDetailLoading = ref(false)
 // 批量下载（勾选视频，解析 iwara 源下载）
 const orBatchRunning = ref(false)
 const orBatchProgress = reactive({ done: 0, total: 0, message: '' })
+
+// ============================
+// ASMR 音声站（asmr-100.com）状态
+// ============================
+// asmrView: ''=普通搜索 | 'popular'=热门 | 'works'=媒体库/筛选 | 'favorites'=收藏 | 'detail'=详情
+const asmrView = ref('')
+const asmrUser = ref('')
+const asmrLoginLoading = ref(false)
+const asmrLoggedIn = ref(false)
+// 列表（热门/媒体库/收藏/筛选共用）
+const asmrItems = ref([])
+const asmrListLoading = ref(false)
+const asmrHasMore = ref(false)
+const asmrError = ref('')
+const asmrLabel = ref('')
+const asmrTotal = ref(0)
+const asmrOrders = ref({})              // 可用排序 {value: label}
+const asmrPage = ref(1)
+// 当前社团/标签/声优筛选（点击索引项进入）
+const asmrFilter = reactive({ kind: '', id: '', name: '' })
+// 社团/标签/声优索引弹窗
+const asmrIndexItems = ref([])
+const asmrIndexLoading = ref(false)
+// 详情（含音轨文件列表）
+const asmrDetail = ref(null)
+const asmrFiles = ref([])
+const asmrDetailLoading = ref(false)
+// 批量下载
+const asmrBatchRunning = ref(false)
+const asmrBatchProgress = reactive({ done: 0, total: 0, message: '' })
+
+// 当前站点对应的后端 site_key（oreno3d → 'oreno3d'，erommdtube → 'erommdtube'）
+const siteKey = computed(() => (settings.site === 'erommdtube' ? 'erommdtube' : 'oreno3d'))
+
+// 忽略另一站的过期事件（双站共用视图状态，快速切换站点时旧站响应直接丢弃）
+function orEventStale(event) {
+  return !!event.site_key && event.site_key !== siteKey.value
+}
+
+// 清空 O3D/E站 全部视图状态（两站之间切换 / 进入异站缓存数据时调用）
+function resetOrenoViews() {
+  orView.value = ''
+  orDataSite.value = ''
+  orHomeItems.value = []
+  orHomeLoading.value = false
+  orHomePage.value = 1
+  orHomeHasMore.value = false
+  orHomeError.value = ''
+  orList.type = ''
+  orList.id = ''
+  orList.name = ''
+  orList.items = []
+  orList.page = 1
+  orList.has_more = false
+  orListLoading.value = false
+  orListError.value = ''
+  orTags.value = []
+  orTagGroups.value = []
+  orTagGroupTitle.value = ''
+  orTagsLoading.value = false
+  orCharacters.value = { popular: [], kana_groups: {} }
+  orCharsLoading.value = false
+  orAuthors.value = []
+  orAuthorsPage.value = 1
+  orAuthorsHasMore.value = false
+  orAuthorsLoading.value = false
+  orDetail.value = null
+  orDetailLoading.value = false
+}
 
 // 重名文件手动改名弹窗（skip_duplicates + manual_rename 开启时触发）
 const renameModal = reactive({
@@ -1237,16 +1361,20 @@ function handlePythonEvent(event) {
       }
       break
 
-    case 'oreno_proxy_set':
-      // 后端确认代理设置（含自动补 http:// 前缀）
-      if ((event.proxy || '') !== settings.oreno_proxy) {
-        settings.oreno_proxy = event.proxy || ''
+    case 'oreno_proxy_set': {
+      // 后端确认代理设置（含自动补 http:// 前缀；按 site_key 区分 O3D / E站）
+      const field = event.site_key === 'erommdtube' ? 'erommd_proxy' : 'oreno_proxy'
+      if ((event.proxy || '') !== settings[field]) {
+        settings[field] = event.proxy || ''
         saveSettings()
       }
       break
+    }
 
     case 'oreno_home':
+      if (orEventStale(event)) break
       orHomeLoading.value = false
+      orDataSite.value = event.site_key || siteKey.value
       orHomeError.value = event.error || ''
       if (event.error) break
       if ((event.page || 1) <= 1) {
@@ -1261,11 +1389,14 @@ function handlePythonEvent(event) {
       break
 
     case 'oreno_home_loading':
+      if (orEventStale(event)) break
       orHomeLoading.value = !!event.loading
       break
 
     case 'oreno_list':
+      if (orEventStale(event)) break
       orListLoading.value = false
+      orDataSite.value = event.site_key || siteKey.value
       if (event.error) {
         orListError.value = event.error
         message.error(event.error)
@@ -1287,37 +1418,98 @@ function handlePythonEvent(event) {
       break
 
     case 'oreno_list_loading':
+      if (orEventStale(event)) break
       orListLoading.value = !!event.loading
       break
 
     case 'oreno_tags':
+      if (orEventStale(event)) break
       orTagsLoading.value = false
+      orDataSite.value = event.site_key || siteKey.value
       if (event.error) {
         message.error(event.error)
         break
       }
       orTags.value = event.tags || []
+      orTagGroups.value = event.groups || []
+      orTagGroupTitle.value = event.group_title || ''
       break
 
     case 'oreno_tags_loading':
+      if (orEventStale(event)) break
       orTagsLoading.value = !!event.loading
       break
 
+    case 'oreno_characters':
+      if (orEventStale(event)) break
+      orCharsLoading.value = false
+      orDataSite.value = event.site_key || siteKey.value
+      if (event.error) {
+        message.error(event.error)
+        break
+      }
+      orCharacters.value = { popular: event.popular || [], kana_groups: event.kana_groups || {} }
+      break
+
+    case 'oreno_chars_loading':
+      if (orEventStale(event)) break
+      orCharsLoading.value = !!event.loading
+      break
+
+    case 'oreno_authors':
+      if (orEventStale(event)) break
+      orAuthorsLoading.value = false
+      orDataSite.value = event.site_key || siteKey.value
+      if (event.error) {
+        message.error(event.error)
+        break
+      }
+      orAuthors.value = event.authors || []
+      orAuthorsPage.value = event.page || 1
+      orAuthorsHasMore.value = !!event.has_more
+      break
+
+    case 'oreno_authors_loading':
+      if (orEventStale(event)) break
+      orAuthorsLoading.value = !!event.loading
+      break
+
+    case 'oreno_fav_result':
+      if (orEventStale(event)) break
+      if (event.error) {
+        message.error(event.error)
+        break
+      }
+      message.success(event.saved ? '已加入收藏' : '已取消收藏')
+      // 详情页同步收藏状态
+      if (orDetail.value && orDetail.value.video_id === event.video_id) {
+        orDetail.value.saved = !!event.saved
+      }
+      // 收藏列表视图内取消收藏时同步移除卡片
+      if (orList.type === 'favorites' && !event.saved) {
+        orList.items = orList.items.filter(i => i.video_id !== event.video_id)
+      }
+      break
+
     case 'oreno_video_detail':
+      if (orEventStale(event)) break
       orDetailLoading.value = false
       if (event.error || !event.video) {
         message.error(event.error || '获取视频详情失败')
         break
       }
       orDetail.value = event.video
+      orDataSite.value = event.site_key || siteKey.value
       orView.value = 'detail'
       break
 
     case 'oreno_detail_loading':
+      if (orEventStale(event)) break
       orDetailLoading.value = !!event.loading
       break
 
     case 'oreno_batch_progress':
+      if (orEventStale(event)) break
       orBatchRunning.value = true
       orBatchProgress.done = event.done || 0
       orBatchProgress.total = event.total || 0
@@ -1325,10 +1517,137 @@ function handlePythonEvent(event) {
       break
 
     case 'oreno_batch_done':
+      if (orEventStale(event)) break
       orBatchRunning.value = false
       orBatchProgress.done = event.done || 0
       orBatchProgress.total = event.total || 0
       orBatchProgress.message = ''
+      if (event.message) {
+        message.info(event.message)
+        addLog('下载', event.message)
+      }
+      break
+
+    // ============================
+    // ASMR 音声站事件
+    // ============================
+    case 'asmr_login_result':
+      asmrLoginLoading.value = false
+      if (event.logout) {
+        asmrUser.value = ''
+        asmrLoggedIn.value = false
+        if (!event.silent) message.info(event.message || '已退出 ASMR 登录')
+        addLog('系统', 'ASMR 已退出登录')
+      } else if (event.success) {
+        asmrUser.value = event.username || '已登录'
+        asmrLoggedIn.value = true
+        if (!event.silent) message.success(event.message || 'ASMR 登录成功')
+        addLog('系统', `ASMR 登录成功: ${asmrUser.value}`)
+      } else {
+        if (event.network_issue) {
+          // 网络问题：保留当前登录显示
+          if (!event.silent) message.warning(event.message || 'ASMR 连接失败（网络问题），登录状态已保留')
+          addLog('系统', `ASMR 连接失败（网络）: ${event.message || ''}`)
+        } else {
+          asmrUser.value = ''
+          asmrLoggedIn.value = false
+          if (!event.silent) message.error(event.message || 'ASMR 未登录')
+          addLog('系统', `ASMR 未登录: ${event.message || ''}`)
+        }
+      }
+      break
+
+    case 'asmr_proxy_set':
+      // 后端确认代理设置（含自动补 http:// 前缀）
+      if ((event.proxy || '') !== settings.asmr_proxy) {
+        settings.asmr_proxy = event.proxy || ''
+        saveSettings()
+      }
+      break
+
+    case 'asmr_list':
+      if ((settings.site || 'bunkr') !== 'asmr') break
+      asmrListLoading.value = false
+      asmrView.value = event.view || 'popular'
+      asmrPage.value = event.page || 1
+      asmrHasMore.value = !!event.has_more
+      asmrError.value = event.error || ''
+      if (event.error) break
+      if ((event.page || 1) <= 1) {
+        asmrItems.value = event.items || []
+      } else {
+        asmrItems.value.push(...(event.items || []))
+      }
+      asmrLabel.value = event.label || ''
+      asmrTotal.value = event.total || 0
+      if (event.orders) asmrOrders.value = event.orders
+      searchResults.value = []
+      break
+
+    case 'asmr_list_loading':
+      asmrListLoading.value = !!event.loading
+      break
+
+    case 'asmr_video_detail':
+      asmrDetailLoading.value = false
+      if (event.error || !event.video) {
+        message.error(event.error || '获取作品详情失败')
+        break
+      }
+      if (asmrView.value !== 'detail') asmrListPrevView.value = asmrView.value
+      asmrDetail.value = event.video
+      asmrFiles.value = event.files || []
+      asmrLoggedIn.value = !!event.logged_in
+      asmrView.value = 'detail'
+      break
+
+    case 'asmr_detail_loading':
+      asmrDetailLoading.value = !!event.loading
+      break
+
+    case 'asmr_circles':
+    case 'asmr_tags':
+    case 'asmr_vas':
+      if (event.error) {
+        message.error(event.error)
+        break
+      }
+      asmrIndexItems.value = event.items || []
+      break
+
+    case 'asmr_circles_loading':
+    case 'asmr_tags_loading':
+    case 'asmr_vas_loading':
+      asmrIndexLoading.value = !!event.loading
+      break
+
+    case 'asmr_fav_result':
+      if (event.error) {
+        message.error(event.error)
+        break
+      }
+      message.success(event.saved ? '已收藏' : '已取消收藏')
+      if (asmrDetail.value && String(asmrDetail.value.video_id) === String(event.video_id)) {
+        asmrDetail.value.saved = !!event.saved
+      }
+      // 收藏列表视图中同步移除/恢复
+      if (asmrView.value === 'favorites' && !event.saved) {
+        asmrItems.value = asmrItems.value.filter(i => String(i.video_id) !== String(event.video_id))
+      }
+      break
+
+    case 'asmr_batch_progress':
+      asmrBatchRunning.value = true
+      asmrBatchProgress.done = event.done || 0
+      asmrBatchProgress.total = event.total || 0
+      asmrBatchProgress.message = event.message || ''
+      break
+
+    case 'asmr_batch_done':
+      asmrBatchRunning.value = false
+      asmrBatchProgress.done = event.done || 0
+      asmrBatchProgress.total = event.total || 0
+      asmrBatchProgress.message = ''
       if (event.message) {
         message.info(event.message)
         addLog('下载', event.message)
@@ -1432,6 +1751,21 @@ function handlePythonEvent(event) {
 
     case 'search_history':
       searchHistory.value = event.items || []
+      break
+
+    case 'translate_result':
+      // 有道翻译结果（成功/失败都回传，前端面板显示 translation 或 error）
+      translateResult.value = event
+      break
+
+    case 'github_update_info':
+      // GitHub 仓库更新检查结果
+      githubUpdateInfo.value = event
+      break
+
+    case 'github_update_marked':
+      // 用户已确认更新完成 → 重新检查
+      if (window.api) window.api.sendCommand({ cmd: 'check_github_update' })
       break
 
     case 'local_favorites':
@@ -1620,12 +1954,17 @@ function isHanimeUrl(text) {
   return /^https?:\/\/(www\.)?hanime1\.me\/watch\?v=\w+/i.test((text || '').trim())
 }
 
-// 判断输入是否为 Oreno3D 视频链接（oreno3d.com/movies/xxx）
+// 判断输入是否为 Oreno3D / EroMMDTube 视频链接（oreno3d.com/movies/xxx、erommdtube.com/movies/xxx）
 function isOrenoUrl(text) {
-  return /^https?:\/\/(www\.)?oreno3d\.com\/movies\/\d+/i.test((text || '').trim())
+  return /^https?:\/\/(www\.)?(oreno3d|erommdtube)\.com\/movies\/\d+/i.test((text || '').trim())
 }
 
-const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D' }
+// 判断输入是否为 ASMR 音声作品链接（asmr-100.com / asmr.one 的 /work/xxx）
+function isAsmrUrl(text) {
+  return /^https?:\/\/(www\.)?(asmr-100|asmr)\.\w+\/work\/\d+/i.test((text || '').trim())
+}
+
+const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站', asmr: '音声' }
 function siteNameOf(s) {
   return siteNames[s] || (s ? String(s) : '未知')
 }
@@ -1640,15 +1979,27 @@ function updateSite(site) {
   paArtistPosts.value = null
   if (site !== 'iwara') iwView.value = ''
   if (site !== 'hanime') haView.value = ''
-  if (site !== 'oreno3d') orView.value = ''
+  if (site !== 'asmr') {
+    asmrView.value = ''
+    asmrDetail.value = null
+    asmrFiles.value = []
+  }
+  // O3D / E站 双站共用一套视图状态：切换到其中一站时，若缓存的是另一站数据则整体清空
+  if (site === 'oreno3d' || site === 'erommdtube') {
+    if (orDataSite.value && orDataSite.value !== (site === 'erommdtube' ? 'erommdtube' : 'oreno3d')) {
+      resetOrenoViews()
+    }
+  } else if (orView.value) {
+    orView.value = ''
+  }
   saveSettings()
 }
 
 function handleSearch() {
   const text = searchQuery.value.trim()
   if (!text) return
-  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isOrenoUrl(text)) {
-    // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D 链接，直接解析（后端按链接自动路由）
+  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isOrenoUrl(text) || isAsmrUrl(text)) {
+    // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR 链接，直接解析（后端按链接自动路由）
     url.value = text
     cameFromSearch.value = false
     handleInspect()
@@ -1676,6 +2027,7 @@ function doSearch(query, page) {
   iwView.value = ''
   haView.value = ''
   orView.value = ''
+  asmrView.value = ''
   exFavMode.value = false
   exGalleryDetail.value = null
   paPostDetail.value = null
@@ -1833,6 +2185,15 @@ function handleBackToSearch() {
   // 清空文件列表，返回搜索结果视图
   fileList.value = []
   cameFromSearch.value = false
+  // 同步清理各站点详情/子项目视图（避免回退后被旧详情卡住看不到搜索结果）
+  exGalleryDetail.value = null
+  exDetailLoading.value = false
+  paPostDetail.value = null
+  paArtistPosts.value = null
+  iwDetail.value = null
+  iwComments.value = []
+  haDetail.value = null
+  orDetail.value = null
   if (lastSearchKeyword.value) {
     searchQuery.value = lastSearchKeyword.value
   }
@@ -1898,7 +2259,7 @@ function handleUseHistory(h) {
       saveSettings()
     }
     searchQuery.value = query
-    if (isBunkrUrl(query) || isCoomerUrl(query) || isPawchiveUrl(query) || isExhentaiUrl(query) || isTwitterUrl(query) || isIwaraUrl(query) || isHanimeUrl(query) || isOrenoUrl(query)) {
+    if (isBunkrUrl(query) || isCoomerUrl(query) || isPawchiveUrl(query) || isExhentaiUrl(query) || isTwitterUrl(query) || isIwaraUrl(query) || isHanimeUrl(query) || isOrenoUrl(query) || isAsmrUrl(query)) {
       // 历史记录是链接：直接解析
       url.value = query
       cameFromSearch.value = false
@@ -1975,6 +2336,25 @@ function handleDeleteFavorite(id) {
 }
 
 // ============================
+// 有道翻译（左侧翻译面板）
+// ============================
+function handleTranslateYoudao(payload) {
+  if (!window.api) return
+  const { text = '', from = 'auto', to = 'zh' } = payload || {}
+  translateResult.value = null  // 清空旧结果，触发面板 loading
+  window.api.sendCommand({ cmd: 'translate_youdao', text, from, to })
+}
+
+// ============================
+// GitHub 仓库更新检查（设置区）
+// ============================
+function handleCheckGithubUpdate() {
+  if (!window.api) return
+  githubUpdateInfo.value = null  // 清空旧结果，触发 loading
+  window.api.sendCommand({ cmd: 'check_github_update' })
+}
+
+// ============================
 // ExHentai 浏览器视图（webview）相关
 // ============================
 // 获取画廊种子列表（弹窗展示）
@@ -2003,10 +2383,33 @@ function handleExFavorites(page = 1) {
 }
 
 // EX 画廊详情（点击搜索结果 → 完整信息 + 分组标签 + 种子入口）
+// 同时自动解析全部图片并展示文件列表（点开链接自动解析展示）
 function handleExOpenGallery(url) {
   if (!window.api || !url) return
+  // 同步 URL 栏 + 标记来自搜索（"后退"按钮可用，回到搜索结果）
+  url.value = url
+  searchQuery.value = url
+  cameFromSearch.value = true
+  // 退出其他站点视图，进入 EX 详情+文件列表视图
+  paPostDetail.value = null
+  paArtistPosts.value = null
+  iwView.value = ''
+  iwDetail.value = null
+  iwComments.value = []
+  haView.value = ''
+  haDetail.value = null
+  orView.value = ''
+  orDetail.value = null
+  twFollowMode.value = ''
+  twViewUser.value = null
+  twNavStack.value = []
+  // 1) 画廊详情（标题/标签/上传者/评分/封面 + 第1页缩略图）—— 立即返回
   exDetailLoading.value = true
   window.api.sendCommand({ cmd: 'exhentai_gallery_info', url })
+  // 2) 自动解析全部图片直链，进入文件列表视图（带批量下载）
+  fileList.value = []
+  const options = JSON.parse(JSON.stringify(settings))
+  window.api.sendCommand({ cmd: 'inspect', url, options })
 }
 
 function handleExCloseDetail() {
@@ -2461,17 +2864,18 @@ function handleHanimeBatchDownload(videoIds) {
 }
 
 // ============================
-// Oreno3D 代理 / 主页 / 标签 / 作者 / 详情
+// Oreno3D / EroMMDTube 代理 / 主页 / 标签 / 角色 / 作者 / 详情
 // ============================
-// O3D 代理修改：保存设置 + 通知后端（留空 = 直连）
-function handleOrenoSetProxy(proxy) {
-  updateSettings({ oreno_proxy: proxy })
+// O3D / E站 代理修改：保存设置 + 通知后端（留空 = 直连；site_key 区分两站）
+function handleOrenoSetProxy(proxy, siteKeyArg) {
+  const key = siteKeyArg === 'erommdtube' ? 'erommdtube' : 'oreno3d'
+  updateSettings(key === 'erommdtube' ? { erommd_proxy: proxy } : { oreno_proxy: proxy })
   if (window.api) {
-    window.api.sendCommand({ cmd: 'oreno_set_proxy', proxy: proxy || '' })
+    window.api.sendCommand({ cmd: 'oreno_set_proxy', proxy: proxy || '', site_key: key })
   }
 }
 
-// O3D 主页/列表（进入站点时自动加载，sort 使用设置持久化）
+// O3D / E站 主页/列表（进入站点时自动加载，sort 使用设置持久化）
 function handleOrHome(page = 1, sort) {
   if (!window.api) return
   orView.value = 'home'
@@ -2479,7 +2883,7 @@ function handleOrHome(page = 1, sort) {
     orHomeItems.value = []
     searchResults.value = []
   }
-  window.api.sendCommand({ cmd: 'oreno_home', page, sort: sort !== undefined ? sort : settings.oreno_sort || '' })
+  window.api.sendCommand({ cmd: 'oreno_home', page, sort: sort !== undefined ? sort : settings.oreno_sort || '', site_key: siteKey.value })
 }
 
 // 主页"加载更多"
@@ -2487,13 +2891,15 @@ function handleOrHomeMore() {
   handleOrHome(orHomePage.value + 1)
 }
 
-// 排序切换：保存设置并刷新当前视图（主页/标签/作者列表回第 1 页，搜索态重新搜索）
+// 排序切换：保存设置并刷新当前视图（主页/标签/角色/作者列表回第 1 页，搜索态重新搜索）
 function handleOrenoSortUpdate(sort) {
   updateSettings({ oreno_sort: sort })
-  if ((settings.site || 'bunkr') !== 'oreno3d') return
+  if (!['oreno3d', 'erommdtube'].includes(settings.site || 'bunkr')) return
   if (orView.value === 'list') {
     if (orList.type === 'tag') handleOrenoTag(orList.id, 1, sort)
-    else handleOrenoAuthor(orList.id, 1, sort)
+    else if (orList.type === 'author') handleOrenoAuthor(orList.id, 1, sort)
+    else if (orList.type === 'character') handleOrenoCharacter(orList.id, 1, sort)
+    else if (orList.type === 'origin') handleOrenoOrigin(orList.id, 1, sort)
   } else if (orView.value === 'home' || !searchResults.value.length) {
     handleOrHome(1, sort)
   } else if (searchResults.value.length && lastSearchKeyword.value && !searching.value) {
@@ -2501,10 +2907,10 @@ function handleOrenoSortUpdate(sort) {
   }
 }
 
-// 打开视频详情（含 iwara 源播放直链）
-function handleOrenoOpenDetail(movieId) {
+// 打开视频详情（含 iwara 源播放直链；卡片自带 site_key 时按卡片站点请求）
+function handleOrenoOpenDetail(movieId, siteKeyArg) {
   if (!window.api) return
-  window.api.sendCommand({ cmd: 'oreno_detail', movie_id: movieId })
+  window.api.sendCommand({ cmd: 'oreno_detail', movie_id: movieId, site_key: siteKeyArg || siteKey.value })
 }
 
 // 关闭视频详情（返回上一层：列表态回列表，否则回主页）
@@ -2526,6 +2932,7 @@ function handleOrenoTag(tagId, page = 1, sort) {
     tag_id: tagId,
     page,
     sort: sort !== undefined ? sort : settings.oreno_sort || '',
+    site_key: siteKey.value,
   })
 }
 
@@ -2542,12 +2949,49 @@ function handleOrenoAuthor(authorId, page = 1, sort) {
     author_id: authorId,
     page,
     sort: sort !== undefined ? sort : settings.oreno_sort || '',
+    site_key: siteKey.value,
   })
 }
 
-// 标签/作者列表"加载更多"
+// 角色页视频列表
+function handleOrenoCharacter(characterId, page = 1, sort) {
+  if (!window.api) return
+  orView.value = 'list'
+  if (page <= 1) {
+    orList.items = []
+    searchResults.value = []
+  }
+  window.api.sendCommand({
+    cmd: 'oreno_character',
+    character_id: characterId,
+    page,
+    sort: sort !== undefined ? sort : settings.oreno_sort || '',
+    site_key: siteKey.value,
+  })
+}
+
+// 原作页视频列表
+function handleOrenoOrigin(originId, page = 1, sort) {
+  if (!window.api) return
+  orView.value = 'list'
+  if (page <= 1) {
+    orList.items = []
+    searchResults.value = []
+  }
+  window.api.sendCommand({
+    cmd: 'oreno_origin',
+    origin_id: originId,
+    page,
+    sort: sort !== undefined ? sort : settings.oreno_sort || '',
+    site_key: siteKey.value,
+  })
+}
+
+// 标签/角色/作者列表"加载更多"（按列表类型分发对应命令）
 function handleOrListMore() {
   if (orList.type === 'author') handleOrenoAuthor(orList.id, orList.page + 1)
+  else if (orList.type === 'character') handleOrenoCharacter(orList.id, orList.page + 1)
+  else if (orList.type === 'origin') handleOrenoOrigin(orList.id, orList.page + 1)
   else handleOrenoTag(orList.id, orList.page + 1)
 }
 
@@ -2557,10 +3001,66 @@ function handleOrListBack() {
   orList.items = []
 }
 
-// 标签索引弹窗（全部标签列表）
+// 角色/作者浏览视图返回主页
+function handleOrBrowseBack() {
+  orView.value = orHomeItems.value.length ? 'home' : ''
+}
+
+// 角色列表视图（人気角色 + 五十音分组）
+function handleOrenoCharacters() {
+  if (!window.api) return
+  orView.value = 'characters'
+  searchResults.value = []
+  window.api.sendCommand({ cmd: 'oreno_characters', site_key: siteKey.value })
+}
+
+// 人気作者列表视图（分页）
+function handleOrenoAuthorsIndex(page = 1) {
+  if (!window.api) return
+  orView.value = 'authors'
+  searchResults.value = []
+  window.api.sendCommand({ cmd: 'oreno_authors_index', page, site_key: siteKey.value })
+}
+
+// 热门分类弹窗（标签 + 分类组）
 function handleOrenoTagsIndex() {
   if (!window.api) return
-  window.api.sendCommand({ cmd: 'oreno_tags_index' })
+  window.api.sendCommand({ cmd: 'oreno_tags_index', site_key: siteKey.value })
+}
+
+// 分类组内标签列表（弹窗内点击分类组）
+function handleOrenoTagGroup(groupId) {
+  if (!window.api || !groupId) return
+  window.api.sendCommand({ cmd: 'oreno_tag_group', group_id: groupId, site_key: siteKey.value })
+}
+
+// 本地收藏列表（oreno_list type='favorites' 视图展示）
+function handleOrenoFavorites() {
+  if (!window.api) return
+  searchResults.value = []
+  window.api.sendCommand({ cmd: 'oreno_favorites', site_key: siteKey.value })
+}
+
+// 收藏/取消收藏（卡片爱心按钮；卡片字段随命令保存到本地收藏文件）
+function handleOrenoToggleFavorite(item) {
+  if (!window.api || !item || !item.video_id) return
+  const key = item.site_key || siteKey.value
+  window.api.sendCommand({
+    cmd: 'oreno_toggle_favorite',
+    movie_id: item.video_id,
+    card: {
+      album_name: item.album_name || '',
+      album_url: item.album_url || '',
+      thumbnail: item.thumbnail || '',
+      video_id: item.video_id,
+      author: item.author || '',
+      views: item.views || '',
+      likes: item.likes || '',
+      tags: item.tags || [],
+      site_key: key,
+    },
+    site_key: key,
+  })
 }
 
 // 批量下载：勾选的视频 → 后端解析 iwara 源并下载（最高画质）
@@ -2574,18 +3074,223 @@ function handleOrenoBatchDownload(videoIds) {
     cmd: 'oreno_batch_download',
     video_ids: videoIds,
     options: JSON.parse(JSON.stringify(settings)),
+    site_key: siteKey.value,
   })
-  addLog('下载', `O3D批量下载：${videoIds.length} 个视频`)
+  addLog('下载', `${siteNameOf(settings.site)}批量下载：${videoIds.length} 个视频`)
 }
 
-// 进入 Iwara / Hanime1 / Oreno3D 站点（或启动时停留在该站）自动加载主页
+// ============================
+// ASMR 音声站：登录 / 代理 / 热门 / 媒体库 / 收藏 / 索引 / 详情 / 批量下载
+// ============================
+// 筛选类型中文名（列表标题用）
+const ASMR_FILTER_KIND_NAMES = { circles: '社团', tags: '标签', vas: '声优' }
+// 进入详情前的视图（返回时恢复）
+const asmrListPrevView = ref('')
+
+function handleAsmrLogin(username, password) {
+  if (!window.api || !username.trim() || !password) return
+  asmrLoginLoading.value = true
+  window.api.sendCommand({ cmd: 'asmr_login', username: username.trim(), password })
+}
+
+function handleAsmrLogout() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'asmr_logout' })
+}
+
+// ASMR 代理修改：保存设置 + 通知后端（留空 = 直连）
+function handleAsmrSetProxy(proxy) {
+  updateSettings({ asmr_proxy: proxy })
+  if (window.api) {
+    window.api.sendCommand({ cmd: 'asmr_set_proxy', proxy: proxy || '' })
+  }
+}
+
+// 热门作品（每页 100，进入站点时自动加载）
+function handleAsmrPopular(page = 1) {
+  if (!window.api) return
+  asmrView.value = 'popular'
+  asmrFilter.kind = ''
+  asmrFilter.id = ''
+  asmrFilter.name = ''
+  if (page <= 1) {
+    asmrItems.value = []
+    asmrPage.value = 1
+    searchResults.value = []
+  }
+  window.api.sendCommand({ cmd: 'asmr_popular', page })
+}
+
+// 媒体库（最新入库等排序 + 仅带字幕 + 社团/标签/声优筛选）
+function handleAsmrWorks(page = 1, filter) {
+  if (!window.api) return
+  const f = filter || asmrFilter
+  asmrView.value = 'works'
+  if (f && f.id) {
+    asmrFilter.kind = f.kind
+    asmrFilter.id = f.id
+    asmrFilter.name = f.name
+  } else if (!f) {
+    asmrFilter.kind = ''
+    asmrFilter.id = ''
+    asmrFilter.name = ''
+  }
+  if (page <= 1) {
+    asmrItems.value = []
+    asmrPage.value = 1
+    searchResults.value = []
+  }
+  window.api.sendCommand({
+    cmd: 'asmr_works',
+    page,
+    order: settings.asmr_order || 'create_date',
+    sort: 'desc',
+    subtitle: !!settings.asmr_subtitle,
+    circle_id: asmrFilter.kind === 'circles' ? asmrFilter.id : '',
+    tag_id: asmrFilter.kind === 'tags' ? asmrFilter.id : '',
+    va_id: asmrFilter.kind === 'vas' ? asmrFilter.id : '',
+    label: asmrFilter.name ? `${ASMR_FILTER_KIND_NAMES[asmrFilter.kind] || '筛选'}：${asmrFilter.name}` : '媒体库',
+  })
+}
+
+// ASMR 搜索选项更新（排序/仅带字幕）：存入设置并按新条件刷新列表
+function handleAsmrSearchUpdate(opts) {
+  Object.assign(settings, opts)
+  saveSettings()
+  if ((settings.site || 'bunkr') !== 'asmr') return
+  // 有筛选：刷新筛选列表；在媒体库/热门：刷新对应列表；搜索态且有结果：重新搜索
+  if (asmrView.value === 'works') {
+    handleAsmrWorks(1)
+  } else if (asmrView.value === 'popular' || asmrView.value === 'favorites') {
+    // 排序仅作用于媒体库，其他视图不刷新
+  } else if (searchResults.value.length > 0 && lastSearchKeyword.value && !searching.value) {
+    doSearch(lastSearchKeyword.value, 1)
+  }
+}
+
+// 我的收藏（需登录）
+function handleAsmrFavorites(page = 1) {
+  if (!window.api) return
+  if (!asmrUser.value && !asmrLoggedIn.value) {
+    message.warning('请先在左侧登录 ASMR 账号')
+    return
+  }
+  asmrView.value = 'favorites'
+  asmrFilter.kind = ''
+  asmrFilter.id = ''
+  asmrFilter.name = ''
+  if (page <= 1) {
+    asmrItems.value = []
+    asmrPage.value = 1
+    searchResults.value = []
+  }
+  window.api.sendCommand({ cmd: 'asmr_favorites', page })
+}
+
+// 当前列表加载更多（按当前视图分发）
+function handleAsmrMore() {
+  if (asmrView.value === 'popular') handleAsmrPopular(asmrPage.value + 1)
+  else if (asmrView.value === 'favorites') handleAsmrFavorites(asmrPage.value + 1)
+  else if (asmrView.value === 'works') handleAsmrWorks(asmrPage.value + 1)
+}
+
+// 社团/标签/声优索引弹窗
+function handleAsmrIndex(kind) {
+  if (!window.api) return
+  asmrIndexItems.value = []
+  window.api.sendCommand({ cmd: 'asmr_browse_index', kind })
+}
+
+// 点击索引项进入筛选列表（tag_id/circle_id/va_id 走 asmr_works）
+function handleAsmrIndexPick(kind, id, name) {
+  if (!window.api || !id) return
+  handleAsmrWorks(1, { kind, id, name })
+}
+
+// 打开作品详情
+function handleAsmrOpenDetail(item) {
+  if (!window.api || !item) return
+  const wid = item.video_id || (item.album_url || '').match(/work\/(\d+)/)?.[1]
+  if (!wid) return
+  asmrDetail.value = null
+  asmrFiles.value = []
+  window.api.sendCommand({ cmd: 'asmr_work_detail', work_id: String(wid) })
+}
+
+// 关闭详情返回上一层（有列表回列表，否则回搜索态）
+function handleAsmrDetailBack() {
+  asmrView.value = asmrItems.value.length ? (asmrListPrevView.value || 'popular') : ''
+  asmrDetail.value = null
+  asmrFiles.value = []
+}
+
+// 收藏/取消收藏作品
+function handleAsmrToggleFavorite(item) {
+  if (!window.api || !item) return
+  window.api.sendCommand({
+    cmd: 'asmr_toggle_favorite',
+    work_id: String(item.video_id),
+    card: JSON.parse(JSON.stringify(item)),
+  })
+}
+
+// 点击 tag 搜索（填入搜索框并搜索）
+function handleAsmrSearchTag(tag) {
+  if (!tag) return
+  asmrView.value = ''
+  asmrItems.value = []
+  searchQuery.value = tag
+  handleSearch()
+}
+
+// 点击社团查看全部作品
+function handleAsmrOpenCircle(detail) {
+  if (!detail) return
+  const cid = (detail.circle && detail.circle.id) || detail.circle_id
+  const name = (detail.circle && detail.circle.name) || detail.author
+  if (!cid) {
+    message.warning('该作品没有社团信息')
+    return
+  }
+  handleAsmrWorks(1, { kind: 'circles', id: String(cid), name })
+}
+
+// 点击声优查看作品
+function handleAsmrOpenVa(detail) {
+  if (!detail || !detail.vas || !detail.vas.length) return
+  const name = detail.vas[0]
+  // 音声列表 vas 是名字数组；索引弹窗里有声优 id，这里直接用名字打开索引弹窗由用户选择
+  searchQuery.value = name
+  asmrView.value = ''
+  asmrItems.value = []
+  handleSearch()
+}
+
+// 批量下载作品（整包下载全部音轨）
+function handleAsmrBatchDownload(workIds) {
+  if (!window.api || !workIds || !workIds.length) return
+  asmrBatchRunning.value = true
+  asmrBatchProgress.done = 0
+  asmrBatchProgress.total = workIds.length
+  asmrBatchProgress.message = '准备中...'
+  window.api.sendCommand({
+    cmd: 'asmr_batch_download',
+    work_ids: workIds,
+    options: JSON.parse(JSON.stringify(settings)),
+  })
+  addLog('下载', `音声站批量下载：${workIds.length} 个作品`)
+}
+
+// 进入 Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR 站点（或启动时停留在该站）自动加载主页
 watch(() => settings.site, (s) => {
   if (s === 'iwara' && !iwHomeItems.value.length) {
     handleIwHome(1)
   } else if (s === 'hanime' && !haSections.value.length) {
     handleHaHome()
-  } else if (s === 'oreno3d' && !orHomeItems.value.length) {
+  } else if ((s === 'oreno3d' || s === 'erommdtube') && !orHomeItems.value.length) {
     handleOrHome(1)
+  } else if (s === 'asmr' && !asmrItems.value.length) {
+    handleAsmrPopular(1)
   }
 }, { immediate: true })
 
@@ -3264,6 +3969,7 @@ html.light-mode .pa-toolbar,
 html.light-mode .ex-results,
 html.light-mode .ex-toolbar,
 html.light-mode .ex-tr,
+html.light-mode .ex-inline-info,
 html.light-mode .tw-follow-toolbar {
   background: #ffffff;
 }
@@ -3308,7 +4014,14 @@ html.light-mode .magnet-label,
 html.light-mode .pa-result-count,
 html.light-mode .ex-result-count,
 html.light-mode .torrent-meta,
-html.light-mode .ex-info-meta {
+html.light-mode .ex-info-meta,
+html.light-mode .ex-inline-label,
+html.light-mode .ex-inline-tagrow-ns {
+  color: #4e5969;
+}
+
+html.light-mode .ex-inline-value,
+html.light-mode .ex-inline-tag {
   color: #1f2329;
 }
 

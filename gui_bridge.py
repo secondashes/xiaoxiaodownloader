@@ -695,9 +695,14 @@ async def gui_inspect(url: str, options: dict) -> None:
         await hanime_inspect(url, options)
         return
 
-    # Oreno3D 站点（oreno3d.com）视频页，走独立解析流程
+    # Oreno3D / EroMMDTube 站点视频页，走独立解析流程
     if is_oreno_url(url):
         await oreno_inspect(url, options)
+        return
+
+    # ASMR 音声站（asmr-100.com）作品页，走独立解析流程
+    if is_asmr_url(url):
+        await asmr_inspect(url, options)
         return
 
     args = create_args(options)
@@ -6632,30 +6637,105 @@ async def hanime_batch_download(video_ids: list, options: dict) -> None:
 #   下载/播放复用 Iwara 逻辑（api.iwara.tv 解析最高画质）
 # - 视频本体在 iwara，站内仅缩略图（/storage/thumbnails_small/）
 ORENO_BASE = "https://oreno3d.com"
-ORENO_SORTS = {"hot": "人気", "favorites": "お気に入り", "latest": "最新", "popularity": "閲覧数"}
+EROMMD_BASE = "https://erommdtube.com"
+# 四排序（与站点页面上 急上昇/高評価/新着/人気 一一对应）
+ORENO_SORTS = {"hot": "急上昇", "favorites": "高評価", "latest": "新着", "popularity": "人気"}
+
+# 两站同库同路由（oreno3d / erommdtube），仅 CSS 选择器不同：一套解析逻辑 + 选择器映射
+ORENO_SITES: dict[str, dict] = {
+    "oreno3d": {
+        "base": ORENO_BASE,
+        "label": "Oreno3D",
+        "sel_card": "a.box.pop_separate",
+        "sel_title": "h2.box-h2",
+        "sel_img": "img.main-thumbnail",
+        "sel_stats": ".figure-text-in",
+        "sel_texts": ".box-text-in",
+        "sel_iwara_btn": "a.video-watch-btn2",
+        "sel_iwara_fig": None,  # oreno3d 用按钮即可
+        "sel_h1_detail": "h1.video-h1",
+        "sel_img_detail": "img.video-img",
+        "sel_author_link": "section.video-section-tag a[href*='/authors/']",
+        # 本视频元数据：标签区(ul.video-tag) + 面包屑(原作/角色)
+        "sel_tag_links": "ul.video-tag a[href], ol.breadcrumb a[href]",
+        "sel_tag_text": None,
+        "sel_stat_text": "div.video-text",
+        "sel_comment": "blockquote.video-information-comment",
+        "sel_related": "section.g-main-video-related",
+        "sel_group_li": "li.group-list-li",
+        "sel_group_link": "a.group-list-li-a",
+        "sel_group_chara": "div.group-list-li-a-chara",
+        "sel_group_number": "div.group-list-li-a-number",
+        "sel_pagination": "a.page-link",
+    },
+    "erommdtube": {
+        "base": EROMMD_BASE,
+        "label": "EroMMDTube",
+        "sel_card": "a.main__list-link",
+        "sel_title": "h2.main__list-title",
+        "sel_img": "img.main__list-thumbnail",
+        "sel_stats": None,  # 统计在 description 文本里
+        "sel_texts": None,
+        "sel_iwara_btn": None,
+        "sel_iwara_fig": "figure.show__figure > a[href*='iwara.tv/video/']",
+        "sel_h1_detail": "h1.show__h1",
+        "sel_img_detail": "img.show__header-img",
+        "sel_author_link": "div.show__authors-link a[href*='/authors/']",
+        # 本视频元数据：标签区(含原作/角色/标签混排) + 面包屑
+        "sel_tag_links": "ul.show__tag-ul a.show__tag-link, ol.main__breadcrumb a[href]",
+        "sel_tag_text": None,
+        "sel_stat_text": "ul.show__count li",
+        "sel_comment": "blockquote.show__comment-blockquote",
+        "sel_related": "section.show__related",
+        "sel_group_li": "li.aside__li",
+        "sel_group_link": "a.aside__li-link",
+        "sel_group_chara": "div.aside__li-chara",
+        "sel_group_number": "div.aside__ranking",
+        "sel_pagination": "a.main__pagination-link",
+    },
+}
 
 _oreno_proxy = ""
+_erommd_proxy = ""
 _oreno_last_req = 0.0
 
 _oreno_session = requests.Session()
-_oreno_session.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-})
+_erommd_session = requests.Session()
+for _s in (_oreno_session, _erommd_session):
+    _s.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    })
 
 
-def oreno_set_proxy(proxy: str) -> None:
-    """设置 Oreno3D 代理（空 = 直连）。"""
-    global _oreno_proxy
-    _oreno_proxy = (proxy or "").strip()
-    if _oreno_proxy and not _oreno_proxy.startswith(("http://", "https://", "socks5://")):
-        _oreno_proxy = "http://" + _oreno_proxy
-    proxies = {"http": _oreno_proxy, "https": _oreno_proxy} if _oreno_proxy else {}
-    _oreno_session.proxies = proxies
-    emit({"event": "oreno_proxy_set", "proxy": _oreno_proxy})
+def _oreno_conf(site_key: str) -> dict:
+    return ORENO_SITES.get(site_key) or ORENO_SITES["oreno3d"]
+
+
+def _oreno_session_of(site_key: str) -> requests.Session:
+    return _erommd_session if site_key == "erommdtube" else _oreno_session
+
+
+def _oreno_site_proxy(site_key: str) -> str:
+    return _erommd_proxy if site_key == "erommdtube" else _oreno_proxy
+
+
+def oreno_set_proxy(proxy: str, site_key: str = "oreno3d") -> None:
+    """设置 Oreno3D / EroMMDTube 代理（空 = 直连）。"""
+    proxy = (proxy or "").strip()
+    if proxy and not proxy.startswith(("http://", "https://", "socks5://")):
+        proxy = "http://" + proxy
+    global _oreno_proxy, _erommd_proxy
+    if site_key == "erommdtube":
+        _erommd_proxy = proxy
+    else:
+        _oreno_proxy = proxy
+    proxies = {"http": proxy, "https": proxy} if proxy else {}
+    _oreno_session_of(site_key).proxies = proxies
+    emit({"event": "oreno_proxy_set", "proxy": proxy, "site_key": site_key})
 
 
 def _oreno_throttle(min_interval: float = 0.5) -> None:
@@ -6666,38 +6746,71 @@ def _oreno_throttle(min_interval: float = 0.5) -> None:
     _oreno_last_req = time.time()
 
 
-def _oreno_soup(path: str, params: dict | None = None) -> BeautifulSoup:
+def _oreno_soup(path: str, params: dict | None = None, site_key: str = "oreno3d") -> BeautifulSoup:
+    conf = _oreno_conf(site_key)
     _oreno_throttle()
-    resp = _oreno_session.get(f"{ORENO_BASE}{path}", params=params, timeout=25)
+    resp = _oreno_session_of(site_key).get(f"{conf['base']}{path}", params=params, timeout=25)
     if resp.status_code != 200:
-        raise PermissionError(f"Oreno3D 返回 HTTP {resp.status_code}")
+        raise PermissionError(f"{conf['label']} 返回 HTTP {resp.status_code}")
     return BeautifulSoup(resp.text, "html.parser")
 
 
-def _oreno_parse_card(card: BeautifulSoup) -> dict | None:
-    """列表卡片（a.box.pop_separate）→ 前端视频卡片。"""
+def _oreno_link_text(a) -> str:
+    """链接纯文本（剔除 <i class="material-icons">face/local_offer 等图标文字）。"""
+    parts = []
+    for s in a.find_all(string=True):
+        if s.parent and s.parent.name == "i":
+            continue
+        parts.append(str(s))
+    return "".join(parts).strip()
+
+
+def _oreno_parse_card(card: BeautifulSoup, site_key: str = "oreno3d") -> dict | None:
+    """列表卡片 → 前端视频卡片（oreno3d: a.box.pop_separate / erommdtube: a.main__list-link）。"""
+    conf = _oreno_conf(site_key)
     m = re.search(r"/movies/(\d+)", card.get("href") or "")
     if not m:
         return None
     mid = m.group(1)
-    h2 = card.select_one("h2.box-h2")
-    img = card.select_one("img.main-thumbnail")
-    # 播放数/点赞数（figure-text-in，顺序固定：先播放后点赞）
-    stats = [d.get_text(strip=True) for d in card.select(".figure-text-in")]
-    views = stats[0] if len(stats) > 0 else ""
-    likes = stats[1] if len(stats) > 1 else ""
-    texts = card.select(".box-text-in")
-    author = texts[0].get_text(strip=True) if len(texts) > 0 else ""
-    tags = (texts[1].get_text(strip=True) if len(texts) > 1 else "").split()
+    h2 = card.select_one(conf["sel_title"])
+    img = card.select_one(conf["sel_img"])
+    views = ""
+    likes = ""
+    author = ""
+    tags: list[str] = []
+    if site_key == "erommdtube":
+        # 统计与作者混在 description 文本：person 作者 / play_arrow 再生 / favorite 数
+        desc = card.select_one("div.main__list-description")
+        text = desc.get_text("|", strip=True) if desc else ""
+        parts = [p.strip() for p in text.split("|") if p.strip()]
+        nums = [p for p in parts if re.fullmatch(r"[\d.,]+[km]?", p, re.I)]
+        author = parts[0] if parts else ""
+        if len(nums) >= 1:
+            views = nums[0]
+        if len(nums) >= 2:
+            likes = nums[1]
+        # 标签行（sell icon 后的文本）
+        tag_el = card.select_one("div.main__list-tag")
+        if tag_el:
+            tags = tag_el.get_text(" ", strip=True).split()
+    else:
+        # 播放数/点赞数（figure-text-in，顺序固定：先播放后点赞）
+        stats = [d.get_text(strip=True) for d in card.select(conf["sel_stats"])]
+        views = stats[0] if len(stats) > 0 else ""
+        likes = stats[1] if len(stats) > 1 else ""
+        texts = card.select(conf["sel_texts"])
+        author = texts[0].get_text(strip=True) if len(texts) > 0 else ""
+        tags = (texts[1].get_text(strip=True) if len(texts) > 1 else "").split()
     thumb = (img.get("src") or "") if img else ""
     if thumb.startswith("/"):
-        thumb = ORENO_BASE + thumb
+        thumb = _oreno_conf(site_key)["base"] + thumb
     return {
-        "album_name": (h2.get_text(strip=True) if h2 else "") or f"oreno3d_{mid}",
-        "album_url": f"{ORENO_BASE}/movies/{mid}",
+        "album_name": (h2.get_text(strip=True) if h2 else "") or f"{site_key}_{mid}",
+        "album_url": f"{_oreno_conf(site_key)['base']}/movies/{mid}",
         "thumbnail": thumb,
         "files": 1,
-        "site": "oreno",
+        "site": "oreno" if site_key == "oreno3d" else "erommd",
+        "site_key": site_key,
         "video_id": mid,
         "author": author,
         "views": views,
@@ -6706,45 +6819,56 @@ def _oreno_parse_card(card: BeautifulSoup) -> dict | None:
     }
 
 
-def _oreno_parse_cards(soup: BeautifulSoup) -> list[dict]:
+def _oreno_parse_cards(soup: BeautifulSoup, site_key: str = "oreno3d") -> list[dict]:
     items: list[dict] = []
-    for card in soup.select("a.box.pop_separate"):
-        item = _oreno_parse_card(card)
+    for card in soup.select(_oreno_conf(site_key)["sel_card"]):
+        item = _oreno_parse_card(card, site_key)
         if item:
             items.append(item)
     return items
 
 
-def _oreno_has_next(soup: BeautifulSoup) -> bool:
-    return bool(soup.find("a", rel="next"))
+def _oreno_has_next(soup: BeautifulSoup, site_key: str = "oreno3d") -> bool:
+    if soup.find("a", rel="next"):
+        return True
+    # erommdtube 分页无 rel=next：看 pagination 里是否有比当前页大的页码/省略号
+    links = soup.select(_oreno_conf(site_key)["sel_pagination"])
+    for a in links:
+        href = a.get("href") or ""
+        m = re.search(r"[?&]page=(\d+)", href)
+        if m and a.get_text(strip=True) in (">", "»", "次へ", "次"):
+            return True
+    return False
 
 
-async def oreno_home(page: int = 1, sort: str = "") -> None:
-    """Oreno3D 主页/列表（默认人気排序，可切换排序，Laravel 分页）。"""
-    emit({"event": "oreno_home_loading", "loading": True})
+async def oreno_home(page: int = 1, sort: str = "", site_key: str = "oreno3d") -> None:
+    """Oreno3D / EroMMDTube 主页/列表（默认人気排序，四排序可切换，Laravel 分页）。"""
+    emit({"event": "oreno_home_loading", "loading": True, "site_key": site_key})
     try:
         page = max(1, page or 1)
         params: dict = {"page": page}
         if sort in ORENO_SORTS:
             params["sort"] = sort
-        soup = await asyncio.to_thread(_oreno_soup, "/", params)
-        items = _oreno_parse_cards(soup)
+        soup = await asyncio.to_thread(_oreno_soup, "/", params, site_key)
+        items = _oreno_parse_cards(soup, site_key)
         _apply_cached_thumbnails(items)
         asyncio.create_task(_cache_thumbnails(items))
         emit({"event": "oreno_home", "items": items, "page": page,
-              "has_more": _oreno_has_next(soup), "sort": sort,
-              "sorts": ORENO_SORTS})
-        logging.info("Oreno3D 主页第 %d 页 (sort=%s): %d 个视频", page, sort, len(items))
+              "has_more": _oreno_has_next(soup, site_key), "sort": sort,
+              "sorts": ORENO_SORTS, "site_key": site_key})
+        logging.info("%s 主页第 %d 页 (sort=%s): %d 个视频",
+                     _oreno_conf(site_key)["label"], page, sort, len(items))
     except Exception as exc:
         emit({"event": "oreno_home", "items": [], "page": max(1, page), "has_more": False,
-              "sort": sort, "error": f"获取列表失败: {exc}（请检查网络或代理设置）"})
-        logging.exception("Oreno3D 主页获取失败")
+              "sort": sort, "site_key": site_key,
+              "error": f"获取列表失败: {exc}（请检查网络或代理设置）"})
+        logging.exception("%s 主页获取失败", _oreno_conf(site_key)["label"])
     finally:
-        emit({"event": "oreno_home_loading", "loading": False})
+        emit({"event": "oreno_home_loading", "loading": False, "site_key": site_key})
 
 
-async def oreno_search(query: str, page: int = 1, sort: str = "") -> None:
-    """Oreno3D 关键词搜索（/search?keyword=）。"""
+async def oreno_search(query: str, page: int = 1, sort: str = "", site_key: str = "oreno3d") -> None:
+    """Oreno3D / EroMMDTube 关键词搜索（/search?keyword=）。"""
     query = (query or "").strip()
     if not query:
         emit({"event": "search_error", "message": "搜索关键词为空"})
@@ -6755,32 +6879,34 @@ async def oreno_search(query: str, page: int = 1, sort: str = "") -> None:
         params: dict = {"keyword": query, "page": page}
         if sort in ORENO_SORTS:
             params["sort"] = sort
-        soup = await asyncio.to_thread(_oreno_soup, "/search", params)
-        items = _oreno_parse_cards(soup)
-        emit({"event": "search_result", "query": query, "site": "oreno",
-              "items": items, "page": page, "has_more": _oreno_has_next(soup),
+        soup = await asyncio.to_thread(_oreno_soup, "/search", params, site_key)
+        items = _oreno_parse_cards(soup, site_key)
+        site_tag = "oreno" if site_key == "oreno3d" else "erommd"
+        emit({"event": "search_result", "query": query, "site": site_tag,
+              "site_key": site_key,
+              "items": items, "page": page, "has_more": _oreno_has_next(soup, site_key),
               "sort": sort, "label": query})
         if items:
             asyncio.create_task(_cache_thumbnails(items))
-        logging.info("Oreno3D 搜索 '%s': %d 个结果", query, len(items))
+        logging.info("%s 搜索 '%s': %d 个结果", _oreno_conf(site_key)["label"], query, len(items))
     except Exception as exc:
         emit({"event": "search_error",
-              "message": f"Oreno3D 搜索失败: {exc}（请检查网络或代理设置）"})
-        logging.exception("Oreno3D 搜索失败")
+              "message": f"{_oreno_conf(site_key)['label']} 搜索失败: {exc}（请检查网络或代理设置）"})
+        logging.exception("%s 搜索失败", _oreno_conf(site_key)["label"])
     finally:
         emit({"event": "search_loading", "loading": False})
 
 
-async def oreno_tag(tag_id: str, page: int = 1, sort: str = "") -> None:
-    """Oreno3D 标签页视频列表。"""
-    emit({"event": "oreno_list_loading", "loading": True})
+async def oreno_tag(tag_id: str, page: int = 1, sort: str = "", site_key: str = "oreno3d") -> None:
+    """标签页视频列表。"""
+    emit({"event": "oreno_list_loading", "loading": True, "site_key": site_key})
     try:
         page = max(1, page or 1)
         params: dict = {"page": page}
         if sort in ORENO_SORTS:
             params["sort"] = sort
-        soup = await asyncio.to_thread(_oreno_soup, f"/tags/{tag_id}", params)
-        items = _oreno_parse_cards(soup)
+        soup = await asyncio.to_thread(_oreno_soup, f"/tags/{tag_id}", params, site_key)
+        items = _oreno_parse_cards(soup, site_key)
         tag_name = ""
         h1 = soup.find("h1")
         if h1:
@@ -6788,24 +6914,25 @@ async def oreno_tag(tag_id: str, page: int = 1, sort: str = "") -> None:
         _apply_cached_thumbnails(items)
         asyncio.create_task(_cache_thumbnails(items))
         emit({"event": "oreno_list", "type": "tag", "id": tag_id, "name": tag_name,
-              "items": items, "page": page, "has_more": _oreno_has_next(soup), "sort": sort})
+              "site_key": site_key,
+              "items": items, "page": page, "has_more": _oreno_has_next(soup, site_key), "sort": sort})
     except Exception as exc:
-        emit({"event": "oreno_list", "type": "tag", "id": tag_id, "items": [],
-              "page": page, "has_more": False, "error": f"获取标签视频失败: {exc}"})
+        emit({"event": "oreno_list", "type": "tag", "id": tag_id, "site_key": site_key,
+              "items": [], "page": page, "has_more": False, "error": f"获取标签视频失败: {exc}"})
     finally:
-        emit({"event": "oreno_list_loading", "loading": False})
+        emit({"event": "oreno_list_loading", "loading": False, "site_key": site_key})
 
 
-async def oreno_author(author_id: str, page: int = 1, sort: str = "") -> None:
-    """Oreno3D 作者页视频列表。"""
-    emit({"event": "oreno_list_loading", "loading": True})
+async def oreno_author(author_id: str, page: int = 1, sort: str = "", site_key: str = "oreno3d") -> None:
+    """作者页视频列表。"""
+    emit({"event": "oreno_list_loading", "loading": True, "site_key": site_key})
     try:
         page = max(1, page or 1)
         params: dict = {"page": page}
         if sort in ORENO_SORTS:
             params["sort"] = sort
-        soup = await asyncio.to_thread(_oreno_soup, f"/authors/{author_id}", params)
-        items = _oreno_parse_cards(soup)
+        soup = await asyncio.to_thread(_oreno_soup, f"/authors/{author_id}", params, site_key)
+        items = _oreno_parse_cards(soup, site_key)
         author_name = ""
         h1 = soup.find("h1")
         if h1:
@@ -6813,25 +6940,247 @@ async def oreno_author(author_id: str, page: int = 1, sort: str = "") -> None:
         _apply_cached_thumbnails(items)
         asyncio.create_task(_cache_thumbnails(items))
         emit({"event": "oreno_list", "type": "author", "id": author_id, "name": author_name,
-              "items": items, "page": page, "has_more": _oreno_has_next(soup), "sort": sort})
+              "site_key": site_key,
+              "items": items, "page": page, "has_more": _oreno_has_next(soup, site_key), "sort": sort})
     except Exception as exc:
-        emit({"event": "oreno_list", "type": "author", "id": author_id, "items": [],
-              "page": page, "has_more": False, "error": f"获取作者视频失败: {exc}"})
+        emit({"event": "oreno_list", "type": "author", "id": author_id, "site_key": site_key,
+              "items": [], "page": page, "has_more": False, "error": f"获取作者视频失败: {exc}"})
     finally:
-        emit({"event": "oreno_list_loading", "loading": False})
+        emit({"event": "oreno_list_loading", "loading": False, "site_key": site_key})
 
 
-async def oreno_tags_index() -> None:
-    """Oreno3D 全部标签列表（供前端浏览选择）。"""
-    emit({"event": "oreno_tags_loading", "loading": True})
+async def oreno_character(character_id: str, page: int = 1, sort: str = "", site_key: str = "oreno3d") -> None:
+    """角色页视频列表（/characters/{id}）。"""
+    emit({"event": "oreno_list_loading", "loading": True, "site_key": site_key})
     try:
-        soup = await asyncio.to_thread(_oreno_soup, "/tags")
+        page = max(1, page or 1)
+        params: dict = {"page": page}
+        if sort in ORENO_SORTS:
+            params["sort"] = sort
+        soup = await asyncio.to_thread(_oreno_soup, f"/characters/{character_id}", params, site_key)
+        items = _oreno_parse_cards(soup, site_key)
+        name = ""
+        h1 = soup.find("h1")
+        if h1:
+            name = h1.get_text(strip=True)
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        emit({"event": "oreno_list", "type": "character", "id": character_id, "name": name,
+              "site_key": site_key,
+              "items": items, "page": page, "has_more": _oreno_has_next(soup, site_key), "sort": sort})
+    except Exception as exc:
+        emit({"event": "oreno_list", "type": "character", "id": character_id, "site_key": site_key,
+              "items": [], "page": page, "has_more": False, "error": f"获取角色视频失败: {exc}"})
+    finally:
+        emit({"event": "oreno_list_loading", "loading": False, "site_key": site_key})
+
+
+async def oreno_origin(origin_id: str, page: int = 1, sort: str = "", site_key: str = "oreno3d") -> None:
+    """原作页视频列表（/origins/{id}）。"""
+    emit({"event": "oreno_list_loading", "loading": True, "site_key": site_key})
+    try:
+        page = max(1, page or 1)
+        params: dict = {"page": page}
+        if sort in ORENO_SORTS:
+            params["sort"] = sort
+        soup = await asyncio.to_thread(_oreno_soup, f"/origins/{origin_id}", params, site_key)
+        items = _oreno_parse_cards(soup, site_key)
+        name = ""
+        h1 = soup.find("h1")
+        if h1:
+            name = h1.get_text(strip=True)
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        emit({"event": "oreno_list", "type": "origin", "id": origin_id, "name": name,
+              "site_key": site_key,
+              "items": items, "page": page, "has_more": _oreno_has_next(soup, site_key), "sort": sort})
+    except Exception as exc:
+        emit({"event": "oreno_list", "type": "origin", "id": origin_id, "site_key": site_key,
+              "items": [], "page": page, "has_more": False, "error": f"获取原作视频失败: {exc}"})
+    finally:
+        emit({"event": "oreno_list_loading", "loading": False, "site_key": site_key})
+
+
+async def oreno_characters(site_key: str = "oreno3d") -> None:
+    """角色列表（单页全量：人気排序 + 五十音分组均静态内嵌）。"""
+    emit({"event": "oreno_chars_loading", "loading": True, "site_key": site_key})
+    try:
+        soup = await asyncio.to_thread(_oreno_soup, "/characters", None, site_key)
+        conf = _oreno_conf(site_key)
+        popular: list[dict] = []
+        kana_groups: dict[str, list[dict]] = {}
+        seen: set[str] = set()
+        # 人気区
+        for li in soup.select(f"div.sorted-popularity {conf['sel_group_li']}"):
+            a = li.select_one(conf["sel_group_link"])
+            if not a:
+                continue
+            m = re.search(r"/characters/(\d+)", a.get("href") or "")
+            if not m:
+                continue
+            cid = m.group(1)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            chara_el = a.select_one(conf["sel_group_chara"])
+            name = ""
+            origin = ""
+            if chara_el:
+                name = chara_el.get_text(strip=True)
+                span = chara_el.find("span")
+                if span:
+                    origin = span.get_text(strip=True).strip("()")
+                    name = chara_el.get_text(strip=True).replace(span.get_text(strip=True), "").strip()
+            nums = [d.get_text(strip=True) for d in a.select(conf["sel_group_number"])]
+            popular.append({
+                "id": cid, "name": name, "origin": origin,
+                "rank": nums[0] if nums else "",
+                "count": nums[-1] if len(nums) > 1 else "",
+            })
+        # 五十音区（oreno3d: div.sorted-kana > ul#sort-{行}；erommdtube 同结构）
+        for ul in soup.select("div.sorted-kana ul[id]"):
+            row = re.sub(r"^sort-", "", ul.get("id") or "")
+            for li in ul.select(conf["sel_group_li"]):
+                a = li.select_one(conf["sel_group_link"])
+                if not a:
+                    continue
+                m = re.search(r"/characters/(\d+)", a.get("href") or "")
+                if not m:
+                    continue
+                cid = m.group(1)
+                chara_el = a.select_one(conf["sel_group_chara"])
+                name = ""
+                origin = ""
+                if chara_el:
+                    name = chara_el.get_text(strip=True)
+                    span = chara_el.find("span")
+                    if span:
+                        origin = span.get_text(strip=True).strip("()")
+                        name = chara_el.get_text(strip=True).replace(span.get_text(strip=True), "").strip()
+                nums = [d.get_text(strip=True) for d in a.select(conf["sel_group_number"])]
+                kana_groups.setdefault(row or "?", []).append({
+                    "id": cid, "name": name, "origin": origin,
+                    "count": nums[-1] if nums else "",
+                })
+        emit({"event": "oreno_characters", "popular": popular[:300],
+              "kana_groups": kana_groups, "site_key": site_key})
+        logging.info("%s 角色列表: 人気 %d 个 / %d 个五十音组",
+                     conf["label"], len(popular), len(kana_groups))
+    except Exception as exc:
+        emit({"event": "oreno_characters", "popular": [], "kana_groups": {},
+              "site_key": site_key, "error": f"获取角色列表失败: {exc}"})
+        logging.exception("角色列表获取失败")
+    finally:
+        emit({"event": "oreno_chars_loading", "loading": False, "site_key": site_key})
+
+
+async def oreno_authors_index(page: int = 1, site_key: str = "oreno3d") -> None:
+    """人気作者列表（/authors 分页，oreno3d 共约 1919 页）。"""
+    emit({"event": "oreno_authors_loading", "loading": True, "site_key": site_key})
+    try:
+        page = max(1, page or 1)
+        soup = await asyncio.to_thread(_oreno_soup, "/authors", {"page": page}, site_key)
+        conf = _oreno_conf(site_key)
+        authors: list[dict] = []
+        seen: set[str] = set()
+        for li in soup.select(conf["sel_group_li"]):
+            a = li.select_one(conf["sel_group_link"])
+            if not a:
+                continue
+            m = re.search(r"/authors/(\d+)", a.get("href") or "")
+            if not m:
+                continue
+            aid = m.group(1)
+            if aid in seen:
+                continue
+            seen.add(aid)
+            chara_el = a.select_one(conf["sel_group_chara"])
+            name = chara_el.get_text(strip=True) if chara_el else a.get_text(strip=True)[:30]
+            nums = [d.get_text(strip=True) for d in a.select(conf["sel_group_number"])]
+            authors.append({"id": aid, "name": name, "rank": nums[0] if nums else ""})
+        # 该页内嵌的作者热门视频（可顺带返回给前端直接看）
+        items = _oreno_parse_cards(soup, site_key)
+        emit({"event": "oreno_authors", "authors": authors, "items": items, "page": page,
+              "has_more": _oreno_has_next(soup, site_key), "site_key": site_key})
+    except Exception as exc:
+        emit({"event": "oreno_authors", "authors": [], "items": [], "page": page,
+              "has_more": False, "site_key": site_key, "error": f"获取作者列表失败: {exc}"})
+    finally:
+        emit({"event": "oreno_authors_loading", "loading": False, "site_key": site_key})
+
+
+def _oreno_fav_path() -> Path:
+    return Path("cache/oreno_favorites.json")
+
+
+def _oreno_fav_load() -> dict:
+    """本地收藏（两站通用，按 site_key 分组）：{site_key: {movie_id: 卡片dict}}。"""
+    try:
+        data = json.loads(_oreno_fav_path().read_text("utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _oreno_fav_save(data: dict) -> None:
+    _oreno_fav_path().parent.mkdir(parents=True, exist_ok=True)
+    _oreno_fav_path().write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
+
+
+async def oreno_toggle_favorite(movie_id: str, card: dict, site_key: str = "oreno3d") -> None:
+    """本地收藏/取消收藏（站点无服务端账号体系，收藏保存在本地）。"""
+    try:
+        data = _oreno_fav_load()
+        group = data.setdefault(site_key, {})
+        movie_id = str(movie_id)
+        if movie_id in group:
+            group.pop(movie_id)
+            saved = False
+        else:
+            card = dict(card or {})
+            card["video_id"] = movie_id
+            card["site_key"] = site_key
+            card["saved_at"] = int(time.time())
+            group[movie_id] = card
+            saved = True
+        _oreno_fav_save(data)
+        emit({"event": "oreno_fav_result", "video_id": movie_id, "saved": saved,
+              "site_key": site_key})
+    except Exception as exc:
+        emit({"event": "oreno_fav_result", "video_id": str(movie_id), "saved": False,
+              "site_key": site_key, "error": f"收藏操作失败: {exc}"})
+
+
+async def oreno_favorites(site_key: str = "oreno3d") -> None:
+    """本地收藏列表。"""
+    emit({"event": "oreno_list_loading", "loading": True, "site_key": site_key})
+    try:
+        group = (_oreno_fav_load().get(site_key)) or {}
+        items = sorted(group.values(), key=lambda x: -(x.get("saved_at") or 0))
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        emit({"event": "oreno_list", "type": "favorites", "id": "", "name": "我的收藏",
+              "site_key": site_key, "items": items, "page": 1, "has_more": False, "sort": ""})
+    except Exception as exc:
+        emit({"event": "oreno_list", "type": "favorites", "id": "", "site_key": site_key,
+              "items": [], "page": 1, "has_more": False, "error": f"获取收藏失败: {exc}"})
+    finally:
+        emit({"event": "oreno_list_loading", "loading": False, "site_key": site_key})
+
+
+async def oreno_tags_index(site_key: str = "oreno3d") -> None:
+    """标签列表 + 热门分类组（tag-groups，名称含作品总数）。"""
+    emit({"event": "oreno_tags_loading", "loading": True, "site_key": site_key})
+    try:
+        soup = await asyncio.to_thread(_oreno_soup, "/tags", None, site_key)
         tags: list[dict] = []
         for a in soup.select("a[href^='/tags/']"):
             m = re.search(r"/tags/(\d+)", a.get("href") or "")
             if not m:
                 continue
-            name = a.get_text(strip=True)
+            name = _oreno_link_text(a)
             if name:
                 tags.append({"id": m.group(1), "name": name})
         # 去重
@@ -6841,85 +7190,196 @@ async def oreno_tags_index() -> None:
             if t["id"] not in seen:
                 seen.add(t["id"])
                 unique.append(t)
-        emit({"event": "oreno_tags", "tags": unique[:500]})
+        # 热门分类组：文本形如 "キャラクター設定 5タグ 171477 作品" → 名称 + 作品总数
+        groups: list[dict] = []
+        for a in soup.select("a[href*='/tag-groups/']"):
+            m = re.search(r"/tag-groups/(\d+)", a.get("href") or "")
+            if not m:
+                continue
+            text = " ".join(_oreno_link_text(a).split())
+            if not text:
+                continue
+            cnt = ""
+            pm = re.search(r"([\d.,]+)\s*作品", text)
+            if pm:
+                cnt = pm.group(1)
+            # 名称 = 首个 "Nタグ/N作品" 数字段之前的文本
+            nm = re.search(r"\s*[\d.,]+\s*(?:タグ|本|作品)", text)
+            name = (text[:nm.start()].strip() if nm else "").strip() or text
+            groups.append({"id": m.group(1), "name": name, "count": cnt})
+        emit({"event": "oreno_tags", "tags": unique[:500], "groups": groups,
+              "site_key": site_key})
     except Exception as exc:
-        emit({"event": "oreno_tags", "tags": [], "error": f"获取标签列表失败: {exc}"})
+        emit({"event": "oreno_tags", "tags": [], "groups": [], "site_key": site_key,
+              "error": f"获取标签列表失败: {exc}"})
     finally:
-        emit({"event": "oreno_tags_loading", "loading": False})
+        emit({"event": "oreno_tags_loading", "loading": False, "site_key": site_key})
 
 
-def _oreno_extract_iwara_id(soup: BeautifulSoup) -> str:
-    """详情页提取 iwara 视频 ID（a.video-watch-btn2 的 href）。"""
-    btn = soup.select_one("a.video-watch-btn2")
+async def oreno_tag_group(group_id: str, site_key: str = "oreno3d") -> None:
+    """热门分类组内的标签列表（/tag-groups/{id}）。"""
+    emit({"event": "oreno_tags_loading", "loading": True, "site_key": site_key})
+    try:
+        soup = await asyncio.to_thread(
+            _oreno_soup, f"/tag-groups/{group_id}", None, site_key)
+        h = soup.select_one("h1, h2")
+        title = _oreno_link_text(h) if h else f"分类组 {group_id}"
+        tags: list[dict] = []
+        seen = set()
+        for a in soup.select("a[href^='/tags/']"):
+            m = re.search(r"/tags/(\d+)", a.get("href") or "")
+            if not m or m.group(1) in seen:
+                continue
+            name = _oreno_link_text(a)
+            if name:
+                seen.add(m.group(1))
+                tags.append({"id": m.group(1), "name": name})
+        emit({"event": "oreno_tags", "tags": tags, "groups": [],
+              "group_title": title, "site_key": site_key})
+    except Exception as exc:
+        emit({"event": "oreno_tags", "tags": [], "groups": [], "site_key": site_key,
+              "error": f"获取分类组失败: {exc}"})
+    finally:
+        emit({"event": "oreno_tags_loading", "loading": False, "site_key": site_key})
+
+
+def _oreno_extract_iwara_id(soup: BeautifulSoup, site_key: str = "oreno3d") -> str:
+    """详情页提取 iwara 视频 ID（oreno3d: a.video-watch-btn2 / erommdtube: figure.show__figure>a）。"""
+    conf = _oreno_conf(site_key)
+    hrefs: list[str] = []
+    btn = soup.select_one(conf["sel_iwara_btn"]) if conf["sel_iwara_btn"] else None
     if btn:
-        m = re.search(r"iwara\.tv/video/([A-Za-z0-9]+)", btn.get("href") or "")
+        hrefs.append(btn.get("href") or "")
+    if conf["sel_iwara_fig"]:
+        fig = soup.select_one(conf["sel_iwara_fig"])
+        if fig:
+            hrefs.append(fig.get("href") or "")
+    for href in hrefs:
+        m = re.search(r"iwara\.tv/video/([A-Za-z0-9]+)", href)
         if m:
             return m.group(1)
     m = re.search(r"https?://www\.iwara\.tv/video/([A-Za-z0-9]+)", soup.get_text() or "")
     return m.group(1) if m else ""
 
 
-async def oreno_detail(movie_id: str) -> None:
-    """Oreno3D 视频详情：标题/作者/标签/统计 + iwara 源信息（复用 Iwara API 播放/下载）。"""
-    emit({"event": "oreno_detail_loading", "loading": True})
+async def oreno_detail(movie_id: str, site_key: str = "oreno3d") -> None:
+    """视频详情：标题/作者/原作/角色/标签/统计/作者描述(含网盘链接)/相关推荐 + iwara 源。"""
+    emit({"event": "oreno_detail_loading", "loading": True, "site_key": site_key})
     try:
-        soup = await asyncio.to_thread(_oreno_soup, f"/movies/{movie_id}")
-        h1 = soup.select_one("h1.video-h1")
-        img = soup.select_one("img.video-img")
+        conf = _oreno_conf(site_key)
+        soup = await asyncio.to_thread(_oreno_soup, f"/movies/{movie_id}", None, site_key)
+        h1 = soup.select_one(conf["sel_h1_detail"])
+        img = soup.select_one(conf["sel_img_detail"])
         thumb = (img.get("src") or "") if img else ""
         if thumb.startswith("/"):
-            thumb = ORENO_BASE + thumb
-        # 作者（video-section-tag 内 /authors/ 链接）
+            thumb = conf["base"] + thumb
+        # 作者（链接内 <i class="material-icons">face</i><div>hadoru</div> → 取 div 或去图标文本）
         author = ""
         author_id = ""
-        for a in soup.select("section.video-section-tag a[href^='/authors/']"):
-            author = a.get_text(strip=True)
+        for a in soup.select(conf["sel_author_link"]):
+            div = a.select_one("div.video-center, div.c-txt, span")
+            author = (div.get_text(strip=True) if div else _oreno_link_text(a)) or ""
+            author = _oreno_link_text(a) if not author else author
             m = re.search(r"/authors/(\d+)", a.get("href") or "")
             if m:
                 author_id = m.group(1)
             break
-        # 标签
+        # 标签 / 原作 / 角色（按 href 前缀区分；名称去掉 material icon 文本；按 id 去重）
         tags: list[dict] = []
-        for a in soup.select("ul.video-tag a[href^='/tags/']"):
-            name_el = a.select_one("div.tag-text")
-            name = (name_el.get_text(strip=True) if name_el else "") or a.get_text(strip=True)
-            m = re.search(r"/tags/(\d+)", a.get("href") or "")
-            if name and m:
-                tags.append({"id": m.group(1), "name": name})
-        # 统计（video-text：日期 / 观看数 / 点赞数）
+        origins: list[dict] = []
+        characters: list[dict] = []
+        _seen_meta: set[str] = set()
+        for a in soup.select(conf["sel_tag_links"]):
+            name_el = a.select_one(conf["sel_tag_text"]) if conf["sel_tag_text"] else None
+            name = (name_el.get_text(strip=True) if name_el else "") or _oreno_link_text(a)
+            href = a.get("href") or ""
+            tm = re.search(r"/tags/(\d+)", href)
+            om = re.search(r"/origins/(\d+)", href)
+            cm = re.search(r"/characters/(\d+)", href)
+            mid = (tm or om or cm)
+            if not mid or not name:
+                continue
+            key = f"{mid.re.pattern}|{mid.group(1)}"
+            if key in _seen_meta:
+                continue
+            _seen_meta.add(key)
+            if tm:
+                tags.append({"id": tm.group(1), "name": name})
+            elif om:
+                origins.append({"id": om.group(1), "name": name})
+            elif cm:
+                characters.append({"id": cm.group(1), "name": name})
+        # 统计（日期 / 时长 / 观看数 / 点赞数）
         date = ""
         views = ""
         likes = ""
-        text_el = soup.select_one("div.video-text")
+        text_el = soup.select_one(conf["sel_stat_text"])
         if text_el:
             text = text_el.get_text(" ", strip=True)
-            dm = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+            dm = re.search(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2})", text)
             if dm:
-                date = dm.group(1)
-        for div in soup.select("div.video-text, div.video-text-in"):
-            t = div.get_text(" ", strip=True)
-            vm = re.search(r"(?:再生|再生数|閲覧)\s*[：:]?\s*([\d.,]+[km]?)", t)
+                date = dm.group(1).replace("/", "-")
+        stat_texts = [d.get_text(" ", strip=True) for d in soup.select("div.video-text, div.video-text-in, ul.show__count li")]
+        # erommdtube: "投稿日：2018/11/19" / "151032 再生" / "1300 お気に入り"
+        for t in stat_texts:
+            if not date:
+                dm = re.search(r"(?:投稿日|投稿)\s*[：:]?\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})", t)
+                if dm:
+                    date = dm.group(1).replace("/", "-")
+            vm = re.search(r"(?:再生|再生数|閲覧)\s*[：:]?\s*([\d.,]+[km]?)", t) or \
+                re.search(r"([\d.,]+[km]?)\s*(?:再生|再生数|閲覧)", t)
             if vm:
                 views = vm.group(1)
-            lm = re.search(r"(?:お気に入り|ファボ)\s*[：:]?\s*([\d.,]+[km]?)", t)
+            lm = re.search(r"(?:お気に入り|ファボ|いいね)\s*[：:]?\s*([\d.,]+[km]?)", t) or \
+                re.search(r"([\d.,]+[km]?)\s*(?:お気に入り|ファボ|いいね)", t)
             if lm:
                 likes = lm.group(1)
-        iwara_id = _oreno_extract_iwara_id(soup)
+        # oreno3d: video-text 为纯数字序列（日期/时长/再生数/评论标签/收藏数）
+        if not views or not likes:
+            nums = [t for t in stat_texts if re.fullmatch(r"[\d.,]+[km]?", t)]
+            if len(nums) >= 1 and not views:
+                views = nums[0]
+            if len(nums) >= 2 and not likes:
+                likes = nums[1]
+        # 作者描述（常含 MEGA/Patreon 等网盘链接）
+        comment = ""
+        megas: list[str] = []
+        bq = soup.select_one(conf["sel_comment"])
+        if bq:
+            comment = bq.get_text("\n", strip=True)
+            for href in re.findall(r"https?://[^\s\"'<>]+", bq.decode() if hasattr(bq, "decode") else str(bq)):
+                if any(k in href.lower() for k in ("mega.nz", "mega.co", "patreon", "drive.google", "pixeldrain", "kemono")):
+                    megas.append(href)
+            if not megas:
+                for href in re.findall(r"https?://[^\s\"'<>]+", comment):
+                    if any(k in href.lower() for k in ("mega.nz", "mega.co", "patreon", "drive.google", "pixeldrain", "kemono")):
+                        megas.append(href)
+        iwara_id = _oreno_extract_iwara_id(soup, site_key)
         video = {
-            "album_name": (h1.get_text(strip=True) if h1 else "") or f"oreno3d_{movie_id}",
-            "album_url": f"{ORENO_BASE}/movies/{movie_id}",
+            "album_name": (h1.get_text(strip=True) if h1 else "") or f"{site_key}_{movie_id}",
+            "album_url": f"{conf['base']}/movies/{movie_id}",
             "video_id": movie_id,
-            "site": "oreno",
+            "site": "oreno" if site_key == "oreno3d" else "erommd",
+            "site_key": site_key,
             "thumbnail": thumb,
             "author": author,
             "author_id": author_id,
             "tags": tags,
+            "origins": origins,
+            "characters": characters,
             "post_date": date,
             "views": views,
             "likes": likes,
+            "comment": comment,
+            "mega_links": megas,
             "iwara_id": iwara_id,
             "iwara_url": f"https://www.iwara.tv/video/{iwara_id}" if iwara_id else "",
+            "related": [],
         }
+        # 相关视频推荐（同列表卡片结构）
+        related_sec = soup.select_one(conf["sel_related"])
+        if related_sec:
+            video["related"] = _oreno_parse_cards(related_sec, site_key)[:12]
         # 通过 Iwara API 解析播放直链（最高画质）
         iwara_info: dict = {}
         if iwara_id:
@@ -6938,26 +7398,29 @@ async def oreno_detail(movie_id: str) -> None:
                         "video_url": play_url,
                     }
             except Exception as exc:
-                logging.warning("Oreno3D iwara 源解析失败: %s", exc)
+                logging.warning("%s iwara 源解析失败: %s", conf["label"], exc)
         video.update(iwara_info)
+        # 收藏状态（本地）
+        video["saved"] = str(movie_id) in ((_oreno_fav_load().get(site_key)) or {})
         _apply_cached_thumbnails([video])
         asyncio.create_task(_cache_thumbnails([video]))
-        emit({"event": "oreno_video_detail", "video": video})
-        logging.info("Oreno3D 视频详情: %s (iwara=%s)", movie_id, iwara_id)
+        emit({"event": "oreno_video_detail", "video": video, "site_key": site_key})
+        logging.info("%s 视频详情: %s (iwara=%s)", conf["label"], movie_id, iwara_id)
     except Exception as exc:
-        emit({"event": "oreno_video_detail", "video": None,
+        emit({"event": "oreno_video_detail", "video": None, "site_key": site_key,
               "error": f"获取视频详情失败: {exc}（请检查网络或代理设置）"})
-        logging.exception("Oreno3D 视频详情获取失败")
+        logging.exception("%s 视频详情获取失败", _oreno_conf(site_key)["label"])
     finally:
-        emit({"event": "oreno_detail_loading", "loading": False})
+        emit({"event": "oreno_detail_loading", "loading": False, "site_key": site_key})
 
 
-async def oreno_batch_download(video_ids: list, options: dict) -> None:
-    """批量下载 Oreno3D 视频：解析 iwara ID 后复用 Iwara 下载逻辑（最高画质）。"""
+async def oreno_batch_download(video_ids: list, options: dict, site_key: str = "oreno3d") -> None:
+    """批量下载视频：解析 iwara ID 后复用 Iwara 下载逻辑（最高画质）。"""
+    conf = _oreno_conf(site_key)
     video_ids = [str(v).strip() for v in (video_ids or []) if str(v).strip()]
     if not video_ids:
         emit({"event": "oreno_batch_done", "done": 0, "total": 0, "failed": [],
-              "message": "请先勾选要下载的视频"})
+              "site_key": site_key, "message": "请先勾选要下载的视频"})
         return
     total = len(video_ids)
     failed: list[str] = []
@@ -6965,8 +7428,8 @@ async def oreno_batch_download(video_ids: list, options: dict) -> None:
     try:
         for i, mid in enumerate(video_ids):
             try:
-                soup = await asyncio.to_thread(_oreno_soup, f"/movies/{mid}")
-                iwara_id = _oreno_extract_iwara_id(soup)
+                soup = await asyncio.to_thread(_oreno_soup, f"/movies/{mid}", None, site_key)
+                iwara_id = _oreno_extract_iwara_id(soup, site_key)
                 if iwara_id:
                     iwara_ids.append(iwara_id)
                 else:
@@ -6974,22 +7437,22 @@ async def oreno_batch_download(video_ids: list, options: dict) -> None:
             except Exception as exc:
                 failed.append(f"{mid}（{exc}）")
             emit({"event": "oreno_batch_progress", "done": i + 1, "total": total,
-                  "message": f"解析进度 {i + 1}/{total}"})
+                  "site_key": site_key, "message": f"解析进度 {i + 1}/{total}"})
         items: list[dict] = []
         if iwara_ids:
             items = await _iwara_build_items(iwara_ids)
         if items:
             task_id = download_manager.submit(
-                f"{ORENO_BASE}/", items, options, "Oreno3D 批量下载", "oreno_batch",
+                f"{conf['base']}/", items, options, f"{conf['label']} 批量下载", "oreno_batch",
             )
             download_manager.start(task_id)
         summary = f"批量下载已提交：{len(items)}/{total}"
         if failed:
             summary += f"；失败：{'、'.join(failed)}"
         emit({"event": "oreno_batch_done", "done": len(items), "total": total,
-              "failed": failed, "message": summary})
+              "site_key": site_key, "failed": failed, "message": summary})
     except Exception as exc:
-        emit({"event": "oreno_batch_done", "done": 0, "total": total,
+        emit({"event": "oreno_batch_done", "done": 0, "total": total, "site_key": site_key,
               "failed": failed, "message": f"批量下载中断: {exc}"})
 
 
@@ -6998,9 +7461,18 @@ def is_hanime_url(url: str) -> bool:
     return bool(re.search(r"hanime1\.me/watch\?v=\w+", url, re.I))
 
 
-def is_oreno_url(url: str) -> bool:
-    """判断是否为 Oreno3D 链接（/movies/{id}）。"""
-    return bool(re.search(r"oreno3d\.com/movies/\d+", url, re.I))
+def is_oreno_url(url: str) -> str | None:
+    """判断是否为 Oreno3D / EroMMDTube 链接（/movies/{id}），返回 site_key 或 None。"""
+    if re.search(r"oreno3d\.com/movies/\d+", url, re.I):
+        return "oreno3d"
+    if re.search(r"erommdtube\.com/movies/\d+", url, re.I):
+        return "erommdtube"
+    return None
+
+
+def is_asmr_url(url: str) -> bool:
+    """判断是否为 ASMR 站链接（asmr-100.com / asmr.one 作品页 /work/{id}）。"""
+    return bool(re.search(r"asmr-100\.com/work/\d+|asmr\.one/work/\d+", url, re.I))
 
 
 async def hanime_inspect(url: str, options: dict) -> None:
@@ -7049,15 +7521,17 @@ async def hanime_inspect(url: str, options: dict) -> None:
 
 
 async def oreno_inspect(url: str, options: dict) -> None:
-    """解析 Oreno3D 视频页 → iwara 源文件列表（复用 Iwara 下载逻辑）。"""
+    """解析 Oreno3D / EroMMDTube 视频页 → iwara 源文件列表（复用 Iwara 下载逻辑）。"""
+    site_key = is_oreno_url(url) or "oreno3d"
+    conf = _oreno_conf(site_key)
     m = re.search(r"/movies/(\d+)", url)
     if not m:
-        emit({"event": "inspect_error", "message": "无法识别的 Oreno3D 链接（支持 /movies/{id}）"})
+        emit({"event": "inspect_error", "message": f"无法识别的 {conf['label']} 链接（支持 /movies/{{id}}）"})
         return
     mid = m.group(1)
     try:
-        soup = await asyncio.to_thread(_oreno_soup, f"/movies/{mid}")
-        iwara_id = _oreno_extract_iwara_id(soup)
+        soup = await asyncio.to_thread(_oreno_soup, f"/movies/{mid}", None, site_key)
+        iwara_id = _oreno_extract_iwara_id(soup, site_key)
         if not iwara_id:
             emit({"event": "inspect_error", "message": "该视频没有找到 iwara 源，无法下载"})
             return
@@ -7065,8 +7539,8 @@ async def oreno_inspect(url: str, options: dict) -> None:
         if not items:
             emit({"event": "inspect_error", "message": "iwara 源解析失败（视频可能已删除或需登录）"})
             return
-        h1 = soup.select_one("h1.video-h1")
-        album = (h1.get_text(strip=True) if h1 else "") or items[0].get("post_title") or f"oreno3d_{mid}"
+        h1 = soup.select_one(conf["sel_h1_detail"])
+        album = (h1.get_text(strip=True) if h1 else "") or items[0].get("post_title") or f"{site_key}_{mid}"
         album_id = f"oreno_{mid}"
         _apply_cached_thumbnails(items)
         _mark_items_new(album_id, items)
@@ -7078,11 +7552,609 @@ async def oreno_inspect(url: str, options: dict) -> None:
             "items": items,
         })
         asyncio.create_task(_cache_thumbnails(items))
-        logging.info("Oreno3D 解析完成: %s (iwara=%s)", mid, iwara_id)
+        logging.info("%s 解析完成: %s (iwara=%s)", conf["label"], mid, iwara_id)
     except Exception as exc:
         emit({"event": "inspect_error",
-              "message": f"Oreno3D 解析失败: {exc}（请检查网络或代理设置）"})
-        logging.exception("Oreno3D 解析过程出错")
+              "message": f"{conf['label']} 解析失败: {exc}（请检查网络或代理设置）"})
+        logging.exception("%s 解析过程出错", conf["label"])
+
+
+# ============================
+# asmr-100.com（音声站，Kikoeru 系统，API 网关 + 多域名容灾）
+# ============================
+# - API：https://api.asmr-200.com（可容灾切换 api.asmr.one / api.asmr-100.com / api.asmr-300.com，token 互通）
+# - 登录：POST /api/auth/me {name, password}（勿带 Authorization 头）→ JWT（365 天）
+# - 热门：POST /api/recommender/popular {page, pageSize}（勿传空数组参数，会 400）
+# - 列表：GET /api/works（order/sort/page/pageSize/subtitle，支持 circleId/tagId/vaId 筛选）
+# - 详情：GET /api/work/{id}；音轨树：GET /api/tracks/{id}?v=2（folder/audio/text 三种节点）
+# - 音频：GET /api/media/stream/{workId}/{fileId}（播放）/api/media/download/{workId}/{fileId}（下载）
+#   → 匿名可用、无签名、支持 Range 断点续传
+# - 收藏：PUT /api/review {work_id, progress:"marked"} / DELETE /api/review?work_id=
+# - 收藏列表：GET /api/review?filter=marked
+ASMR_API_BASES = [
+    "https://api.asmr-200.com",
+    "https://api.asmr.one",
+    "https://api.asmr-100.com",
+    "https://api.asmr-300.com",
+]
+ASMR_SITE = "https://asmr-100.com"
+ASMR_ORDERS = {
+    "release": "发售日", "create_date": "最新入库", "dl_count": "下载量",
+    "price": "价格", "rate_average_2dp": "评分", "review_count": "评论数",
+}
+
+_asmr_proxy = ""
+_asmr_token = ""
+_asmr_username = ""
+_asmr_api_base = ASMR_API_BASES[0]
+_asmr_last_req = 0.0
+_asmr_session = requests.Session()
+_asmr_session.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Origin": ASMR_SITE,
+    "Referer": ASMR_SITE + "/",
+})
+
+
+def asmr_set_proxy(proxy: str) -> None:
+    """设置 ASMR 站代理（空 = 直连）。"""
+    global _asmr_proxy
+    _asmr_proxy = (proxy or "").strip()
+    if _asmr_proxy and not _asmr_proxy.startswith(("http://", "https://", "socks5://")):
+        _asmr_proxy = "http://" + _asmr_proxy
+    proxies = {"http": _asmr_proxy, "https": _asmr_proxy} if _asmr_proxy else {}
+    _asmr_session.proxies = proxies
+    emit({"event": "asmr_proxy_set", "proxy": _asmr_proxy})
+
+
+def _asmr_throttle(min_interval: float = 0.3) -> None:
+    global _asmr_last_req
+    wait = _asmr_last_req + min_interval - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    _asmr_last_req = time.time()
+
+
+def _asmr_load_cred() -> dict:
+    return _secure_store_read_cred("asmr")
+
+
+def _asmr_save_cred(cred: dict) -> None:
+    _secure_store_write_cred("asmr", cred)
+
+
+def _asmr_auth_headers() -> dict:
+    if _asmr_token:
+        return {"Authorization": f"Bearer {_asmr_token}"}
+    return {}
+
+
+def _asmr_api(
+    method: str,
+    path: str,
+    json_body: dict | None = None,
+    params: dict | None = None,
+    auth: bool = True,
+) -> dict | list:
+    """ASMR API 请求（JSON），多域名容灾：主域名失败依次切换备用域名。"""
+    global _asmr_api_base
+    headers = dict(_asmr_session.headers)
+    if auth and _asmr_token:
+        headers["Authorization"] = f"Bearer {_asmr_token}"
+    bases = [_asmr_api_base] + [b for b in ASMR_API_BASES if b != _asmr_api_base]
+    last_exc: Exception | None = None
+    for base in bases:
+        _asmr_throttle()
+        try:
+            resp = _asmr_session.request(
+                method, f"{base}{path}", json=json_body, params=params,
+                headers=headers, timeout=30,
+            )
+            if resp.status_code in (200, 201):
+                _asmr_api_base = base
+                return resp.json() if resp.content else {}
+            last_exc = PermissionError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            # 401 = token 失效，切换域名无意义
+            if resp.status_code == 401:
+                break
+        except requests.RequestException as exc:
+            last_exc = exc
+    raise last_exc or PermissionError("ASMR API 请求失败")
+
+
+def _asmr_work_card(w: dict) -> dict:
+    """API work 对象 → 前端作品卡片。"""
+    tags = [t.get("name") or t.get("i18n", {}).get("zh-cn") or "" for t in (w.get("tags") or [])]
+    vas = [v.get("name") or "" for v in (w.get("vas") or [])]
+    return {
+        "album_name": w.get("title") or "",
+        "album_url": f"{ASMR_SITE}/work/{w.get('id')}",
+        "thumbnail": w.get("mainCoverUrl") or "",
+        "files": (w.get("duration") and 1) or 1,
+        "site": "asmr",
+        "video_id": str(w.get("id") or ""),
+        "author": w.get("name") or "",  # 社团名
+        "circle_id": str(w.get("circle_id") or ""),
+        "views": w.get("dl_count"),
+        "likes": w.get("rate_average_2dp"),
+        "rating": w.get("rate_average_2dp"),
+        "price": w.get("price"),
+        "nsfw": bool(w.get("nsfw")),
+        "duration": w.get("duration"),  # 分钟
+        "has_subtitle": bool(w.get("has_subtitle")),
+        "post_date": (w.get("release") or "")[:10],
+        "source_id": w.get("source_id") or "",
+        "tags": [t for t in tags if t],
+        "vas": [v for v in vas if v],
+        "review_count": w.get("review_count"),
+    }
+
+
+def asmr_login(name: str, password: str, silent: bool = False) -> None:
+    """登录 ASMR 站（用户名+密码 → JWT，365 天有效）。"""
+    global _asmr_token, _asmr_username
+    name = (name or "").strip()
+    password = password or ""
+    if not name or not password:
+        if not silent:
+            emit({"event": "asmr_login_result", "success": False, "message": "请输入用户名和密码"})
+        return
+    try:
+        _asmr_throttle()
+        # 登录请求勿带 Authorization 头
+        resp = _asmr_session.post(
+            f"{_asmr_api_base}/api/auth/me",
+            json={"name": name, "password": password}, timeout=30,
+        )
+        if resp.status_code != 200:
+            msg = "用户名或密码错误" if resp.status_code in (401, 422) else f"登录失败（HTTP {resp.status_code}）"
+            emit({"event": "asmr_login_result", "success": False, "message": msg,
+                  "network_issue": resp.status_code >= 500})
+            return
+        data = resp.json()
+        token = data.get("token") or ""
+        user = data.get("user") or {}
+        if not token or not user.get("loggedIn"):
+            emit({"event": "asmr_login_result", "success": False, "message": "登录失败（服务器未返回有效 token）"})
+            return
+        _asmr_token = token
+        _asmr_username = user.get("name") or name
+        # token + 密码一起加密持久化（失效自动重登）
+        _asmr_save_cred({"token": token, "username": _asmr_username, "password": password})
+        emit({"event": "asmr_login_result", "success": True, "silent": silent,
+              "username": _asmr_username, "message": f"已登录：{_asmr_username}"})
+        _emit_login_info()
+        logging.info("ASMR 登录成功: %s", _asmr_username)
+    except requests.RequestException as exc:
+        emit({"event": "asmr_login_result", "success": False, "network_issue": True,
+              "silent": silent, "message": f"网络错误：登录请求失败（{exc}），请检查网络或代理设置"})
+    except Exception as exc:
+        emit({"event": "asmr_login_result", "success": False, "network_issue": True,
+              "silent": silent, "message": f"登录出错：{exc}"})
+
+
+def asmr_logout() -> None:
+    """退出登录（清除本地 token）。"""
+    global _asmr_token, _asmr_username
+    _asmr_token = ""
+    _asmr_username = ""
+    _secure_store_clear_cred("asmr")
+    emit({"event": "asmr_login_result", "success": True, "logout": True, "username": "",
+          "message": "已退出登录"})
+    _emit_login_info()
+
+
+def asmr_check_login(silent: bool = False) -> None:
+    """检查登录状态；token 失效时用保存的密码自动重登。"""
+    global _asmr_token, _asmr_username
+    cred = _asmr_load_cred()
+    token = cred.get("token") or ""
+    if not token:
+        if not silent:
+            emit({"event": "asmr_login_result", "success": False, "message": "未登录"})
+        return
+    _asmr_token = token
+    _asmr_username = cred.get("username") or ""
+    try:
+        data = _asmr_api("GET", "/api/auth/me")
+        user = data.get("user") or {}
+        if user.get("loggedIn"):
+            _asmr_username = user.get("name") or _asmr_username
+            emit({"event": "asmr_login_result", "success": True, "silent": silent,
+                  "username": _asmr_username})
+            _emit_login_info()
+            return
+    except Exception as exc:
+        logging.warning("ASMR 登录检查失败: %s", exc)
+    # token 失效 → 用保存的密码重登
+    if cred.get("password"):
+        asmr_login(cred.get("username") or "", cred.get("password"), silent=True)
+    elif not silent:
+        emit({"event": "asmr_login_result", "success": False,
+              "message": "登录已失效，请重新登录"})
+
+
+def _asmr_tracks_flatten(nodes: list, parent: str = "") -> list[dict]:
+    """音轨树 → 平铺文件列表（保留文件夹相对路径）。"""
+    files: list[dict] = []
+    for node in nodes or []:
+        ntype = node.get("type")
+        title = node.get("title") or ""
+        if ntype == "folder":
+            sub = f"{parent}/{title}" if parent else title
+            files.extend(_asmr_tracks_flatten(node.get("children") or [], sub))
+        elif ntype in ("audio", "text"):
+            hash_ = node.get("hash") or ""
+            if not hash_:
+                continue
+            work_id, file_id = hash_.split("/", 1) if "/" in hash_ else ("", hash_)
+            media_url = node.get("mediaDownloadUrl") or (
+                f"{_asmr_api_base}/api/media/download/{hash_}")
+            if media_url.startswith("//"):
+                media_url = "https:" + media_url
+            files.append({
+                "title": title,
+                "path": parent,
+                "type": ntype,
+                "duration": node.get("duration"),
+                "size": node.get("size"),
+                "work_id": work_id,
+                "file_id": file_id,
+                "media_url": media_url,
+                "stream_url": f"{_asmr_api_base}/api/media/stream/{hash_}",
+            })
+    return files
+
+
+async def asmr_popular(page: int = 1) -> None:
+    """热门作品（每页 100，可翻页抓取 100+）。"""
+    emit({"event": "asmr_list_loading", "loading": True, "view": "popular"})
+    try:
+        page = max(1, page or 1)
+        data = await asyncio.to_thread(
+            _asmr_api, "POST", "/api/recommender/popular",
+            {"page": page, "pageSize": 100}, None, False,
+        )
+        works = data.get("works") or data or []
+        items = [_asmr_work_card(w) for w in works if isinstance(w, dict) and w.get("id")]
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        pagination = data.get("pagination") or {}
+        emit({"event": "asmr_list", "view": "popular", "items": items, "page": page,
+              "has_more": page < max(1, (pagination.get("totalCount") or 0) // 100 + 1),
+              "label": "热门作品"})
+        logging.info("ASMR 热门第 %d 页: %d 个作品", page, len(items))
+    except Exception as exc:
+        emit({"event": "asmr_list", "view": "popular", "items": [], "page": page,
+              "has_more": False, "error": f"获取热门作品失败: {exc}（请检查网络或代理设置）"})
+        logging.exception("ASMR 热门获取失败")
+    finally:
+        emit({"event": "asmr_list_loading", "loading": False, "view": "popular"})
+
+
+async def asmr_works(
+    page: int = 1, order: str = "create_date", sort: str = "desc",
+    subtitle: bool = False, circle_id: str = "", tag_id: str = "", va_id: str = "",
+    view: str = "works", label: str = "",
+) -> None:
+    """作品列表（最新入库等排序 + 社团/标签/声优筛选 + 可勾选仅带字幕）。"""
+    emit({"event": "asmr_list_loading", "loading": True, "view": view})
+    try:
+        page = max(1, page or 1)
+        params: dict = {
+            "page": page, "pageSize": 50,
+            "order": order or "create_date", "sort": sort or "desc",
+        }
+        if subtitle:
+            params["subtitle"] = 1
+        if circle_id:
+            params["circleId"] = circle_id
+        if tag_id:
+            params["tagId"] = tag_id
+        if va_id:
+            params["vas"] = va_id
+        data = await asyncio.to_thread(_asmr_api, "GET", "/api/works", None, params, False)
+        works = data.get("works") or []
+        items = [_asmr_work_card(w) for w in works if isinstance(w, dict) and w.get("id")]
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        pagination = data.get("pagination") or {}
+        total = pagination.get("totalCount") or 0
+        has_more = page * 50 < total
+        emit({"event": "asmr_list", "view": view, "items": items, "page": page,
+              "has_more": has_more, "total": total, "label": label or "作品列表",
+              "orders": ASMR_ORDERS})
+    except Exception as exc:
+        emit({"event": "asmr_list", "view": view, "items": [], "page": page,
+              "has_more": False, "error": f"获取作品列表失败: {exc}"})
+        logging.exception("ASMR 作品列表获取失败")
+    finally:
+        emit({"event": "asmr_list_loading", "loading": False, "view": view})
+
+
+async def asmr_search(query: str, page: int = 1, subtitle: bool = False) -> None:
+    """关键词搜索（支持 RJ 号 / 标题 / 社团名 / 标签）。"""
+    query = (query or "").strip()
+    if not query:
+        emit({"event": "search_error", "message": "搜索关键词为空"})
+        return
+    emit({"event": "search_loading", "loading": True})
+    try:
+        page = max(1, page or 1)
+        params: dict = {
+            "page": page, "pageSize": 50,
+            "orderBy": "create_date", "sort": "desc",
+        }
+        if subtitle:
+            params["subtitle"] = 1
+        from urllib.parse import quote
+        data = await asyncio.to_thread(
+            _asmr_api, "GET", f"/api/search/{quote(query)}", None, params, False)
+        works = data.get("works") or []
+        items = [_asmr_work_card(w) for w in works if isinstance(w, dict) and w.get("id")]
+        emit({"event": "search_result", "query": query, "site": "asmr",
+              "items": items, "page": page,
+              "has_more": page * 50 < (data.get("pagination") or {}).get("totalCount", 0),
+              "label": query})
+        if items:
+            asyncio.create_task(_cache_thumbnails(items))
+        logging.info("ASMR 搜索 '%s': %d 个结果", query, len(items))
+    except Exception as exc:
+        emit({"event": "search_error",
+              "message": f"ASMR 搜索失败: {exc}（请检查网络或代理设置）"})
+        logging.exception("ASMR 搜索失败")
+    finally:
+        emit({"event": "search_loading", "loading": False})
+
+
+async def asmr_work_detail(work_id: str) -> None:
+    """作品详情：元数据 + 音轨树（在线播放走本地媒体代理）+ 收藏状态。"""
+    emit({"event": "asmr_detail_loading", "loading": True})
+    try:
+        work = await asyncio.to_thread(_asmr_api, "GET", f"/api/work/{work_id}", None, None, False)
+        try:
+            extra = await asyncio.to_thread(
+                _asmr_api, "GET", f"/api/workInfo/{work_id}", None, None, False)
+            if isinstance(extra, dict):
+                work.update({k: v for k, v in extra.items() if k not in work})
+        except Exception:
+            pass
+        tracks = await asyncio.to_thread(
+            _asmr_api, "GET", f"/api/tracks/{work_id}", None, {"v": 2}, False)
+        files = _asmr_tracks_flatten(tracks if isinstance(tracks, list) else [])
+        # 播放/下载地址转本地媒体代理（前端直接用）
+        for f in files:
+            f["play_url"] = media_proxy_url(f["stream_url"])
+        card = _asmr_work_card(work)
+        # 中文附加信息
+        card.update({
+            "description": (work.get("work_attributes") or {}),
+            "sam_cover": work.get("samCoverUrl") or "",
+            "circle": (work.get("circle") or {}),
+            "source_url": work.get("source_url") or "",
+            "create_date": (work.get("create_date") or "")[:10],
+            "file_count": len(files),
+        })
+        emit({"event": "asmr_video_detail", "video": card, "files": files,
+              "logged_in": bool(_asmr_token)})
+        asyncio.create_task(_cache_thumbnails([card]))
+        logging.info("ASMR 作品详情: %s (%d 个文件)", work_id, len(files))
+    except Exception as exc:
+        emit({"event": "asmr_video_detail", "video": None, "files": [],
+              "error": f"获取作品详情失败: {exc}（请检查网络或代理设置）"})
+        logging.exception("ASMR 作品详情获取失败")
+    finally:
+        emit({"event": "asmr_detail_loading", "loading": False})
+
+
+def _asmr_cache_list(kind: str) -> list[dict]:
+    """社团/标签/声优全量列表（API 返回全量，本地缓存 7 天）。"""
+    cache_file = Path(f"cache/asmr_{kind}.json")
+    if cache_file.exists():
+        try:
+            age = time.time() - cache_file.stat().st_mtime
+            if age < 7 * 86400:
+                data = json.loads(cache_file.read_text("utf-8"))
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+    path = {"circles": "/api/circles/", "tags": "/api/tags/", "vas": "/api/vas/"}[kind]
+    data = _asmr_api("GET", path, None, None, False)
+    data = data if isinstance(data, list) else []
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    return data
+
+
+async def asmr_browse_index(kind: str) -> None:
+    """社团/标签/声优索引（全量，含作品数与多语言名）。"""
+    event = {"circles": "asmr_circles", "tags": "asmr_tags", "vas": "asmr_vas"}[kind]
+    emit({"event": f"{event}_loading", "loading": True})
+    try:
+        data = await asyncio.to_thread(_asmr_cache_list, kind)
+        out: list[dict] = []
+        for item in data:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            i18n = item.get("i18n") or {}
+            name = item.get("name") or i18n.get("zh-cn") or i18n.get("en-us") or ""
+            if not name:
+                continue
+            out.append({"id": str(item["id"]), "name": name,
+                        "count": item.get("count") or 0})
+        out.sort(key=lambda x: -int(x["count"] or 0))
+        emit({"event": event, "items": out})
+        logging.info("ASMR %s 索引: %d 项", kind, len(out))
+    except Exception as exc:
+        emit({"event": event, "items": [], "error": f"获取{kind}列表失败: {exc}"})
+    finally:
+        emit({"event": f"{event}_loading", "loading": False})
+
+
+async def asmr_toggle_favorite(work_id: str, card: dict) -> None:
+    """收藏/取消收藏作品（PUT/DELETE /api/review，需登录）。"""
+    try:
+        if not _asmr_token:
+            emit({"event": "asmr_fav_result", "video_id": str(work_id), "saved": False,
+                  "error": "请先登录"})
+            return
+        # 查询当前是否已收藏
+        cur = _asmr_api("GET", "/api/review", None,
+                        {"order": "updated_at", "sort": "desc", "page": 1,
+                         "pageSize": 100, "filter": "marked"})
+        cur_ids = {str(w.get("id")) for w in (cur.get("works") or [])}
+        wid = str(work_id)
+        if wid in cur_ids:
+            _asmr_api("DELETE", "/api/review", None, {"work_id": work_id})
+            saved = False
+        else:
+            _asmr_api("PUT", "/api/review",
+                      {"work_id": int(work_id), "rating": 0,
+                       "review_text": "", "progress": "marked"})
+            saved = True
+        emit({"event": "asmr_fav_result", "video_id": wid, "saved": saved})
+    except Exception as exc:
+        emit({"event": "asmr_fav_result", "video_id": str(work_id), "saved": False,
+              "error": f"收藏操作失败: {exc}"})
+
+
+async def asmr_favorites(page: int = 1) -> None:
+    """我的收藏列表（需登录）。"""
+    emit({"event": "asmr_list_loading", "loading": True, "view": "favorites"})
+    try:
+        if not _asmr_token:
+            emit({"event": "asmr_list", "view": "favorites", "items": [], "page": 1,
+                  "has_more": False, "error": "请先登录"})
+            return
+        page = max(1, page or 1)
+        data = await asyncio.to_thread(
+            _asmr_api, "GET", "/api/review",
+            None, {"order": "updated_at", "sort": "desc", "page": page,
+                   "pageSize": 50, "filter": "marked"})
+        works = data.get("works") or []
+        items = [_asmr_work_card(w) for w in works if isinstance(w, dict) and w.get("id")]
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        total = (data.get("pagination") or {}).get("totalCount") or 0
+        emit({"event": "asmr_list", "view": "favorites", "items": items, "page": page,
+              "has_more": page * 50 < total, "label": "我的收藏"})
+    except Exception as exc:
+        emit({"event": "asmr_list", "view": "favorites", "items": [], "page": page,
+              "has_more": False, "error": f"获取收藏失败: {exc}"})
+    finally:
+        emit({"event": "asmr_list_loading", "loading": False, "view": "favorites"})
+
+
+async def asmr_batch_download(work_ids: list, options: dict) -> None:
+    """批量下载作品（整包）：每个作品遍历音轨树，逐文件下载（保留文件夹结构）。"""
+    work_ids = [str(v).strip() for v in (work_ids or []) if str(v).strip()]
+    if not work_ids:
+        emit({"event": "asmr_batch_done", "done": 0, "total": 0, "failed": [],
+              "message": "请先勾选要下载的作品"})
+        return
+    total = len(work_ids)
+    failed: list[str] = []
+    submitted = 0
+    try:
+        for i, wid in enumerate(work_ids):
+            try:
+                work = await asyncio.to_thread(
+                    _asmr_api, "GET", f"/api/work/{wid}", None, None, False)
+                tracks = await asyncio.to_thread(
+                    _asmr_api, "GET", f"/api/tracks/{wid}", None, {"v": 2}, False)
+                files = _asmr_tracks_flatten(tracks if isinstance(tracks, list) else [])
+                if not files:
+                    failed.append(f"{wid}（无文件）")
+                    continue
+                title = sanitize_directory_name(
+                    (work.get("title") or "").strip() or f"asmr_{wid}")
+                rj = work.get("source_id") or ""
+                album_name = f"{rj} {title}".strip() if rj else title
+                items: list[dict] = []
+                for f in files:
+                    rel = "/".join(p for p in [f["path"], f["title"]] if p)
+                    items.append({
+                        "filename": rel,
+                        "size": f.get("size"),
+                        "item_page": f"{ASMR_SITE}/work/{wid}",
+                        "status": "ok",
+                        "media_url": f["media_url"],
+                        "site": "asmr",
+                        "post_title": title,
+                        "post_date": (work.get("release") or "")[:10],
+                        "artist": work.get("name") or "",
+                    })
+                task_id = download_manager.submit(
+                    f"{ASMR_SITE}/work/{wid}", items, options,
+                    album_name, f"asmr_{wid}")
+                download_manager.start(task_id)
+                submitted += 1
+            except Exception as exc:
+                failed.append(f"{wid}（{exc}）")
+            emit({"event": "asmr_batch_progress", "done": i + 1, "total": total,
+                  "message": f"解析进度 {i + 1}/{total}"})
+        summary = f"批量下载已提交 {submitted}/{total} 个作品"
+        if failed:
+            summary += f"；失败：{'、'.join(failed)}"
+        emit({"event": "asmr_batch_done", "done": submitted, "total": total,
+              "failed": failed, "message": summary})
+    except Exception as exc:
+        emit({"event": "asmr_batch_done", "done": submitted, "total": total,
+              "failed": failed, "message": f"批量下载中断: {exc}"})
+
+
+async def asmr_inspect(url: str, options: dict) -> None:
+    """解析 ASMR 作品页 → 全部音轨文件列表（在线播放走本地媒体代理）。"""
+    m = re.search(r"/work/(\d+)", url)
+    if not m:
+        emit({"event": "inspect_error", "message": "无法识别的 ASMR 链接（支持 /work/{id}）"})
+        return
+    wid = m.group(1)
+    try:
+        work = await asyncio.to_thread(_asmr_api, "GET", f"/api/work/{wid}", None, None, False)
+        tracks = await asyncio.to_thread(
+            _asmr_api, "GET", f"/api/tracks/{wid}", None, {"v": 2}, False)
+        files = _asmr_tracks_flatten(tracks if isinstance(tracks, list) else [])
+        if not files:
+            emit({"event": "inspect_error", "message": "该作品没有可下载的文件"})
+            return
+        title = sanitize_directory_name((work.get("title") or "").strip() or f"asmr_{wid}")
+        rj = work.get("source_id") or ""
+        album_name = f"{rj} {title}".strip() if rj else title
+        items: list[dict] = []
+        for f in files:
+            rel = "/".join(p for p in [f["path"], f["title"]] if p)
+            items.append({
+                "filename": rel,
+                "size": f.get("size"),
+                "item_page": f"{ASMR_SITE}/work/{wid}",
+                "status": "ok",
+                "media_url": f["media_url"],
+                "play_url": media_proxy_url(f["stream_url"]),
+                "site": "asmr",
+                "post_title": title,
+                "post_date": (work.get("release") or "")[:10],
+                "artist": work.get("name") or "",
+            })
+        album_id = f"asmr_{wid}"
+        _apply_cached_thumbnails(items)
+        _mark_items_new(album_id, items)
+        emit({
+            "event": "inspect_complete",
+            "album_name": album_name,
+            "album_id": album_id,
+            "is_album": True,
+            "items": items,
+        })
+        logging.info("ASMR 作品解析完成: %s (%d 个文件)", wid, len(items))
+    except Exception as exc:
+        emit({"event": "inspect_error",
+              "message": f"ASMR 作品解析失败: {exc}（请检查网络或 ASMR 代理设置）"})
+        logging.exception("ASMR 作品解析过程出错")
 
 
 # ============================
@@ -8012,6 +9084,7 @@ def _cleanup_thumbnail_cache() -> None:
 _MEDIA_ALLOWED_KEYWORDS = (
     "bunkr", "coomer", "pawchive", "e-hentai", "exhentai", "ehgt",
     "hath.network", "twimg", "iwara", "hanime", "hembed", "oreno3d",
+    "erommdtube", "asmr", "kiko-play",
 )
 _media_proxy_port: int = 0  # 启动后填充（127.0.0.1 随机端口）
 
@@ -8062,6 +9135,12 @@ def _media_route(url: str) -> tuple[dict, str | None, str | None]:
     # Oreno3D（oreno3d.com / *.oreno3d.com）：按设置走代理
     elif "oreno3d" in netloc:
         proxy = _oreno_proxy or None
+    # EroMMDTube（erommdtube.com）：按设置走代理
+    elif "erommdtube" in netloc:
+        proxy = _erommd_proxy or None
+    # ASMR 音声（api.asmr-200.com / *.kiko-play-niptan.one 等）：按设置走代理
+    elif "asmr" in netloc or "kiko-play" in netloc:
+        proxy = _asmr_proxy or None
     if cookie:
         headers["Cookie"] = cookie
     return headers, cookie, proxy
@@ -8334,9 +9413,11 @@ async def _cache_thumbnails(items: list[dict]) -> None:
         if "hembed" in netloc or "hanime" in netloc:
             proxy = _hanime_proxy or None
             headers["Referer"] = f"{HANIME_BASE}/"
-        # Oreno3D 缩略图（oreno3d.com/storage/...）按设置走代理
+        # Oreno3D 缩略图（oreno3d.com/storage/...）/ EroMMDTube 缩略图 按设置走代理
         if "oreno3d" in netloc:
             proxy = _oreno_proxy or None
+        if "erommdtube" in netloc:
+            proxy = _erommd_proxy or None
         try:
             async with session.get(
                 url, timeout=aiohttp.ClientTimeout(total=20), headers=headers, proxy=proxy,
@@ -8451,9 +9532,14 @@ async def gui_search(query: str, page: int, per_page: int, options: dict) -> Non
         )
         return
 
-    # 站点切换：Oreno3D 模式下搜索视频（关键词）
-    if options.get("site") == "oreno3d":
-        await oreno_search(query, page, options.get("oreno_sort") or "")
+    # 站点切换：Oreno3D / EroMMDTube 模式下搜索视频（关键词）
+    if options.get("site") in ("oreno3d", "erommdtube"):
+        await oreno_search(query, page, options.get("oreno_sort") or "", options.get("site"))
+        return
+
+    # 站点切换：ASMR 音声站模式搜索作品（RJ 号 / 标题 / 社团 / 标签）
+    if options.get("site") == "asmr":
+        await asmr_search(query, page, bool(options.get("asmr_subtitle")))
         return
 
     emit({"event": "search_start", "query": query, "page": page})
@@ -8980,6 +10066,12 @@ class DownloadManager:
         elif item.get("site") == "hanime":
             # Hanime1：MP4 直链 secure 签名会过期，下载时重新解析最高画质源
             await self._hanime_download_one(
+                task, item, album_path, task_id, max_retries,
+            )
+            return
+        elif item.get("site") == "asmr":
+            # ASMR：文件直链永久有效（匿名可下载），filename 含文件夹相对路径
+            await self._asmr_download_one(
                 task, item, album_path, task_id, max_retries,
             )
             return
@@ -9846,6 +10938,125 @@ class DownloadManager:
         self._save()
         self.emit_snapshot()
 
+    async def _asmr_download_one(
+        self,
+        task: dict,
+        item: dict,
+        album_path: str,
+        task_id: str,
+        max_retries: int,
+    ) -> None:
+        """下载单个 ASMR 音频/字幕文件（直链永久有效，保留文件夹相对路径）。
+
+        目录组织：下载根目录/RJ号 标题/文件夹路径/文件名（与其他站点逻辑一致）。
+        """
+        rel = item.get("filename") or f"asmr_{int(time.time())}.mp3"
+        download_link = item.get("media_url") or ""
+
+        item["status"] = "downloading"
+        self._save()
+        self.emit_snapshot()
+
+        live_manager = GuiLiveManager()
+        live_manager.task_id = task_id
+        internal_task = live_manager.add_task()
+
+        options = task.get("options", {})
+        # filename 含子路径：逐段清理非法字符，但保留目录分隔
+        rel = "/".join(
+            re.sub(r'[\\/:*?"<>|]', "_", seg).strip() for seg in rel.replace("\\", "/").split("/")
+        ).strip("/")
+        final_name = rel.split("/")[-1] or f"asmr_{int(time.time())}.mp3"
+
+        def _resolve_and_download() -> tuple[bool, str]:
+            if not download_link.startswith("http"):
+                return False, ""
+            file_dir = str(Path(album_path) / Path(rel).parent) if "/" in rel or "\\" in rel else album_path
+            Path(file_dir).mkdir(parents=True, exist_ok=True)
+            # 跳过重复
+            _, dup_action = _resolve_duplicate(file_dir, final_name, item.get("size"), options)
+            if dup_action == "skip":
+                live_manager.update_log(event="跳过重复", details=f"{final_name}（已存在相同大小的文件）")
+                item["_final_name"] = final_name
+                item["_skip_history"] = True
+                return True, ""
+            for attempt in range(max(1, max_retries)):
+                try:
+                    _asmr_throttle()
+                    with _asmr_session.get(download_link, stream=True, timeout=120) as resp:
+                        resp.raise_for_status()
+                        size = int(resp.headers.get("Content-Length") or 0) or item.get("size")
+                        live_manager.set_task_info(internal_task, final_name, size)
+                        emit({"event": "file_start", "filename": final_name, "index": 0,
+                              "size": size, "task_id": task_id})
+                        downloaded = 0
+                        last_pct = -1
+                        final_path = Path(file_dir) / truncate_filename(final_name)
+                        with open(final_path, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                                if task.get("status") in ("paused", "cancelled"):
+                                    raise InterruptedError("任务已暂停/取消")
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if size:
+                                        pct = round(downloaded / size * 100, 1)
+                                        if pct != last_pct:
+                                            live_manager.update_task(internal_task, pct)
+                                            last_pct = pct
+                        item["_final_path"] = str(final_path)
+                        item["_final_name"] = final_name
+                        item["size"] = size
+                        return True, str(final_path)
+                except InterruptedError:
+                    raise
+                except (requests.RequestException, PermissionError, OSError) as exc:
+                    logging.warning("ASMR 文件下载失败(第 %d 次) %s: %s", attempt + 1, final_name, exc)
+                    if attempt < max(1, max_retries) - 1:
+                        time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
+            return False, ""
+
+        try:
+            success, final_path = await asyncio.to_thread(_resolve_and_download)
+        except InterruptedError:
+            item["status"] = "pending"
+            self._save()
+            self.emit_snapshot()
+            return
+        except Exception as exc:
+            logging.exception("ASMR 下载出错: %s", exc)
+            success, final_path = False, ""
+
+        skip_history = item.pop("_skip_history", False)
+        final_name = item.pop("_final_name", final_name)
+        if success:
+            item["status"] = "completed"
+            item["completed"] = 100
+            task["done"] = task.get("done", 0) + 1
+            if not skip_history and final_path:
+                _add_history_entry({
+                    "id": f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
+                    "filename": final_name,
+                    "path": final_path,
+                    "size": item.get("size"),
+                    "album": task.get("album") or "下载",
+                    "time": datetime.now().isoformat(timespec="seconds"),
+                })
+        else:
+            item["status"] = "failed"
+            task["failed"] = task.get("failed", 0) + 1
+
+        emit({
+            "event": "file_complete",
+            "filename": final_name,
+            "success": success,
+            "skipped": bool(skip_history),
+            "size": item.get("size"),
+            "task_id": task_id,
+        })
+        self._save()
+        self.emit_snapshot()
+
 
 # 全局下载管理器单例
 download_manager = DownloadManager()
@@ -9910,9 +11121,11 @@ DEFAULT_SETTINGS = {
     "twitter_subfolder": "date_post",
     # Iwara 专属设置（代理留空 = 直连）
     "iwara_proxy": "",
-    # Hanime1 / Oreno3D 专属设置（Hanime1 国内需代理；Oreno3D 默认直连）
+    # Hanime1 / Oreno3D / EroMMDTube / ASMR 专属设置（Hanime1 国内需代理；其余默认直连）
     "hanime_proxy": "http://127.0.0.1:10809",
     "oreno_proxy": "",
+    "erommd_proxy": "",
+    "asmr_proxy": "",
     # 每站点自定义子文件夹模板（留空=使用上方的组织规则；变量 {date}/{date_full}/{title}/{id}）
     "pawchive_folder_template": "",
     "exhentai_folder_template": "",
@@ -9936,6 +11149,11 @@ DEFAULT_SETTINGS = {
     "ignore": [],
     "include": [],
     "float_visible": True,
+    # 有道智云翻译 API（用户在设置区填写，留空=未配置）
+    "youdao_app_id": "",
+    "youdao_app_secret": "",
+    # GitHub 仓库更新检查代理（国内默认 http://127.0.0.1:10809）
+    "github_proxy": "http://127.0.0.1:10809",
 }
 
 
@@ -9959,6 +11177,178 @@ def _save_settings(settings: dict) -> None:
             json.dump(settings, file, ensure_ascii=False, indent=2)
     except OSError as exc:
         logging.warning("保存设置失败: %s", exc)
+
+
+# ============================
+# 有道智云翻译 API
+# ============================
+YOUDAO_API = "https://openapi.youdao.com/api"
+
+
+def translate_youdao(text: str, from_lang: str = "auto", to_lang: str = "zh") -> None:
+    """调用有道智云翻译 API（需用户在设置里填 app_id/app_secret）。
+
+    成功 emit 'translate_result' 事件。未配置 key / 网络失败 / 错误码 均回 ok=False。
+    """
+    text = text or ""
+    if not text.strip():
+        emit({"event": "translate_result", "ok": False, "error": "请输入要翻译的文本"})
+        return
+    s = _load_settings()
+    app_id = (s.get("youdao_app_id") or "").strip()
+    app_secret = (s.get("youdao_app_secret") or "").strip()
+    if not app_id or not app_secret:
+        emit({
+            "event": "translate_result",
+            "ok": False,
+            "error": "未配置有道 API，请在下方填写应用 ID 和密钥后保存设置",
+        })
+        return
+    import uuid
+    salt = uuid.uuid4().hex
+    curtime = str(int(time.time()))
+    # 签名输入：文本 ≤10 全量；>10 取首3+长度+末3
+    input_str = text if len(text) <= 10 else text[:3] + str(len(text)) + text[-3:]
+    sign_str = app_id + input_str + salt + curtime + app_secret
+    sign = hashlib.sha256(sign_str.encode("utf-8")).hexdigest()
+    params = {
+        "q": text,
+        "from": from_lang,
+        "to": to_lang,
+        "appKey": app_id,
+        "salt": salt,
+        "sign": sign,
+        "signType": "v3",
+        "curtime": curtime,
+    }
+    try:
+        resp = requests.post(YOUDAO_API, data=params, timeout=20)
+        data = resp.json()
+    except Exception as exc:
+        emit({"event": "translate_result", "ok": False, "error": f"网络请求失败：{exc}"})
+        return
+    err = str(data.get("errorCode") or "")
+    translation = data.get("translation") or []
+    if err not in ("", "0") and not translation:
+        emit({"event": "translate_result", "ok": False, "error": f"有道返回错误码 {err}"})
+        return
+    if not translation:
+        emit({"event": "translate_result", "ok": False, "error": "未获得翻译结果"})
+        return
+    emit({
+        "event": "translate_result",
+        "ok": True,
+        "translation": translation[0] if len(translation) == 1 else "；".join(translation),
+        "query": data.get("query") or text,
+        "raw": data,
+    })
+
+
+# ============================
+# GitHub 仓库更新检查（secondashes/xiaoxiaodownloader）
+# ============================
+GITHUB_REPO = "secondashes/xiaoxiaodownloader"
+GITHUB_LAST_SHA_FILE = "cache/github_last_sha.json"
+
+
+def _github_last_sha() -> str:
+    try:
+        with Path(GITHUB_LAST_SHA_FILE).open("r", encoding="utf-8") as f:
+            return json.load(f).get("sha") or ""
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return ""
+
+
+def _github_save_last_sha(sha: str) -> None:
+    try:
+        Path("cache").mkdir(parents=True, exist_ok=True)
+        with Path(GITHUB_LAST_SHA_FILE).open("w", encoding="utf-8") as f:
+            json.dump({"sha": sha, "checked_at": int(time.time())}, f, ensure_ascii=False)
+    except OSError as exc:
+        logging.warning("保存 GitHub last_sha 失败: %s", exc)
+
+
+def check_github_update() -> None:
+    """检查 GitHub 仓库 secondashes/xiaoxiaodownloader 的 main 分支最新 commit。
+
+    国内访问 api.github.com 需走代理（github_proxy 设置）。成功 emit 'github_update_info'。
+    """
+    s = _load_settings()
+    proxy = (s.get("github_proxy") or "").strip()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0",
+        "Accept": "application/vnd.github+json",
+    }
+    # 1. 拉取 main 分支最新 commit（带 cache-busting 头避免 CDN 缓存）
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/main"
+    try:
+        resp = requests.get(url, headers=headers, proxies=proxies, timeout=20)
+        if resp.status_code != 200:
+            emit({
+                "event": "github_update_info",
+                "ok": False,
+                "error": f"GitHub 返回 HTTP {resp.status_code}",
+            })
+            return
+        data = resp.json()
+    except Exception as exc:
+        emit({
+            "event": "github_update_info",
+            "ok": False,
+            "error": f"网络请求失败：{exc}",
+        })
+        return
+    sha = data.get("sha") or ""
+    commit = data.get("commit") or {}
+    message = (commit.get("message") or "").strip()
+    date = commit.get("author", {}).get("date") or data.get("commit", {}).get("committer", {}).get("date", "")
+    author = (commit.get("author") or {}).get("name") or (data.get("author") or {}).get("login", "")
+    html_url = data.get("html_url") or f"https://github.com/{GITHUB_REPO}/commit/{sha}"
+
+    # 2. 拉取最新 release（无 release 时 fallback 到 commit）
+    latest_release: dict = {}
+    try:
+        r2 = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            headers=headers, proxies=proxies, timeout=15,
+        )
+        if r2.status_code == 200:
+            latest_release = r2.json() or {}
+    except Exception:
+        pass  # 无 release 不算错误
+
+    # 3. 对比本地记录的 sha
+    local_sha = _github_last_sha()
+    has_update = bool(sha) and (sha != local_sha)
+
+    emit({
+        "event": "github_update_info",
+        "ok": True,
+        "latest_sha": sha,
+        "latest_message": message,
+        "latest_date": date,
+        "latest_author": author,
+        "latest_url": html_url,
+        "local_sha": local_sha,
+        "has_update": has_update,
+        "is_first_check": not local_sha,
+        "release": {
+            "tag": latest_release.get("tag_name") or "",
+            "name": latest_release.get("name") or "",
+            "url": latest_release.get("html_url") or "",
+            "published_at": latest_release.get("published_at") or "",
+            "body": (latest_release.get("body") or "")[:800],
+        } if latest_release else None,
+        "repo_url": f"https://github.com/{GITHUB_REPO}",
+        "commits_url": f"https://github.com/{GITHUB_REPO}/commits/main",
+    })
+
+
+def github_mark_update_done(sha: str) -> None:
+    """用户确认已更新（或拉取代码后），把当前 sha 记为本地 last_sha。"""
+    _github_save_last_sha((sha or "").strip())
+    emit({"event": "github_update_marked", "ok": True, "sha": sha})
 
 
 # ============================
@@ -9993,6 +11383,8 @@ def _site_cookie_str(site: str) -> str:
     if site == "hanime":
         cookies = _hanime_load_cred().get("cookies") or {}
         return "; ".join(f"{k}={v}" for k, v in cookies.items())
+    if site == "asmr":
+        return _asmr_load_cred().get("token") or ""
     return ""
 
 
@@ -10008,6 +11400,8 @@ def _site_username(site: str) -> str:
         return _iwara_load_token().get("username") or ""
     if site == "hanime":
         return _hanime_username or (_hanime_load_cred().get("username") or "")
+    if site == "asmr":
+        return _asmr_username or (_asmr_load_cred().get("username") or "")
     return ""
 
 
@@ -10024,6 +11418,7 @@ def _emit_login_info() -> None:
         ("pawchive", bool(pa_cookies.get("session")), "; ".join(f"{k}={v}" for k, v in pa_cookies.items())),
         ("iwara", bool(_iwara_load_token().get("user_token")), _iwara_load_token().get("user_token") or ""),
         ("hanime", bool(_hanime_load_cred().get("cookies")), _site_cookie_str("hanime")),
+        ("asmr", bool(_asmr_load_cred().get("token")), _site_cookie_str("asmr")),
     ):
         entry = accounts.get(site) or {}
         sites[site] = {
@@ -10069,6 +11464,12 @@ def save_account(site: str, label: str = "") -> None:
             "user_id": ha_cred.get("user_id") or "",
             "cookies": ha_cred.get("cookies") or {},
         }
+    # ASMR：token + 用户名密码一起存进档案（加密存储），切换后失效也能自动重登
+    if site == "asmr":
+        as_cred = _asmr_load_cred()
+        profile["password"] = as_cred.get("password") or ""
+        profile["username"] = as_cred.get("username") or profile["username"]
+        profile["asmr_cred"] = dict(as_cred)
     profiles[name] = profile
     entry["active"] = name
     _save_accounts(accounts)
@@ -10155,6 +11556,23 @@ def switch_account(site: str, label: str) -> None:
         emit({"event": "hanime_login_result", "success": True, "silent": True,
               "username": cred.get("username") or label, "message": "账号档案已恢复"})
         hanime_check_login(silent=True)
+    elif site == "asmr":
+        # 恢复完整凭据（token + 用户名密码），token 过期时自动重登
+        global _asmr_token, _asmr_username
+        cred = dict(profile.get("asmr_cred") or {})
+        if not cred.get("token") and cookie_str:
+            cred["token"] = cookie_str
+        if not cred.get("password") and profile.get("password"):
+            cred["password"] = profile.get("password")
+        if not cred.get("username"):
+            cred["username"] = profile.get("username") or label
+        _asmr_save_cred(cred)
+        _asmr_token = cred.get("token") or ""
+        _asmr_username = cred.get("username") or ""
+        _emit_login_info()
+        emit({"event": "asmr_login_result", "success": True, "silent": True,
+              "username": _asmr_username, "message": "账号档案已恢复"})
+        asmr_check_login(silent=True)
     else:
         _emit_login_info()
         return
@@ -10280,9 +11698,14 @@ async def command_loop() -> None:
         iwara_set_proxy(_settings["iwara_proxy"])
     if _iwara_load_token().get("user_token"):
         await asyncio.to_thread(iwara_check_login, True)
-    # 恢复 Hanime1 / Oreno3D 代理设置（Hanime1 有已保存会话时同时静默检查登录）
+    # 恢复 Hanime1 / Oreno3D / EroMMDTube 代理设置（Hanime1 有已保存会话时同时静默检查登录）
     hanime_set_proxy(_settings.get("hanime_proxy") or HANIME_DEFAULT_PROXY)
     oreno_set_proxy(_settings.get("oreno_proxy") or "")
+    oreno_set_proxy(_settings.get("erommd_proxy") or "", "erommdtube")
+    # 恢复 ASMR 代理设置并静默检查登录（token 失效自动用保存的密码重登）
+    asmr_set_proxy(_settings.get("asmr_proxy") or "")
+    if _asmr_load_cred().get("token"):
+        await asyncio.to_thread(asmr_check_login, True)
     _hanime_restore_session()
     if _hanime_load_cred().get("cookies"):
         await asyncio.to_thread(hanime_check_login, True)
@@ -10677,38 +12100,134 @@ async def command_loop() -> None:
                 await hanime_batch_download(
                     command.get("video_ids") or [], command.get("options") or {})
 
-            # ---------- Oreno3D 站点 ----------
+            # ---------- Oreno3D / EroMMDTube 站点 ----------
             elif cmd == "oreno_set_proxy":
-                oreno_set_proxy(command.get("proxy", ""))
+                oreno_set_proxy(command.get("proxy", ""), command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_home":
                 await oreno_home(
-                    int(command.get("page", 1) or 1), command.get("sort", ""))
+                    int(command.get("page", 1) or 1), command.get("sort", ""),
+                    command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_search":
                 await oreno_search(
                     command.get("query", ""),
-                    int(command.get("page", 1) or 1), command.get("sort", ""))
+                    int(command.get("page", 1) or 1), command.get("sort", ""),
+                    command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_tag":
                 await oreno_tag(
                     command.get("tag_id", ""),
-                    int(command.get("page", 1) or 1), command.get("sort", ""))
+                    int(command.get("page", 1) or 1), command.get("sort", ""),
+                    command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_author":
                 await oreno_author(
                     command.get("author_id", ""),
-                    int(command.get("page", 1) or 1), command.get("sort", ""))
+                    int(command.get("page", 1) or 1), command.get("sort", ""),
+                    command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_character":
+                await oreno_character(
+                    command.get("character_id", ""),
+                    int(command.get("page", 1) or 1), command.get("sort", ""),
+                    command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_origin":
+                await oreno_origin(
+                    command.get("origin_id", ""),
+                    int(command.get("page", 1) or 1), command.get("sort", ""),
+                    command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_tags_index":
-                await oreno_tags_index()
+                await oreno_tags_index(command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_tag_group":
+                await oreno_tag_group(
+                    command.get("group_id", ""), command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_characters":
+                await oreno_characters(command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_authors_index":
+                await oreno_authors_index(
+                    int(command.get("page", 1) or 1),
+                    command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_favorites":
+                await oreno_favorites(command.get("site_key", "oreno3d"))
+
+            elif cmd == "oreno_toggle_favorite":
+                await oreno_toggle_favorite(
+                    command.get("movie_id", ""), command.get("card") or {},
+                    command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_detail":
-                await oreno_detail(command.get("movie_id", ""))
+                await oreno_detail(
+                    command.get("movie_id", ""),
+                    command.get("site_key", "oreno3d"))
 
             elif cmd == "oreno_batch_download":
                 await oreno_batch_download(
-                    command.get("video_ids") or [], command.get("options") or {})
+                    command.get("video_ids") or [], command.get("options") or {},
+                    command.get("site_key", "oreno3d"))
+
+            # ---------- ASMR 音声站（asmr-100.com） ----------
+            elif cmd == "asmr_set_proxy":
+                asmr_set_proxy(command.get("proxy", ""))
+
+            elif cmd == "asmr_login":
+                await asyncio.to_thread(
+                    asmr_login, command.get("username", ""), command.get("password", ""))
+
+            elif cmd == "asmr_logout":
+                asmr_logout()
+
+            elif cmd == "asmr_check_login":
+                await asyncio.to_thread(asmr_check_login, bool(command.get("silent")))
+
+            elif cmd == "asmr_popular":
+                await asmr_popular(int(command.get("page", 1) or 1))
+
+            elif cmd == "asmr_works":
+                await asmr_works(
+                    int(command.get("page", 1) or 1),
+                    command.get("order", "create_date"), command.get("sort", "desc"),
+                    bool(command.get("subtitle")),
+                    command.get("circle_id", ""), command.get("tag_id", ""),
+                    command.get("va_id", ""),
+                    command.get("view", "works"), command.get("label", ""))
+
+            elif cmd == "asmr_work_detail":
+                await asmr_work_detail(command.get("work_id", ""))
+
+            elif cmd == "asmr_browse_index":
+                await asmr_browse_index(command.get("kind", "circles"))
+
+            elif cmd == "asmr_toggle_favorite":
+                await asmr_toggle_favorite(
+                    command.get("work_id", ""), command.get("card") or {})
+
+            elif cmd == "asmr_favorites":
+                await asmr_favorites(int(command.get("page", 1) or 1))
+
+            elif cmd == "asmr_batch_download":
+                await asmr_batch_download(
+                    command.get("work_ids") or [], command.get("options") or {})
+
+            elif cmd == "translate_youdao":
+                await asyncio.to_thread(
+                    translate_youdao,
+                    command.get("text", ""),
+                    command.get("from", "auto"),
+                    command.get("to", "zh"),
+                )
+
+            elif cmd == "check_github_update":
+                await asyncio.to_thread(check_github_update)
+
+            elif cmd == "github_mark_update_done":
+                await asyncio.to_thread(github_mark_update_done, command.get("sha", ""))
 
             elif cmd == "get_search_history":
                 emit({"event": "search_history", "items": _load_search_history()})

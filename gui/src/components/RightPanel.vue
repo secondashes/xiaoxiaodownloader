@@ -8,7 +8,7 @@
           <span class="site-group-label">二次元</span>
           <div class="site-group-btns">
             <button
-              v-for="s in ['pawchive', 'exhentai', 'iwara', 'hanime', 'oreno3d']"
+              v-for="s in ['pawchive', 'exhentai', 'iwara', 'hanime', 'oreno3d', 'erommdtube', 'asmr']"
               :key="s"
               class="site-chip"
               :class="{ on: site === s }"
@@ -363,13 +363,13 @@
       </div>
     </div>
 
-    <!-- Oreno3D (O3D) 工具栏：主页 + 排序 + 标签索引（无需登录） -->
-    <div v-if="site === 'oreno3d' && fileList.length === 0 && orView !== 'detail'" class="tw-toolbar">
+    <!-- Oreno3D (O3D) / EroMMDTube (E站) 工具栏：主页 + 排序 + 角色列表/人気作者/热门分类 + 收藏（无需登录） -->
+    <div v-if="isOrenoSite && fileList.length === 0 && orView !== 'detail'" class="tw-toolbar">
       <n-button
         size="small"
         :type="orView === 'home' ? 'primary' : 'default'"
         :loading="orHomeLoading && orView === 'home'"
-        title="主页（人気排序的 3D 视频列表）"
+        title="主页（人気排序的视频列表）"
         @click="$emit('or-home', 1)"
       >主页</n-button>
       <n-select
@@ -377,15 +377,35 @@
         :options="orSortOptions"
         size="small"
         class="or-sort-select"
-        title="切换排序（切主页/标签/作者列表与搜索结果）"
+        title="切换排序（切主页/标签/角色/作者列表与搜索结果）"
         @update:value="v => $emit('or-sort-update', v || 'hot')"
       />
       <n-button
         size="small"
+        :type="orView === 'characters' ? 'primary' : 'default'"
+        :loading="orCharsLoading && orView === 'characters'"
+        title="浏览全部角色（人気角色 + 五十音分组），点击角色查看对应视频"
+        @click="$emit('or-characters')"
+      >👥 角色列表</n-button>
+      <n-button
+        size="small"
+        :type="orView === 'authors' ? 'primary' : 'default'"
+        :loading="orAuthorsLoading && orView === 'authors'"
+        title="人気作者排行榜（分页浏览），点击作者查看全部作品"
+        @click="$emit('or-authors-index', 1)"
+      >👤 人気作者</n-button>
+      <n-button
+        size="small"
         :loading="orTagsLoading"
-        title="浏览全部标签，点击标签查看该分类视频"
+        title="热门分类组 + 全部标签，点击查看对应视频"
         @click="showOrTags"
-      >🏷 标签索引</n-button>
+      >🏷 热门分类</n-button>
+      <n-button
+        size="small"
+        :type="orView === 'list' && orList.type === 'favorites' ? 'primary' : 'default'"
+        title="我收藏的视频（保存在本地，点击管理）"
+        @click="$emit('or-favorites')"
+      >♥ 我的收藏</n-button>
       <n-button
         size="small"
         :type="orBatchMode ? 'warning' : 'default'"
@@ -404,38 +424,164 @@
       <span v-if="orBatchRunning" class="tw-toolbar-hint iw-batch-progress">
         {{ orBatchProgress.message || '准备中...' }}（{{ orBatchProgress.done }}/{{ orBatchProgress.total }}）
       </span>
-      <span v-else class="tw-toolbar-hint">点视频卡片看详情与播放；点作者/标签查看同类作品</span>
+      <span v-else class="tw-toolbar-hint">点视频卡片看详情与播放；点角色/作者/标签查看同类作品</span>
     </div>
 
-    <!-- Oreno3D 标签索引弹窗：全部标签，点击进入标签列表 -->
+    <!-- ASMR 音声站工具栏：热门作品 / 媒体库（排序+仅带字幕）/ 我的收藏 / 社团·标签·声优索引 / 批量下载 -->
+    <div v-if="site === 'asmr' && fileList.length === 0 && asmrView !== 'detail'" class="ex-search-options">
+      <div class="ex-cats">
+        <span class="ex-cats-label">分类：</span>
+        <n-button
+          size="tiny"
+          :type="asmrView === 'popular' ? 'primary' : 'default'"
+          :loading="asmrListLoading && asmrView === 'popular'"
+          title="热门作品（每页 100 个，可加载更多）"
+          @click="$emit('asmr-popular', 1)"
+        >热门作品</n-button>
+        <n-button
+          size="tiny"
+          :type="asmrView === 'works' && !asmrFilter.id ? 'primary' : 'default'"
+          :loading="asmrListLoading && asmrView === 'works'"
+          title="媒体库（最新入库 + 排序 + 筛选）"
+          @click="$emit('asmr-works', 1)"
+        >媒体库</n-button>
+        <n-button
+          size="tiny"
+          :type="asmrView === 'favorites' ? 'primary' : 'default'"
+          :loading="asmrListLoading && asmrView === 'favorites'"
+          title="我的收藏（需登录）"
+          @click="$emit('asmr-favorites', 1)"
+        >我的收藏</n-button>
+        <div class="ex-filter-item ha-sort-item">
+          <span class="ex-filter-label">排序</span>
+          <n-select
+            :value="settings.asmr_order"
+            :options="asmrOrderOptions"
+            size="tiny"
+            class="ha-sort-select"
+            placeholder="最新入库"
+            @update:value="v => $emit('update:asmr-search', { asmr_order: v })"
+          />
+        </div>
+        <div class="ex-filter-item asmr-subtitle-item">
+          <n-checkbox
+            :checked="!!settings.asmr_subtitle"
+            size="small"
+            title="只显示带中文字幕的作品"
+            @update:checked="v => $emit('update:asmr-search', { asmr_subtitle: !!v })"
+          >仅带字幕</n-checkbox>
+        </div>
+      </div>
+      <div class="ex-cats">
+        <n-button size="tiny" tertiary title="按社团浏览作品" @click="showAsmrIndex('circles')">社团</n-button>
+        <n-button size="tiny" tertiary title="按标签浏览作品" @click="showAsmrIndex('tags')">标签</n-button>
+        <n-button size="tiny" tertiary title="按声优浏览作品" @click="showAsmrIndex('vas')">声优</n-button>
+        <n-button
+          size="tiny"
+          :type="asmrBatchMode ? 'warning' : 'default'"
+          :title="asmrBatchMode ? '退出勾选模式' : '点击后当前列表进入勾选模式，勾选要下载的作品'"
+          @click="toggleAsmrBatch"
+        >{{ asmrBatchMode ? '取消勾选' : '批量下载' }}</n-button>
+        <n-button
+          v-if="asmrBatchMode"
+          size="tiny"
+          type="error"
+          :disabled="!asmrBatchChecked.size"
+          :loading="asmrBatchRunning"
+          :title="`开始下载勾选的 ${asmrBatchChecked.size} 个作品（整包下载全部音轨）`"
+          @click="startAsmrBatch"
+        >开始下载{{ asmrBatchChecked.size ? `(${asmrBatchChecked.size})` : '' }}</n-button>
+        <span v-if="asmrBatchRunning" class="iw-batch-progress">
+          {{ asmrBatchProgress.message || '准备中...' }}（{{ asmrBatchProgress.done }}/{{ asmrBatchProgress.total }}）
+        </span>
+        <span v-else class="tw-toolbar-hint">点作品卡片查看音轨列表并在线试听；可按社团/标签/声优筛选</span>
+      </div>
+    </div>
+
+    <!-- Oreno3D / EroMMDTube 热门分类弹窗：分类组（tag-groups）+ 全部标签；点击分类组查看组内标签 -->
     <n-modal
       v-model:show="orTagsModal"
       preset="card"
       class="or-tags-modal"
-      title="标签索引"
+      :title="orTagGroupTitle ? `分类组：${orTagGroupTitle}` : '热门分类（分类组 + 标签）'"
       style="width: 560px; max-width: 92vw"
     >
       <n-input
         v-model:value="orTagsFilter"
         size="small"
         clearable
-        placeholder="🔍 输入文字过滤标签"
+        placeholder="🔍 输入文字过滤分类组/标签"
         style="margin-bottom: 8px"
       />
       <div class="or-tags-body">
-        <div v-if="orTagsLoading && !orTags.length" class="tw-follow-empty">
+        <div v-if="orTagsLoading && !orTags.length && !orTagGroups.length" class="tw-follow-empty">
           <n-spin size="medium" />
-          <span>正在获取标签列表...</span>
+          <span>正在获取分类列表...</span>
+        </div>
+        <template v-else>
+          <!-- 分类组内标签视图：显示返回按钮 + 组内标签 -->
+          <template v-if="orTagGroupTitle">
+            <n-button size="tiny" quaternary type="primary" style="margin-bottom: 8px" @click="$emit('or-tags-index')">← 返回全部分类</n-button>
+            <span
+              v-for="t in filteredOrTags"
+              :key="t.id"
+              class="or-tag-chip"
+              :title="`点击查看「${t.name}」的视频`"
+              @click="pickOrTag(t)"
+            >{{ t.name }}</span>
+            <div v-if="!filteredOrTags.length" class="or-tags-empty">该分类组内没有匹配的标签</div>
+          </template>
+          <!-- 总览视图：热门分类组（名称+作品数）+ 全部标签 -->
+          <template v-else>
+            <span
+              v-for="g in filteredOrGroups"
+              :key="'g' + g.id"
+              class="or-tag-chip or-group-chip"
+              :title="`点击查看分类组「${g.name}」内的标签${g.count ? `（共 ${g.count} 部作品）` : ''}`"
+              @click="$emit('or-tag-group', g.id)"
+            >{{ g.name }}<span v-if="g.count" class="or-chip-count">{{ g.count }}</span></span>
+            <span
+              v-for="t in filteredOrTags"
+              :key="t.id"
+              class="or-tag-chip"
+              :title="`点击查看「${t.name}」的视频`"
+              @click="pickOrTag(t)"
+            >{{ t.name }}</span>
+            <div v-if="!filteredOrGroups.length && !filteredOrTags.length" class="or-tags-empty">没有匹配的分类</div>
+          </template>
+        </template>
+      </div>
+    </n-modal>
+
+    <!-- ASMR 社团/标签/声优索引弹窗：点击进入对应筛选列表 -->
+    <n-modal
+      v-model:show="asmrIndexModal"
+      preset="card"
+      class="or-tags-modal"
+      :title="`ASMR ${asmrIndexTitle}`"
+      style="width: 560px; max-width: 92vw"
+    >
+      <n-input
+        v-model:value="asmrIndexFilter"
+        size="small"
+        clearable
+        :placeholder="`🔍 输入文字过滤${asmrIndexTitle}`"
+        style="margin-bottom: 8px"
+      />
+      <div class="or-tags-body">
+        <div v-if="asmrIndexLoading && !filteredAsmrIndex.length" class="tw-follow-empty">
+          <n-spin size="medium" />
+          <span>正在获取{{ asmrIndexTitle }}列表...</span>
         </div>
         <template v-else>
           <span
-            v-for="t in filteredOrTags"
+            v-for="t in filteredAsmrIndex"
             :key="t.id"
             class="or-tag-chip"
-            :title="`点击查看「${t.name}」的视频`"
-            @click="pickOrTag(t)"
-          >{{ t.name }}</span>
-          <div v-if="!filteredOrTags.length" class="or-tags-empty">没有匹配的标签</div>
+            :title="`点击查看「${t.name}」的作品${t.count ? `（共 ${t.count} 部）` : ''}`"
+            @click="pickAsmrIndex(t)"
+          >{{ t.name }}<span v-if="t.count" class="or-chip-count">{{ t.count }}</span></span>
+          <div v-if="!filteredAsmrIndex.length" class="or-tags-empty">没有匹配的{{ asmrIndexTitle}}</div>
         </template>
       </div>
     </n-modal>
@@ -497,6 +643,15 @@
             </n-input>
           </div>
           <div class="list-actions">
+            <!-- EX 画廊信息切换：自动解析后保留元数据可见（点开链接自动解析展示） -->
+            <n-button
+              v-if="site === 'exhentai' && exGalleryDetail"
+              size="small"
+              quaternary
+              :type="showExGalleryInfo ? 'primary' : 'default'"
+              :title="showExGalleryInfo ? '收起画廊信息' : '展开画廊信息（上传者/时间/评分/标签）'"
+              @click="showExGalleryInfo = !showExGalleryInfo"
+            >ℹ️ 画廊信息</n-button>
             <n-button size="small" quaternary @click="selectAll">全选</n-button>
             <n-button size="small" quaternary @click="selectNone">取消全选</n-button>
             <n-button size="small" quaternary @click="invertSelection">反选</n-button>
@@ -522,6 +677,55 @@
               </template>
               {{ viewMode === 'grid' ? '列表' : '方格' }}
             </n-button>
+          </div>
+        </div>
+
+        <!-- EX 画廊信息内联面板（自动解析展示后保留元数据可见，可折叠） -->
+        <div
+          v-if="site === 'exhentai' && exGalleryDetail && showExGalleryInfo"
+          class="ex-inline-info"
+        >
+          <div class="ex-inline-row">
+            <span v-if="exGalleryDetail.uploader" class="ex-inline-field">
+              <span class="ex-inline-label">发布者</span>
+              <span class="ex-inline-value">{{ exGalleryDetail.uploader }}</span>
+            </span>
+            <span v-if="exGalleryDetail.posted" class="ex-inline-field">
+              <span class="ex-inline-label">时间</span>
+              <span class="ex-inline-value">{{ exGalleryDetail.posted }}</span>
+            </span>
+            <span v-if="exGalleryDetail.language" class="ex-inline-field">
+              <span class="ex-inline-label">语言</span>
+              <span class="ex-inline-value">{{ exGalleryDetail.language }}</span>
+            </span>
+            <span v-if="exGalleryDetail.file_size" class="ex-inline-field">
+              <span class="ex-inline-label">大小</span>
+              <span class="ex-inline-value">{{ exGalleryDetail.file_size }}</span>
+            </span>
+            <span v-if="exGalleryDetail.length" class="ex-inline-field">
+              <span class="ex-inline-label">页数</span>
+              <span class="ex-inline-value">{{ exGalleryDetail.length }}</span>
+            </span>
+            <span v-if="exGalleryDetail.rating" class="ex-inline-field">
+              <span class="ex-inline-label">评分</span>
+              <span class="ex-inline-value">⭐ {{ exGalleryDetail.rating }}<span v-if="exGalleryDetail.rating_count">（{{ exGalleryDetail.rating_count }}）</span></span>
+            </span>
+            <span v-if="exGalleryDetail.favorited" class="ex-inline-field">
+              <span class="ex-inline-label">收藏</span>
+              <span class="ex-inline-value">{{ exGalleryDetail.favorited }}</span>
+            </span>
+          </div>
+          <div v-if="exGalleryDetail.tags && Object.keys(exGalleryDetail.tags).length" class="ex-inline-tags">
+            <div v-for="(tags, ns) in exGalleryDetail.tags" :key="ns" class="ex-inline-tagrow">
+              <span class="ex-inline-tagrow-ns">{{ ns }}:</span>
+              <a
+                v-for="t in tags"
+                :key="t"
+                class="ex-inline-tag"
+                title="点击搜索该标签"
+                @click="searchTag(`${ns}:${t}`)"
+              >{{ t }}</a>
+            </div>
           </div>
         </div>
 
@@ -588,7 +792,8 @@
       </div>
 
       <!-- EX 画廊详情视图：完整信息（标题/发布者/时间/父画廊/大小/页数/收藏数/评分）+ 分组标签可点击 + 种子入口 -->
-      <div v-else-if="site === 'exhentai' && (exGalleryDetail || exDetailLoading)" class="ex-detail">
+      <!-- 文件列表加载完成后自动隐藏（让位给文件列表视图，点击"后退"可回到此处） -->
+      <div v-else-if="site === 'exhentai' && (exGalleryDetail || exDetailLoading) && fileList.length === 0" class="ex-detail">
         <div class="ex-detail-toolbar">
           <n-button size="small" quaternary type="primary" @click="$emit('ex-close-detail')">← 后退</n-button>
           <span class="ex-detail-toolbar-title">画廊详情</span>
@@ -1549,8 +1754,8 @@
         </n-scrollbar>
       </div>
 
-      <!-- Oreno3D (O3D) 视频详情：播放（iwara 源最高画质）+ 作者可点击 + iwara 原站链接 + 下载 -->
-      <div v-else-if="site === 'oreno3d' && orView === 'detail'" class="iw-detail">
+      <!-- Oreno3D (O3D) / EroMMDTube (E站) 视频详情：播放（iwara 源最高画质）+ 作者/角色/原作可点击 + iwara 原站链接 + 下载 -->
+      <div v-else-if="isOrenoSite && orView === 'detail'" class="iw-detail">
         <div v-if="orDetailLoading && !orDetail" class="tw-follow-empty">
           <n-spin size="medium" />
           <span>正在获取视频详情...</span>
@@ -1559,6 +1764,13 @@
           <div class="tw-follow-toolbar">
             <n-button size="small" quaternary type="primary" @click="$emit('or-detail-back')">← 返回</n-button>
             <span class="tw-follow-title iw-detail-title" :title="orDetail.album_name">{{ orDetail.album_name }}</span>
+            <n-button
+              size="tiny"
+              :type="orDetail.saved ? 'error' : 'default'"
+              tertiary
+              :title="orDetail.saved ? '已收藏，点击取消' : '收藏到本地'"
+              @click="$emit('or-toggle-favorite', orDetail)"
+            >{{ orDetail.saved ? '♥ 已收藏' : '♡ 收藏' }}</n-button>
             <n-button
               v-if="orDetail.iwara_id"
               size="tiny"
@@ -1601,6 +1813,30 @@
                 @click.prevent="openOrExternal(orDetail.iwara_url)"
               >iwara 原站 ↗</a>
             </div>
+            <div v-if="orDetail.origins && orDetail.origins.length" class="iw-tags">
+              <n-tag
+                v-for="o in orDetail.origins"
+                :key="'o' + o.id"
+                size="small"
+                round
+                type="warning"
+                class="iw-tag"
+                title="点击查看该原作（出处作品）的视频"
+                @click="$emit('or-origin', o.id)"
+              >🎬 {{ o.name }}</n-tag>
+            </div>
+            <div v-if="orDetail.characters && orDetail.characters.length" class="iw-tags">
+              <n-tag
+                v-for="c in orDetail.characters"
+                :key="'c' + c.id"
+                size="small"
+                round
+                type="success"
+                class="iw-tag"
+                title="点击查看该角色的视频"
+                @click="$emit('or-character', c.id)"
+              >🎭 {{ c.name }}</n-tag>
+            </div>
             <div v-if="orDetail.tags && orDetail.tags.length" class="iw-tags">
               <n-tag
                 v-for="t in orDetail.tags"
@@ -1620,10 +1856,10 @@
         </template>
       </div>
 
-      <!-- Oreno3D (O3D) 主页：卡片网格 + 排序 + 加载更多 -->
-      <div v-else-if="site === 'oreno3d' && orView === 'home'" class="tw-follow-view">
+      <!-- Oreno3D (O3D) / EroMMDTube (E站) 主页：卡片网格 + 排序 + 加载更多 -->
+      <div v-else-if="isOrenoSite && orView === 'home'" class="tw-follow-view">
         <div class="tw-follow-toolbar">
-          <span class="tw-follow-title">Oreno3D · {{ orSortLabel }}</span>
+          <span class="tw-follow-title">{{ orSiteLabel }} · {{ orSortLabel }}</span>
           <span v-if="orHomeItems.length" class="tw-follow-count">
             {{ orHomeItems.length }} 个视频<template v-if="orHomeHasMore">（可继续加载）</template>
           </span>
@@ -1652,7 +1888,7 @@
                   <span v-if="item.likes">♥ {{ item.likes }}</span>
                 </div>
                 <span v-if="orBatchMode" class="iw-batch-check" :class="{ checked: orBatchChecked.has(item.video_id) }">{{ orBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
-                <button v-if="!orBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
+                <button v-if="!orBatchMode" class="card-favorite-btn" title="收藏到本地（再点一次取消）" @click.stop="$emit('or-toggle-favorite', item)">♥</button>
               </div>
               <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
               <div class="iw-card-meta">
@@ -1666,11 +1902,111 @@
         </n-scrollbar>
       </div>
 
-      <!-- Oreno3D (O3D) 标签/作者列表：卡片网格 + 加载更多 + 返回主页 -->
-      <div v-else-if="site === 'oreno3d' && orView === 'list'" class="tw-follow-view">
+      <!-- Oreno3D / EroMMDTube 角色列表：人気角色（名称+原作+作品数）+ 五十音分组 tab -->
+      <div v-else-if="isOrenoSite && orView === 'characters'" class="tw-follow-view">
+        <div class="tw-follow-toolbar">
+          <n-button size="small" quaternary type="primary" @click="$emit('or-browse-back')">← 返回</n-button>
+          <span class="tw-follow-title">👥 角色列表</span>
+          <span v-if="orCharacters.popular && orCharacters.popular.length" class="tw-follow-count">
+            人気 {{ orCharacters.popular.length }} 个角色
+          </span>
+          <n-button size="tiny" quaternary :loading="orCharsLoading" @click="$emit('or-characters')">刷新</n-button>
+        </div>
+        <n-scrollbar class="tw-follow-scroll">
+          <div v-if="orCharsLoading && !orCharacters.popular.length && !orKanaRows.length" class="tw-follow-empty">
+            <n-spin size="medium" />
+            <span>正在获取角色列表...</span>
+          </div>
+          <template v-else>
+            <div class="or-browse-section">
+              <div class="or-browse-section-title">人気角色</div>
+              <div v-if="orCharacters.popular && orCharacters.popular.length" class="or-chip-list">
+                <span
+                  v-for="c in orCharacters.popular"
+                  :key="'p' + c.id"
+                  class="or-tag-chip or-char-chip"
+                  :title="`查看「${c.name}」的视频${c.count ? `（${c.count} 部作品）` : ''}`"
+                  @click="$emit('or-character', c.id)"
+                >{{ c.name }}<span v-if="c.origin" class="or-chip-origin">（{{ c.origin }}）</span><span v-if="c.count" class="or-chip-count">{{ c.count }}</span></span>
+              </div>
+              <div v-else class="or-tags-empty">暂无人気角色数据</div>
+            </div>
+            <div class="or-browse-section">
+              <div class="or-browse-section-title">五十音分组</div>
+              <div v-if="orKanaRows.length" class="or-kana-tabs">
+                <button
+                  v-for="row in orKanaRows"
+                  :key="row"
+                  class="or-kana-tab"
+                  :class="{ on: orKanaActive === row }"
+                  @click="orKanaRow = row"
+                >{{ row }}</button>
+              </div>
+              <div v-if="orKanaActive && orKanaList.length" class="or-chip-list">
+                <span
+                  v-for="c in orKanaList"
+                  :key="c.id"
+                  class="or-tag-chip or-char-chip"
+                  :title="`查看「${c.name}」的视频${c.count ? `（${c.count} 部作品）` : ''}`"
+                  @click="$emit('or-character', c.id)"
+                >{{ c.name }}<span v-if="c.origin" class="or-chip-origin">（{{ c.origin }}）</span><span v-if="c.count" class="or-chip-count">{{ c.count }}</span></span>
+              </div>
+              <div v-else-if="orKanaRows.length" class="or-tags-empty">该行没有角色</div>
+              <div v-else class="or-tags-empty">暂无五十音分组数据</div>
+            </div>
+          </template>
+        </n-scrollbar>
+      </div>
+
+      <!-- Oreno3D / EroMMDTube 人気作者列表：排名 + 名称，分页浏览 -->
+      <div v-else-if="isOrenoSite && orView === 'authors'" class="tw-follow-view">
+        <div class="tw-follow-toolbar">
+          <n-button size="small" quaternary type="primary" @click="$emit('or-browse-back')">← 返回</n-button>
+          <span class="tw-follow-title">👤 人気作者</span>
+          <span class="tw-follow-count">第 {{ orAuthorsPage }} 页</span>
+          <n-button
+            size="tiny"
+            quaternary
+            :disabled="orAuthorsPage <= 1"
+            :loading="orAuthorsLoading"
+            @click="$emit('or-authors-index', orAuthorsPage - 1)"
+          >上一页</n-button>
+          <n-button
+            size="tiny"
+            quaternary
+            :disabled="!orAuthorsHasMore"
+            :loading="orAuthorsLoading"
+            @click="$emit('or-authors-index', orAuthorsPage + 1)"
+          >下一页</n-button>
+          <n-button size="tiny" quaternary :loading="orAuthorsLoading" @click="$emit('or-authors-index', orAuthorsPage)">刷新</n-button>
+        </div>
+        <n-scrollbar class="tw-follow-scroll">
+          <div v-if="orAuthorsLoading && !orAuthors.length" class="tw-follow-empty">
+            <n-spin size="medium" />
+            <span>正在获取作者列表...</span>
+          </div>
+          <div v-else-if="!orAuthors.length" class="tw-follow-empty">暂无作者</div>
+          <div v-else class="or-author-list">
+            <div
+              v-for="a in orAuthors"
+              :key="a.id"
+              class="or-author-item"
+              :title="`查看「${a.name}」的全部作品`"
+              @click="$emit('or-author', a.id)"
+            >
+              <span v-if="a.rank" class="or-author-rank">{{ a.rank }}</span>
+              <span class="or-author-name">{{ a.name }}</span>
+            </div>
+          </div>
+          <div v-if="orAuthors.length && !orAuthorsHasMore" class="tw-follow-count" style="text-align: center; padding: 10px 0">没有更多了</div>
+        </n-scrollbar>
+      </div>
+
+      <!-- Oreno3D / EroMMDTube 标签/角色/作者/原作/收藏列表：卡片网格 + 加载更多 + 返回主页 -->
+      <div v-else-if="isOrenoSite && orView === 'list'" class="tw-follow-view">
         <div class="tw-follow-toolbar">
           <n-button size="small" quaternary type="primary" @click="$emit('or-list-back')">← 返回</n-button>
-          <span class="tw-follow-title">{{ orList.type === 'author' ? `👤 ${orList.name || '作者'}` : `🏷 ${orList.name || '标签'}` }}</span>
+          <span class="tw-follow-title">{{ orListTitle }}</span>
           <span v-if="orList.items.length" class="tw-follow-count">
             {{ orList.items.length }} 个视频<template v-if="orList.has_more">（可继续加载）</template>
           </span>
@@ -1679,7 +2015,7 @@
             quaternary
             :loading="orListLoading"
             title="刷新当前列表"
-            @click="$emit(orList.type === 'author' ? 'or-author' : 'or-tag', orList.id)"
+            @click="refreshOrList"
           >刷新</n-button>
         </div>
         <n-scrollbar class="tw-follow-scroll">
@@ -1688,7 +2024,7 @@
             <n-spin size="medium" />
             <span>正在获取列表...</span>
           </div>
-          <div v-else-if="!orList.items.length" class="tw-follow-empty">暂无视频</div>
+          <div v-else-if="!orList.items.length" class="tw-follow-empty">{{ orList.type === 'favorites' ? '还没有收藏，点卡片右上角 ♥ 收藏视频' : '暂无视频' }}</div>
           <div v-else class="search-grid">
             <div
               v-for="item in orList.items"
@@ -1705,7 +2041,7 @@
                   <span v-if="item.likes">♥ {{ item.likes }}</span>
                 </div>
                 <span v-if="orBatchMode" class="iw-batch-check" :class="{ checked: orBatchChecked.has(item.video_id) }">{{ orBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
-                <button v-if="!orBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
+                <button v-if="!orBatchMode" class="card-favorite-btn" :title="orList.type === 'favorites' ? '取消收藏' : '收藏到本地（再点一次取消）'" @click.stop="$emit('or-toggle-favorite', item)">{{ orList.type === 'favorites' ? '✕' : '♥' }}</button>
               </div>
               <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
               <div class="iw-card-meta">
@@ -1717,6 +2053,208 @@
             <n-button quaternary block :loading="orListLoading" @click="$emit('or-list-more')">加载更多</n-button>
           </div>
         </n-scrollbar>
+      </div>
+
+      <!-- ASMR 音声站列表视图（热门/媒体库/收藏/社团·标签·声优筛选共用）：作品卡片 -->
+      <div v-else-if="site === 'asmr' && asmrView && asmrView !== 'detail'" class="tw-follow-view">
+        <div class="tw-follow-toolbar">
+          <n-button
+            v-if="asmrFilter.id"
+            size="small"
+            quaternary
+            type="primary"
+            title="返回媒体库"
+            @click="$emit('asmr-works', 1)"
+          >← 返回</n-button>
+          <span class="tw-follow-title">{{ asmrLabel || '热门作品' }}</span>
+          <span v-if="asmrItems.length" class="tw-follow-count">
+            {{ asmrItems.length }} 个作品<template v-if="asmrHasMore">（可继续加载）</template>
+          </span>
+          <n-button
+            size="tiny"
+            quaternary
+            :loading="asmrListLoading"
+            @click="refreshAsmrView"
+          >刷新</n-button>
+        </div>
+        <n-scrollbar class="tw-follow-scroll">
+          <div v-if="asmrError" class="tw-follow-error">{{ asmrError }}</div>
+          <div v-else-if="asmrListLoading && !asmrItems.length" class="tw-follow-empty">
+            <n-spin size="medium" />
+            <span>正在获取作品列表...</span>
+          </div>
+          <div v-else-if="!asmrItems.length" class="tw-follow-empty">
+            {{ asmrView === 'favorites' ? '还没有收藏，登录后在作品详情页点 ☆ 收藏' : '暂无作品' }}
+          </div>
+          <div v-else class="search-grid">
+            <div
+              v-for="item in asmrItems"
+              :key="item.video_id || item.album_url"
+              class="search-card iw-card asmr-card"
+              :class="{ 'iw-batch-checked': asmrBatchMode && asmrBatchChecked.has(item.video_id) }"
+              :title="asmrCardTooltip(item)"
+              @click="asmrBatchMode ? toggleAsmrBatchItem(item.video_id) : $emit('asmr-open-detail', item)"
+            >
+              <div class="thumb-wrapper">
+                <img :src="item.thumbnail" loading="lazy" referrerpolicy="no-referrer" :alt="item.album_name" />
+                <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }} 分钟</span>
+                <span v-if="item.has_subtitle" class="asmr-thumb-sub">字幕</span>
+                <div class="iw-thumb-stats">
+                  <span v-if="item.views != null" title="下载数">⬇ {{ formatCount(item.views) }}</span>
+                  <span v-if="item.rating" title="评分">★ {{ item.rating }}</span>
+                </div>
+                <span v-if="asmrBatchMode" class="iw-batch-check" :class="{ checked: asmrBatchChecked.has(item.video_id) }">{{ asmrBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
+                <button v-if="!asmrBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
+              </div>
+              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="iw-card-meta">
+                <span class="iw-card-author" :title="`社团：${item.author || '未知'}`">{{ item.author || '未知社团' }}</span>
+                <span v-if="item.post_date" class="iw-card-time">{{ item.post_date }}</span>
+              </div>
+              <div v-if="item.tags && item.tags.length" class="asmr-card-tags" :title="item.tags.join(' ')">
+                {{ item.tags.slice(0, 4).join(' · ') }}<template v-if="item.tags.length > 4"> 等</template>
+              </div>
+            </div>
+          </div>
+          <div v-if="asmrItems.length && asmrHasMore" class="tw-browse-more">
+            <n-button quaternary block :loading="asmrListLoading" @click="$emit('asmr-more')">加载更多</n-button>
+          </div>
+        </n-scrollbar>
+      </div>
+
+      <!-- ASMR 作品详情：封面 + 元信息 + 收藏 + 音轨列表（文件夹分组）+ 内置音频播放器 -->
+      <div v-else-if="site === 'asmr' && asmrView === 'detail'" class="iw-detail">
+        <div v-if="asmrDetailLoading && !asmrDetail" class="tw-follow-empty">
+          <n-spin size="medium" />
+          <span>正在获取作品详情...</span>
+        </div>
+        <template v-else-if="asmrDetail">
+          <div class="tw-follow-toolbar">
+            <n-button size="small" quaternary type="primary" @click="$emit('asmr-detail-back')">← 返回</n-button>
+            <span class="tw-follow-title iw-detail-title" :title="asmrDetail.album_name">{{ asmrDetail.album_name }}</span>
+            <n-button
+              size="tiny"
+              tertiary
+              type="primary"
+              title="解析作品全部音轨文件并加入下载列表"
+              @click="$emit('open-album', asmrDetail)"
+            >解析下载</n-button>
+          </div>
+          <n-scrollbar class="iw-detail-scroll">
+            <div class="asmr-detail-head">
+              <div class="asmr-detail-cover">
+                <img :src="asmrDetail.thumbnail" referrerpolicy="no-referrer" :alt="asmrDetail.album_name" />
+              </div>
+              <div class="asmr-detail-info">
+                <div v-if="asmrDetail.source_id" class="asmr-detail-rid">RJ号：{{ asmrDetail.source_id }}</div>
+                <div class="asmr-detail-circle" title="点击查看该社团全部作品" @click="$emit('asmr-open-circle', asmrDetail)">
+                  社团：{{ (asmrDetail.circle && asmrDetail.circle.name) || asmrDetail.author || '未知' }}
+                </div>
+                <div class="asmr-detail-stats">
+                  <span v-if="asmrDetail.rating != null">★ {{ asmrDetail.rating }}<template v-if="asmrDetail.review_count">（{{ asmrDetail.review_count }} 条评价）</template></span>
+                  <span v-if="asmrDetail.views != null">⬇ {{ formatCount(asmrDetail.views) }}</span>
+                  <span v-if="asmrDetail.duration">⏱ {{ asmrDetail.duration }} 分钟</span>
+                  <span v-if="asmrDetail.price != null">{{ asmrDetail.price > 0 ? `¥${asmrDetail.price}` : '免费' }}</span>
+                  <n-tag v-if="asmrDetail.has_subtitle" size="tiny" type="info" round>中文字幕</n-tag>
+                  <n-tag v-if="asmrDetail.nsfw" size="tiny" type="error" round>NSFW</n-tag>
+                </div>
+                <div v-if="asmrDetail.post_date" class="asmr-detail-meta">发售日：{{ asmrDetail.post_date }}<template v-if="asmrDetail.create_date"> · 入库：{{ asmrDetail.create_date }}</template></div>
+                <div v-if="asmrDetail.file_count" class="asmr-detail-meta">共 {{ asmrDetail.file_count }} 个文件</div>
+                <div class="asmr-detail-actions">
+                  <n-button
+                    size="tiny"
+                    ghost
+                    :type="asmrDetail.saved ? 'warning' : 'primary'"
+                    :title="asmrDetail.saved ? '已收藏（点击取消）' : '加入收藏（需登录）'"
+                    @click="$emit('asmr-toggle-favorite', asmrDetail)"
+                  >{{ asmrDetail.saved ? '★ 已收藏' : '☆ 收藏' }}</n-button>
+                  <n-button
+                    v-if="asmrDetail.vas && asmrDetail.vas.length"
+                    size="tiny"
+                    quaternary
+                    :title="`声优：${asmrDetail.vas.join('、')}`"
+                    @click="$emit('asmr-open-va', asmrDetail)"
+                  >🎤 声优：{{ asmrDetail.vas.join('、') }}</n-button>
+                </div>
+              </div>
+            </div>
+            <!-- 作品属性（中文附加信息） -->
+            <div v-if="asmrDescEntries.length" class="asmr-attrs">
+              <div v-for="a in asmrDescEntries" :key="a.key" class="asmr-attr-row">
+                <span class="asmr-attr-key">{{ a.key }}</span>
+                <span class="asmr-attr-value">{{ a.value }}</span>
+              </div>
+            </div>
+            <div v-if="asmrDetail.tags && asmrDetail.tags.length" class="iw-tags">
+              <n-tag
+                v-for="t in asmrDetail.tags"
+                :key="t"
+                size="small"
+                round
+                type="info"
+                class="iw-tag"
+                title="点击查看该标签作品"
+                @click="$emit('asmr-search-tag', t)"
+              >{{ t }}</n-tag>
+            </div>
+            <!-- 音轨文件列表：按文件夹路径分组 -->
+            <div class="asmr-files-title">音轨文件<template v-if="asmrFiles.length">（{{ asmrFiles.length }}）</template></div>
+            <div v-if="!asmrFiles.length" class="iw-comments-empty">暂无音轨文件</div>
+            <div v-for="g in asmrFileGroups" :key="g.path || 'root'" class="asmr-file-group">
+              <div v-if="g.path" class="asmr-folder-name" title="文件夹路径">📁 {{ g.path }}</div>
+              <div
+                v-for="(f, fi) in g.files"
+                :key="fi"
+                class="asmr-file-row"
+                :class="{ active: f === asmrPlayingFile, text: f.type === 'text' }"
+                :title="f.type === 'text' ? '文本文件（无音频）' : '点击播放'"
+                @click="f.type === 'text' ? null : playAsmrFile(f)"
+              >
+                <span class="asmr-file-icon">{{ f.type === 'text' ? '📄' : (asmrPlayingFile === f ? '▶' : '♪') }}</span>
+                <span class="asmr-file-name" :title="f.title">{{ f.title }}</span>
+                <span v-if="f.type !== 'text' && f.duration" class="asmr-file-duration">{{ iwDuration(f.duration) }}</span>
+                <span v-if="f.size" class="asmr-file-size">{{ formatSize(f.size) }}</span>
+              </div>
+            </div>
+            <!-- 底部占位（播放器悬浮时不遮挡列表） -->
+            <div class="asmr-player-space"></div>
+          </n-scrollbar>
+          <!-- 内置音频播放器（悬浮底部）：连续自动播放 + 快进/倒带 + 音量 -->
+          <div v-if="asmrPlayingFile" class="asmr-player">
+            <span class="asmr-player-icon">🎵</span>
+            <div class="asmr-player-info">
+              <div class="asmr-player-name" :title="asmrPlayingFile.title">{{ asmrPlayingFile.title }}</div>
+              <div class="asmr-player-track">
+                {{ asmrPlayingIndex + 1 }} / {{ asmrAudioFiles.length }}<template v-if="asmrPlayingFile.path"> · {{ asmrPlayingFile.path }}</template>
+              </div>
+            </div>
+            <n-button size="tiny" quaternary title="上一个音轨" :disabled="!asmrHasPrev" @click="playAsmrOffset(-1)">⏮</n-button>
+            <n-button size="tiny" quaternary :title="`倒带 ${settings.asmr_seek_back || 5} 秒`" @click="asmrSeekBy(-1)">⏪ {{ settings.asmr_seek_back || 5 }}s</n-button>
+            <n-button size="tiny" quaternary :type="asmrAudioPaused ? 'primary' : 'default'" :title="asmrAudioPaused ? '播放' : '暂停'" @click="toggleAsmrPlay">{{ asmrAudioPaused ? '▶' : '⏸' }}</n-button>
+            <n-button size="tiny" quaternary :title="`快进 ${settings.asmr_seek_forward || 30} 秒`" @click="asmrSeekBy(1)">⏩ {{ settings.asmr_seek_forward || 30 }}s</n-button>
+            <n-button size="tiny" quaternary title="下一个音轨" :disabled="!asmrHasNext" @click="playAsmrOffset(1)">⏭</n-button>
+            <n-button size="tiny" quaternary title="静音 / 取消静音（音量已记忆）" @click="toggleAsmrMute">{{ asmrAudioMuted ? '🔇' : '🔊' }}</n-button>
+            <input
+              class="asmr-volume"
+              type="range"
+              min="0"
+              max="100"
+              :value="asmrVolumePercent"
+              title="音量（拖动后自动记住）"
+              @input="onAsmrVolumeInput"
+            />
+            <span class="asmr-player-time">{{ asmrTimeText }}</span>
+            <n-button size="tiny" quaternary type="error" title="关闭播放器" @click="stopAsmrPlayer">✕</n-button>
+            <audio
+              ref="asmrAudioRef"
+              :src="asmrPlayingFile.play_url"
+              preload="auto"
+              @ended="onAsmrEnded"
+              @timeupdate="onAsmrTimeUpdate"
+              @error="onAsmrAudioError"
+            />
+          </div>
+        </template>
       </div>
 
       <!-- ExHentai 浏览器视图（类浏览器界面，可登录/浏览/收藏；点"浏览器/搜索结果"切换） -->
@@ -2083,11 +2621,11 @@
           />
         </div>
 
-        <!-- Oreno3D：视频卡片（搜索通用）+ 顶底分页，点击进详情 -->
-        <div v-else-if="site === 'oreno3d'" class="pa-results">
+        <!-- Oreno3D / EroMMDTube：视频卡片（搜索通用）+ 顶底分页，点击进详情 -->
+        <div v-else-if="isOrenoSite" class="pa-results">
           <div class="pa-toolbar">
             <span class="pa-result-count">
-              {{ searchQuery ? `「${searchQuery}」` : 'Oreno3D 视频' }} · 第 {{ searchPage }} 页
+              {{ searchQuery ? `「${searchQuery}」` : `${orSiteLabel} 视频` }} · 第 {{ searchPage }} 页
               <template v-if="searchTotalResults > 0">（共 {{ formatCount(searchTotalResults) }} 个视频）</template>
             </span>
           </div>
@@ -2123,13 +2661,90 @@
                 <button
                   v-else
                   class="card-favorite-btn"
+                  title="收藏到本地（再点一次取消）"
+                  @click.stop="$emit('or-toggle-favorite', item)"
+                >♥</button>
+              </div>
+              <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
+              <div class="iw-card-meta">
+                <span class="iw-card-author">{{ item.author || '未知作者' }}</span>
+              </div>
+            </div>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+        </div>
+
+        <!-- ASMR 音声站：作品卡片（搜索通用，支持批量勾选）+ 顶底分页，点击进详情 -->
+        <div v-else-if="site === 'asmr'" class="pa-results">
+          <div class="pa-toolbar">
+            <span class="pa-result-count">
+              {{ searchQuery ? `「${searchQuery}」` : '音声作品' }} · 第 {{ searchPage }} 页
+            </span>
+            <n-button
+              size="tiny"
+              :type="asmrBatchMode ? 'warning' : 'default'"
+              :title="asmrBatchMode ? '退出勾选模式' : '勾选多个作品批量下载'"
+              @click="toggleAsmrBatch"
+            >{{ asmrBatchMode ? `取消勾选${asmrBatchChecked.size ? `(${asmrBatchChecked.size})` : ''}` : '批量下载' }}</n-button>
+            <n-button
+              v-if="asmrBatchMode"
+              size="tiny"
+              type="error"
+              :disabled="!asmrBatchChecked.size"
+              :loading="asmrBatchRunning"
+              @click="startAsmrBatch"
+            >开始下载{{ asmrBatchChecked.size ? `(${asmrBatchChecked.size})` : '' }}</n-button>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+          <div class="search-grid">
+            <div
+              v-for="item in searchResults"
+              :key="item.album_url"
+              class="search-card iw-card asmr-card"
+              :class="{ 'iw-batch-checked': asmrBatchMode && asmrBatchChecked.has(item.video_id) }"
+              :title="asmrCardTooltip(item)"
+              @click="asmrBatchMode ? toggleAsmrBatchItem(item.video_id) : $emit('asmr-open-detail', item)"
+            >
+              <div class="thumb-wrapper">
+                <img
+                  :src="item.thumbnail"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  :alt="item.album_name"
+                />
+                <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }} 分钟</span>
+                <span v-if="item.has_subtitle" class="asmr-thumb-sub">字幕</span>
+                <div class="iw-thumb-stats">
+                  <span v-if="item.views != null" title="下载数">⬇ {{ formatCount(item.views) }}</span>
+                  <span v-if="item.rating" title="评分">★ {{ item.rating }}</span>
+                </div>
+                <span v-if="asmrBatchMode" class="iw-batch-check" :class="{ checked: asmrBatchChecked.has(item.video_id) }">{{ asmrBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
+                <button
+                  v-else
+                  class="card-favorite-btn"
                   title="快速收藏到本地"
                   @click.stop="handleQuickFavorite(item)"
                 >♥</button>
               </div>
               <div class="card-name" :title="item.album_name">{{ item.album_name || '未命名' }}</div>
               <div class="iw-card-meta">
-                <span class="iw-card-author">{{ item.author || '未知作者' }}</span>
+                <span class="iw-card-author" :title="`社团：${item.author || '未知'}`">{{ item.author || '未知社团' }}</span>
+                <span v-if="item.post_date" class="iw-card-time">{{ item.post_date }}</span>
+              </div>
+              <div v-if="item.tags && item.tags.length" class="asmr-card-tags" :title="item.tags.join(' ')">
+                {{ item.tags.slice(0, 4).join(' · ') }}<template v-if="item.tags.length > 4"> 等</template>
               </div>
             </div>
           </div>
@@ -2212,7 +2827,15 @@
         </template>
         <template v-else-if="site === 'oreno3d'">
           <div class="empty-text">Oreno3D 3D 视频聚合下载</div>
-          <div class="empty-hint">点上方"主页"看人気推荐，"标签索引"按标签浏览；输入关键词搜索；视频从 iwara 源下载最高画质</div>
+          <div class="empty-hint">点上方"主页"看人気推荐；"角色列表 / 人気作者 / 热门分类"分类浏览；输入关键词搜索；视频从 iwara 源下载最高画质</div>
+        </template>
+        <template v-else-if="site === 'erommdtube'">
+          <div class="empty-text">EroMMDTube (E站) MMD 视频聚合下载</div>
+          <div class="empty-hint">点上方"主页"看人気推荐；"角色列表 / 人気作者 / 热门分类"分类浏览；输入关键词搜索；视频从 iwara 源下载最高画质</div>
+        </template>
+        <template v-else-if="site === 'asmr'">
+          <div class="empty-text">ASMR 音声作品下载（asmr-100.com）</div>
+          <div class="empty-hint">点上方"热门作品"看推荐；"媒体库"按最新入库/评分等排序浏览；社团/标签/声优分类筛选；输入关键词或 RJ 号搜索；详情页可在线试听整包音轨</div>
         </template>
         <template v-else>
           <div class="empty-text">搜索 Bunkr 相册，或粘贴 Bunkr 链接</div>
@@ -2387,11 +3010,16 @@
         <div v-if="previewIsVideo" class="media-preview-video">
           <video
             v-if="previewSrc"
+            ref="previewVideoRef"
             :key="previewSrc"
             :src="previewSrc"
+            :muted="previewMuted"
+            :volume="previewVolume"
             controls
             autoplay
             preload="metadata"
+            @loadedmetadata="applyPreviewVolume"
+            @volumechange="onPreviewVolumeChange"
             @error="previewItem.media_resolve_failed = true"
           ></video>
           <div v-else-if="previewLoading" class="media-preview-tip">
@@ -2399,6 +3027,20 @@
           </div>
           <div v-else class="media-preview-tip media-preview-err">
             {{ previewItem.media_resolve_msg || '无法解析播放地址，请直接下载后观看' }}
+          </div>
+          <!-- 音量控制（默认静音 + 音量持久化，仅视频时显示） -->
+          <div v-if="previewSrc" class="media-preview-controls">
+            <n-button size="tiny" quaternary title="静音 / 取消静音（音量已记忆）" @click="togglePreviewMute">{{ previewMuted ? '🔇' : '🔊' }}</n-button>
+            <input
+              class="preview-volume"
+              type="range"
+              min="0"
+              max="100"
+              :value="previewVolumePercent"
+              title="音量（拖动后自动记住）"
+              @input="onPreviewVolumeInput"
+            />
+            <span class="preview-volume-text">{{ previewVolumePercent }}%</span>
           </div>
         </div>
         <!-- 图片预览 -->
@@ -2420,7 +3062,7 @@
 </template>
 
 <script setup>
-import { ref, computed, h, watch, onUnmounted } from 'vue'
+import { ref, computed, h, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { NTag, NButton } from 'naive-ui'
 import PaginationBar from './PaginationBar.vue'
 
@@ -2517,22 +3159,52 @@ const props = defineProps({
   haUserLabel: { type: String, default: '' },       // 当前 tab 中文名
   haBatchRunning: { type: Boolean, default: false },
   haBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
-  // Oreno3D 视图（''=搜索 | home=主页 | list=标签/作者列表 | detail=详情）
+  // Oreno3D / EroMMDTube 视图（''=搜索 | home=主页 | list=标签/角色/作者/原作/收藏列表
+  // | characters=角色列表 | authors=人気作者列表 | detail=详情）
   orView: { type: String, default: '' },
   orHomeItems: { type: Array, default: () => [] },  // 主页视频卡片
   orHomeLoading: { type: Boolean, default: false },
   orHomeHasMore: { type: Boolean, default: false },
   orHomeError: { type: String, default: '' },
-  orSorts: { type: Object, default: () => ({}) },   // 排序映射 {hot: '人気', ...}
-  orList: { type: Object, default: () => ({ type: '', id: '', name: '', items: [], page: 1, has_more: false }) }, // 标签/作者列表
+  orSorts: { type: Object, default: () => ({}) },   // 排序映射 {hot: '急上昇', ...}
+  orList: { type: Object, default: () => ({ type: '', id: '', name: '', items: [], page: 1, has_more: false }) }, // 标签/角色/作者列表
   orListLoading: { type: Boolean, default: false },
   orListError: { type: String, default: '' },
-  orTags: { type: Array, default: () => [] },       // 标签索引 [{id, name}]
+  orTags: { type: Array, default: () => [] },       // 标签列表 [{id, name}]
+  orTagGroups: { type: Array, default: () => [] },  // 热门分类组 [{id, name, count}]
+  orTagGroupTitle: { type: String, default: '' },   // 非空 = 弹窗正在查看该分类组
   orTagsLoading: { type: Boolean, default: false },
-  orDetail: { type: Object, default: null },        // 视频详情（含 iwara 直链/作者/标签）
+  orCharacters: { type: Object, default: () => ({ popular: [], kana_groups: {} }) }, // 角色列表（人気+五十音）
+  orCharsLoading: { type: Boolean, default: false },
+  orAuthors: { type: Array, default: () => [] },    // 人気作者列表 [{id, name, rank}]
+  orAuthorsPage: { type: Number, default: 1 },
+  orAuthorsHasMore: { type: Boolean, default: false },
+  orAuthorsLoading: { type: Boolean, default: false },
+  orDetail: { type: Object, default: null },        // 视频详情（含 iwara 直链/作者/角色/原作/标签）
   orDetailLoading: { type: Boolean, default: false },
   orBatchRunning: { type: Boolean, default: false },
   orBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
+  // ASMR 音声站视图（''=搜索 | popular=热门 | works=媒体库/筛选 | favorites=收藏 | detail=详情）
+  asmrView: { type: String, default: '' },
+  asmrItems: { type: Array, default: () => [] },     // 当前列表作品卡片
+  asmrListLoading: { type: Boolean, default: false },
+  asmrHasMore: { type: Boolean, default: false },
+  asmrError: { type: String, default: '' },
+  asmrLabel: { type: String, default: '' },          // 当前列表标题（热门作品/媒体库/筛选名）
+  asmrTotal: { type: Number, default: 0 },           // 筛选列表总数
+  asmrOrders: { type: Object, default: () => ({}) }, // 可用排序 {value: label}
+  asmrFilter: { type: Object, default: () => ({ kind: '', id: '', name: '' }) }, // 当前社团/标签/声优筛选
+  // 社团/标签/声优索引弹窗数据
+  asmrIndexItems: { type: Array, default: () => [] }, // [{id, name, count}]
+  asmrIndexLoading: { type: Boolean, default: false },
+  // 详情（含音轨文件列表 play_url 本地代理可播）
+  asmrDetail: { type: Object, default: null },
+  asmrFiles: { type: Array, default: () => [] },
+  asmrDetailLoading: { type: Boolean, default: false },
+  asmrLoggedIn: { type: Boolean, default: false },
+  // 批量下载
+  asmrBatchRunning: { type: Boolean, default: false },
+  asmrBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
 })
 
 const emit = defineEmits([
@@ -2607,18 +3279,41 @@ const emit = defineEmits([
   'update:ha-search',       // H站搜索选项更新（分类/排序，v-model 式）
   'hanime-search-tag',      // 点击 tag 搜索（参数：tag 名）
   'hanime-batch-download',  // 批量解析下载（参数：[video_id]）
-  // Oreno3D 事件（由 App.vue 转发给 Python 后端）
+  // Oreno3D / EroMMDTube 事件（由 App.vue 转发给 Python 后端，均带 site_key）
   'or-home',                // 打开/刷新主页（参数：页码）
   'or-home-more',           // 主页加载更多
   'or-open-detail',         // 打开视频详情（参数：视频条目）
   'or-detail-back',         // 关闭详情返回
   'or-tag',                 // 打开标签列表（参数：tag_id）
   'or-author',              // 打开作者列表（参数：author_id）
+  'or-character',           // 打开角色列表（参数：character_id）
+  'or-origin',              // 打开原作列表（参数：origin_id）
   'or-list-back',           // 列表视图返回
   'or-list-more',           // 列表加载更多
-  'or-tags-index',          // 打开标签索引弹窗
+  'or-tags-index',          // 打开热门分类弹窗（标签 + 分类组）
+  'or-tag-group',           // 查看分类组内标签（参数：group_id）
+  'or-characters',          // 打开角色列表视图（人気 + 五十音分组）
+  'or-authors-index',       // 打开人気作者列表视图（参数：页码）
+  'or-browse-back',         // 角色/作者浏览视图返回主页
+  'or-favorites',           // 打开本地收藏列表
+  'or-toggle-favorite',     // 收藏/取消收藏（参数：视频条目）
   'or-sort-update',         // 排序切换（参数：hot/favorites/latest/popularity）
   'or-batch-download',      // 批量解析下载（参数：[video_id]）
+  // ASMR 音声站事件（由 App.vue 转发给 Python 后端）
+  'asmr-popular',           // 打开/刷新热门作品（参数：页码）
+  'asmr-works',             // 打开/刷新媒体库（参数：页码）
+  'asmr-favorites',         // 打开我的收藏（参数：页码）
+  'asmr-more',              // 当前列表加载更多
+  'update:asmr-search',     // 排序/仅带字幕更新（v-model 式，参数：{asmr_order, asmr_subtitle}）
+  'asmr-index',             // 打开社团/标签/声优索引弹窗（参数：'circles'|'tags'|'vas'）
+  'asmr-index-pick',        // 点击索引项进入筛选列表（参数：kind, id, name）
+  'asmr-open-detail',       // 打开作品详情（参数：作品条目）
+  'asmr-detail-back',       // 关闭详情返回
+  'asmr-toggle-favorite',   // 收藏/取消收藏（参数：作品条目）
+  'asmr-search-tag',        // 点击 tag 搜索（参数：tag 名）
+  'asmr-open-circle',       // 点击社团查看全部作品（参数：详情对象）
+  'asmr-open-va',           // 点击声优查看作品（参数：详情对象）
+  'asmr-batch-download',    // 批量下载（参数：[work_id]）
 ])
 
 const checkedKeys = ref([])
@@ -2968,6 +3663,8 @@ function handleQuickFavorite(item) {
 const exDisplayMode = ref('list')
 // 列表模式勾选的画廊（批量收藏，对应原版复选框逻辑）
 const exChecked = ref([])
+// EX 画廊信息内联面板展开状态（文件列表视图下保留元数据可见）
+const showExGalleryInfo = ref(true)
 
 // 换页/新结果时清空勾选
 watch(() => props.searchResults, () => { exChecked.value = [] })
@@ -3148,9 +3845,14 @@ function startHaBatch() {
 }
 
 // ============================
-// Oreno3D (O3D) 排序 / 标签索引 / 批量下载
+// Oreno3D (O3D) / EroMMDTube (E站) 排序 / 热门分类 / 角色作者浏览 / 批量下载
 // ============================
-// 排序下拉选项（后端 ORENO_SORTS：hot=人気/favorites=お気に入り/latest=最新/popularity=閲覧数）
+// 双站共用一套视图（oreno3d / erommdtube）
+const isOrenoSite = computed(() => props.site === 'oreno3d' || props.site === 'erommdtube')
+// 当前站点显示名（主页/搜索结果标题用）
+const orSiteLabel = computed(() => (props.site === 'erommdtube' ? 'EroMMDTube' : 'Oreno3D'))
+
+// 排序下拉选项（后端 ORENO_SORTS：hot=急上昇/favorites=高評価/latest=新着/popularity=人気）
 const orSortOptions = computed(() => {
   const map = props.orSorts || {}
   return Object.keys(map).map(k => ({ label: map[k], value: k }))
@@ -3158,6 +3860,28 @@ const orSortOptions = computed(() => {
 
 // 主页标题当前排序中文名
 const orSortLabel = computed(() => (props.orSorts || {})[props.settings.oreno_sort || 'hot'] || '人気')
+
+// 列表视图标题（按列表类型显示 图标+名称）
+const orListTitle = computed(() => {
+  const name = props.orList.name || ''
+  const t = props.orList.type
+  if (t === 'author') return `👤 ${name || '作者'}`
+  if (t === 'character') return `🎭 ${name || '角色'}`
+  if (t === 'origin') return `🎬 ${name || '原作'}`
+  if (t === 'favorites') return `♥ ${name || '我的收藏'}`
+  return `🏷 ${name || '标签'}`
+})
+
+// 列表视图刷新（按列表类型分发对应命令）
+function refreshOrList() {
+  const id = props.orList.id
+  const t = props.orList.type
+  if (t === 'author') emit('or-author', id)
+  else if (t === 'character') emit('or-character', id)
+  else if (t === 'origin') emit('or-origin', id)
+  else if (t === 'favorites') emit('or-favorites')
+  else emit('or-tag', id)
+}
 
 // 时长秒数 → mm:ss（与 Iwara 同规则）
 function orDuration(sec) {
@@ -3171,7 +3895,7 @@ function openOrExternal(url) {
   else window.open(url, '_blank')
 }
 
-// 标签索引弹窗（打开时向后端请求全部标签）
+// 热门分类弹窗（打开时向后端请求 分类组 + 全部标签）
 const orTagsModal = ref(false)
 const orTagsFilter = ref('')
 
@@ -3182,8 +3906,16 @@ const filteredOrTags = computed(() => {
   return tags.filter(t => String(t.name || '').toLowerCase().includes(q))
 })
 
+const filteredOrGroups = computed(() => {
+  const q = (orTagsFilter.value || '').trim().toLowerCase()
+  const groups = props.orTagGroups || []
+  if (!q) return groups
+  return groups.filter(g => String(g.name || '').toLowerCase().includes(q))
+})
+
 function showOrTags() {
   orTagsModal.value = true
+  orTagsFilter.value = ''
   emit('or-tags-index')
 }
 
@@ -3192,6 +3924,25 @@ function pickOrTag(t) {
   orTagsModal.value = false
   emit('or-tag', t.id)
 }
+
+// ============================
+// 角色列表视图：五十音分组 tab
+// ============================
+const orKanaRow = ref('')
+// 全部五十音行（あ/か/さ/...，来自后端 kana_groups 键）
+const orKanaRows = computed(() => Object.keys((props.orCharacters && props.orCharacters.kana_groups) || {}))
+// 当前生效的行（未选/失效时取第一行）
+const orKanaActive = computed(() => {
+  if (orKanaRow.value && orKanaRows.value.includes(orKanaRow.value)) return orKanaRow.value
+  return orKanaRows.value[0] || ''
+})
+// 当前行的角色列表
+const orKanaList = computed(() => {
+  const groups = (props.orCharacters && props.orCharacters.kana_groups) || {}
+  return groups[orKanaActive.value] || []
+})
+// 新数据到达时重置选中行
+watch(() => props.orCharacters, () => { orKanaRow.value = '' })
 
 // O3D 批量解析下载：勾选模式（主页/标签作者列表/搜索结果均按 video_id 勾选）
 const orBatchMode = ref(false)
@@ -3232,6 +3983,261 @@ function startOrBatch() {
   orBatchChecked.value = new Set()
 }
 
+// ============================
+// ASMR 音声站：排序 / 索引弹窗 / 批量下载 / 音频播放器
+// ============================
+// 排序下拉选项（后端 ASMR_ORDERS：release=发售日 create_date=最新入库 dl_count=下载量...）
+const asmrOrderOptions = computed(() => {
+  const map = props.asmrOrders || {}
+  const keys = Object.keys(map)
+  if (!keys.length) {
+    return [
+      { label: '最新入库', value: 'create_date' },
+      { label: '发售日', value: 'release' },
+      { label: '下载量', value: 'dl_count' },
+      { label: '评分', value: 'rate_average_2dp' },
+      { label: '价格', value: 'price' },
+      { label: '评论数', value: 'review_count' },
+    ]
+  }
+  return keys.map(k => ({ label: map[k], value: k }))
+})
+
+// 卡片悬浮提示（社团/评分/下载数/字幕/标签）
+function asmrCardTooltip(item) {
+  const lines = [item.album_name || '未命名']
+  if (item.author) lines.push(`社团: ${item.author}`)
+  if (item.rating != null) lines.push(`评分: ★${item.rating}`)
+  if (item.views != null) lines.push(`下载数: ${formatCount(item.views)}`)
+  if (item.duration) lines.push(`时长: ${item.duration} 分钟`)
+  if (item.has_subtitle) lines.push('带中文字幕')
+  if (item.tags && item.tags.length) lines.push(`标签: ${item.tags.join(' ')}`)
+  lines.push(props.asmrBatchMode ? '点击勾选/取消勾选' : '点击查看音轨列表并试听')
+  return lines.join('\n')
+}
+
+// 社团/标签/声优索引弹窗
+const asmrIndexModal = ref(false)
+const asmrIndexKind = ref('tags')   // 'circles' | 'tags' | 'vas'
+const asmrIndexFilter = ref('')
+const ASMR_INDEX_TITLES = { circles: '社团', tags: '标签', vas: '声优' }
+const asmrIndexTitle = computed(() => ASMR_INDEX_TITLES[asmrIndexKind.value] || '标签')
+
+const filteredAsmrIndex = computed(() => {
+  const q = (asmrIndexFilter.value || '').trim().toLowerCase()
+  const items = props.asmrIndexItems || []
+  if (!q) return items.slice(0, 400)
+  return items.filter(t => String(t.name || '').toLowerCase().includes(q)).slice(0, 400)
+})
+
+function showAsmrIndex(kind) {
+  asmrIndexKind.value = kind
+  asmrIndexModal.value = true
+  asmrIndexFilter.value = ''
+  emit('asmr-index', kind)
+}
+
+function pickAsmrIndex(t) {
+  if (!t || !t.id) return
+  asmrIndexModal.value = false
+  emit('asmr-index-pick', asmrIndexKind.value, t.id, t.name)
+}
+
+// 刷新当前列表（按当前视图分发）
+function refreshAsmrView() {
+  if (props.asmrView === 'popular') emit('asmr-popular', 1)
+  else if (props.asmrView === 'favorites') emit('asmr-favorites', 1)
+  else emit('asmr-works', 1)
+}
+
+// 批量下载：勾选模式（列表视图/搜索结果均按 video_id 勾选）
+const asmrBatchMode = ref(false)
+const asmrBatchChecked = ref(new Set())
+
+function toggleAsmrBatch() {
+  asmrBatchMode.value = !asmrBatchMode.value
+  if (!asmrBatchMode.value) asmrBatchChecked.value = new Set()
+}
+
+function toggleAsmrBatchItem(workId) {
+  if (!workId) return
+  const next = new Set(asmrBatchChecked.value)
+  if (next.has(workId)) next.delete(workId)
+  else next.add(workId)
+  asmrBatchChecked.value = next
+}
+
+function startAsmrBatch() {
+  const ids = []
+  if (props.asmrView) {
+    for (const item of props.asmrItems) {
+      if (item.video_id && asmrBatchChecked.value.has(item.video_id)) ids.push(item.video_id)
+    }
+  } else {
+    for (const item of props.searchResults) {
+      if (item.video_id && asmrBatchChecked.value.has(item.video_id)) ids.push(item.video_id)
+    }
+  }
+  if (!ids.length) return
+  emit('asmr-batch-download', ids)
+  asmrBatchMode.value = false
+  asmrBatchChecked.value = new Set()
+}
+
+// 详情作品属性（description 为 dict）
+const asmrDescEntries = computed(() => {
+  const d = (props.asmrDetail && props.asmrDetail.description) || {}
+  return Object.keys(d).filter(k => d[k] != null && d[k] !== '').map(k => ({
+    key: k, value: String(d[k]),
+  }))
+})
+
+// 音轨文件按文件夹路径分组（保序）
+const asmrFileGroups = computed(() => {
+  const groups = []
+  const index = new Map()
+  for (const f of props.asmrFiles) {
+    const path = f.path || ''
+    if (!index.has(path)) {
+      index.set(path, { path, files: [] })
+      groups.push(index.get(path))
+    }
+    index.get(path).files.push(f)
+  }
+  return groups
+})
+
+// ============================
+// 内置音频播放器（连续自动播放 + 快进/倒带 + 音量记忆）
+// ============================
+const asmrAudioRef = ref(null)
+const asmrPlayingFile = ref(null)   // 当前播放的音轨对象
+const asmrPlayingIndex = ref(0)     // 在音频列表中的序号
+const asmrAudioPaused = ref(true)
+const asmrAudioMuted = ref(true)    // 默认静音（音量记忆在 localStorage）
+const asmrTimeText = ref('0:00 / 0:00')
+
+// 音量（0-1）：记忆到 localStorage，默认 0.8
+const asmrVolume = ref(Number(localStorage.getItem('asmr_volume')) || 0.8)
+const asmrVolumePercent = computed(() => Math.round((asmrVolume.value || 0) * 100))
+
+// 仅音频文件（连续播放按此列表推进）
+const asmrAudioFiles = computed(() => (props.asmrFiles || []).filter(f => f.type === 'audio' && f.play_url))
+const asmrHasPrev = computed(() => asmrPlayingIndex.value > 0)
+const asmrHasNext = computed(() => asmrPlayingIndex.value < asmrAudioFiles.value.length - 1)
+
+// 同步音量/静音到 <audio>
+watch([asmrVolume, asmrAudioMuted], () => {
+  const el = asmrAudioRef.value
+  if (!el) return
+  el.volume = asmrVolume.value
+  el.muted = asmrAudioMuted.value
+})
+
+// 点击音轨播放（连续自动播放下一轨）
+function playAsmrFile(file) {
+  if (!file || !file.play_url) return
+  const idx = asmrAudioFiles.value.indexOf(file)
+  if (idx < 0) return
+  asmrPlayingFile.value = file
+  asmrPlayingIndex.value = idx
+  nextTick(() => {
+    const el = asmrAudioRef.value
+    if (!el) return
+    el.volume = asmrVolume.value
+    el.muted = asmrAudioMuted.value
+    el.play().then(() => { asmrAudioPaused.value = false }).catch(() => {
+      // 自动播放受限（默认静音一般可播；失败提示用户手动点播放）
+      asmrAudioPaused.value = true
+    })
+  })
+}
+
+// 相对当前曲目跳转（-1 上一轨 / +1 下一轨）
+function playAsmrOffset(step) {
+  const list = asmrAudioFiles.value
+  const target = asmrPlayingIndex.value + step
+  if (target < 0 || target >= list.length) return
+  playAsmrFile(list[target])
+}
+
+// 播放 / 暂停
+function toggleAsmrPlay() {
+  const el = asmrAudioRef.value
+  if (!el) return
+  if (el.paused) {
+    el.play().then(() => { asmrAudioPaused.value = false }).catch(() => {})
+  } else {
+    el.pause()
+    asmrAudioPaused.value = true
+  }
+}
+
+// 快进 / 倒带（秒数来自设置，默认快进 30 秒倒带 5 秒）
+function asmrSeekBy(dir) {
+  const el = asmrAudioRef.value
+  if (!el) return
+  const sec = dir > 0
+    ? Number(props.settings.asmr_seek_forward) || 30
+    : Number(props.settings.asmr_seek_back) || 5
+  el.currentTime = Math.max(0, Math.min((el.duration || 0), el.currentTime + dir * sec))
+}
+
+// 静音切换（音量记忆）
+function toggleAsmrMute() {
+  asmrAudioMuted.value = !asmrAudioMuted.value
+  localStorage.setItem('asmr_muted', asmrAudioMuted.value ? '1' : '0')
+}
+
+// 拖动音量条：更新音量并记忆；拖离 0 时自动取消静音
+function onAsmrVolumeInput(e) {
+  const v = Math.max(0, Math.min(100, Number(e.target.value) || 0)) / 100
+  asmrVolume.value = v
+  localStorage.setItem('asmr_volume', String(v))
+  if (v > 0) {
+    asmrAudioMuted.value = false
+    localStorage.setItem('asmr_muted', '0')
+  }
+}
+
+// 一轨播完自动播下一轨
+function onAsmrEnded() {
+  if (asmrHasNext.value) playAsmrOffset(1)
+  else asmrAudioPaused.value = true
+}
+
+function onAsmrTimeUpdate() {
+  const el = asmrAudioRef.value
+  if (!el) return
+  const fmt = s => {
+    s = Math.floor(s || 0)
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  }
+  asmrTimeText.value = `${fmt(el.currentTime)} / ${fmt(el.duration)}`
+}
+
+function onAsmrAudioError() {
+  asmrAudioPaused.value = true
+}
+
+// 关闭播放器
+function stopAsmrPlayer() {
+  const el = asmrAudioRef.value
+  if (el) el.pause()
+  asmrPlayingFile.value = null
+  asmrAudioPaused.value = true
+  asmrTimeText.value = '0:00 / 0:00'
+}
+
+// 详情数据刷新时停掉旧播放器
+watch(() => props.asmrFiles, () => stopAsmrPlayer())
+
+// 恢复上次静音状态（首次默认静音）
+onMounted(() => {
+  const saved = localStorage.getItem('asmr_muted')
+  if (saved != null) asmrAudioMuted.value = saved === '1'
+})
+
 // 当前文件列表是否为 Pawchive 内容（显示画师内过滤框）
 const isPawchiveList = computed(() => {
   return props.site === 'pawchive' && props.fileList.some(f => f.site === 'pawchive')
@@ -3253,6 +4259,45 @@ const filteredFileList = computed(() => {
 // ============================
 const previewVisible = ref(false)
 const previewItem = ref(null)   // 引用 fileList 条目对象（media_url 解析后自动刷新）
+// 预览视频音量持久化（默认静音，用户取消静音/调音量后记忆到 localStorage，下次沿用）
+const previewVideoRef = ref(null)
+const previewMuted = ref(localStorage.getItem('preview_muted') !== '0')   // 默认静音 true
+const previewVolume = ref(Number(localStorage.getItem('preview_volume')) || 1)  // 0~1，默认 1
+const previewVolumePercent = computed(() => Math.round((previewVolume.value || 0) * 100))
+function applyPreviewVolume() {
+  const el = previewVideoRef.value
+  if (!el) return
+  el.muted = previewMuted.value
+  try { el.volume = previewVolume.value } catch (e) {}
+}
+function onPreviewVolumeChange(e) {
+  const el = e.target
+  if (!el) return
+  previewMuted.value = el.muted
+  previewVolume.value = el.volume
+  localStorage.setItem('preview_muted', el.muted ? '1' : '0')
+  localStorage.setItem('preview_volume', String(el.volume))
+}
+function togglePreviewMute() {
+  previewMuted.value = !previewMuted.value
+  localStorage.setItem('preview_muted', previewMuted.value ? '1' : '0')
+  const el = previewVideoRef.value
+  if (el) el.muted = previewMuted.value
+}
+function onPreviewVolumeInput(e) {
+  const p = Number(e.target.value) / 100
+  previewVolume.value = p
+  localStorage.setItem('preview_volume', String(p))
+  const el = previewVideoRef.value
+  if (el) {
+    try { el.volume = p } catch (e2) {}
+    if (p > 0 && el.muted) {
+      el.muted = false
+      previewMuted.value = false
+      localStorage.setItem('preview_muted', '0')
+    }
+  }
+}
 
 const VIDEO_EXTS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v', 'ts', 'flv', 'wmv']
 const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif', 'jfif']
@@ -3352,7 +4397,13 @@ const inputPlaceholder = computed(() => {
     return '搜索 H站（Hanime1）里番视频，或粘贴 hanime1.me/watch?v=... 链接'
   }
   if (props.site === 'oreno3d') {
-    return '搜索 Oreno3D 3D 视频，或粘贴 oreno3d.com/movies/... 链接'
+    return '搜索 Oreno3D / EroMMDTube 3D 视频，或粘贴 oreno3d.com、erommdtube.com/movies/... 链接'
+  }
+  if (props.site === 'erommdtube') {
+    return '搜索 EroMMDTube 3D 视频，或粘贴 erommdtube.com、oreno3d.com/movies/... 链接'
+  }
+  if (props.site === 'asmr') {
+    return '搜索音声作品（RJ号 / 标题 / 社团 / 标签），或粘贴 asmr-100.com/work/... 链接'
   }
   return '搜索 Bunkr 相册，或粘贴 Bunkr 链接'
 })
@@ -3371,6 +4422,8 @@ function siteChipName(s) {
     iwara: 'Iwara',
     hanime: 'H站',
     oreno3d: 'O3D',
+    erommdtube: 'E站',
+    asmr: '音声',
     coomer: 'Coomer',
     bunkr: 'Bunkr',
     twitter: 'X',
@@ -4067,6 +5120,65 @@ html.light-mode .site-chip.on {
   color: #8f8f98;
 }
 
+/* EX 画廊信息内联面板（文件列表视图下，自动解析后保留元数据可见） */
+.ex-inline-info {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  background: #1e1f22;
+  border: 1px solid #2d2d33;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.ex-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+}
+.ex-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ex-inline-label {
+  color: #8f8f98;
+}
+.ex-inline-value {
+  color: #c8c8d0;
+}
+.ex-inline-tags {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ex-inline-tagrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.ex-inline-tagrow-ns {
+  color: #8f8f98;
+  font-weight: 600;
+}
+.ex-inline-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #2a2f1f;
+  border: 1px solid #3a4a2a;
+  border-radius: 3px;
+  color: #b5d8a0;
+  cursor: pointer;
+  font-size: 11px;
+  text-decoration: none;
+}
+.ex-inline-tag:hover {
+  background: #4a7c3a;
+  border-color: #5a9c46;
+  color: #dff5cf;
+}
+
 .torrent-actions {
   display: flex;
   gap: 8px;
@@ -4627,6 +5739,7 @@ html.light-mode .site-chip.on {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;  /* ASMR 悬浮播放器锚点 */
 }
 
 .iw-detail-title {
@@ -4946,6 +6059,135 @@ html.light-mode .site-chip.on {
   color: #f2c97d;
 }
 
+/* ==================== 角色列表 / 人気作者 / 热门分类（双站共用） ==================== */
+/* 浏览视图分区（人気角色 / 五十音分组） */
+.or-browse-section {
+  padding: 12px 14px 4px;
+}
+
+.or-browse-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e6;
+  margin-bottom: 10px;
+}
+
+/* chip 列表容器 */
+.or-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 10px;
+}
+
+/* 角色 chip（基于 or-tag-chip）：名称 +（原作）+ 作品数 */
+.or-char-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.or-chip-origin {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.or-chip-count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(99, 226, 183, 0.18);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* 五十音分组 tab（あ/か/さ...） */
+.or-kana-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 10px;
+}
+
+.or-kana-tab {
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #a0a0a8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.or-kana-tab:hover {
+  color: #63e2b7;
+  border-color: rgba(99, 226, 183, 0.4);
+}
+
+.or-kana-tab.on {
+  color: #63e2b7;
+  background: rgba(99, 226, 183, 0.12);
+  border-color: rgba(99, 226, 183, 0.45);
+}
+
+/* 人気作者列表（排名 + 名称） */
+.or-author-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  padding: 10px 14px 14px;
+}
+
+.or-author-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.or-author-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.or-author-rank {
+  min-width: 22px;
+  text-align: center;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: rgba(99, 226, 183, 0.15);
+  color: #63e2b7;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.or-author-name {
+  font-size: 13px;
+  color: #e0e0e6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分类组 chip（基于 or-tag-chip，蓝色区分 + 作品数） */
+.or-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: rgba(112, 192, 232, 0.35);
+  background: rgba(112, 192, 232, 0.08);
+  color: #70c0e8;
+}
+
+.or-group-chip:hover {
+  background: rgba(112, 192, 232, 0.2);
+}
+
 /* 日间模式适配 */
 html.light-mode .ha-section-title,
 html.light-mode .ha-uploader {
@@ -4978,6 +6220,60 @@ html.light-mode .or-no-source {
   background: rgba(240, 160, 32, 0.08);
   border-color: rgba(200, 130, 20, 0.35);
   color: #9a6a10;
+}
+
+/* 角色/作者/分类组（双站共用）日间模式 */
+html.light-mode .or-browse-section-title {
+  color: #333;
+}
+
+html.light-mode .or-chip-count {
+  background: rgba(0, 128, 90, 0.12);
+}
+
+html.light-mode .or-kana-tab {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.02);
+  color: #666;
+}
+
+html.light-mode .or-kana-tab:hover {
+  color: #0a7a52;
+  border-color: rgba(0, 128, 90, 0.4);
+}
+
+html.light-mode .or-kana-tab.on {
+  color: #0a7a52;
+  background: rgba(0, 128, 90, 0.08);
+  border-color: rgba(0, 128, 90, 0.45);
+}
+
+html.light-mode .or-author-item {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .or-author-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+html.light-mode .or-author-rank {
+  background: rgba(0, 128, 90, 0.1);
+  color: #0a7a52;
+}
+
+html.light-mode .or-author-name {
+  color: #333;
+}
+
+html.light-mode .or-group-chip {
+  background: rgba(0, 110, 189, 0.06);
+  border-color: rgba(0, 110, 189, 0.35);
+  color: #0a6ebd;
+}
+
+html.light-mode .or-group-chip:hover {
+  background: rgba(0, 110, 189, 0.14);
 }
 
 /* Iwara 批量解析下载：勾选框与选中态 */
@@ -5448,6 +6744,51 @@ html.light-mode .or-no-source {
   background: #000;
   border-radius: 6px;
   display: block;
+}
+
+.media-preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+.preview-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 120px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.preview-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #63e2b7;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.preview-volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #63e2b7;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.preview-volume-text {
+  font-size: 12px;
+  color: #8b8b93;
+  min-width: 36px;
+}
+html.light-mode .preview-volume {
+  background: rgba(0, 0, 0, 0.18);
+}
+html.light-mode .preview-volume-text {
+  color: #5a5c66;
 }
 
 .media-preview-image {
@@ -5975,5 +7316,355 @@ html.light-mode .or-no-source {
   font-size: 11px;
   color: #7a7a85;
   line-height: 1.6;
+}
+
+/* ============================ ASMR 音声站 ============================ */
+/* 工具栏"仅带字幕"勾选 */
+.asmr-subtitle-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 卡片字幕角标 */
+.asmr-thumb-sub {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(56, 137, 255, 0.85);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* 卡片 tags 摘要行 */
+.asmr-card-tags {
+  font-size: 11px;
+  color: #7a7a85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px 2px;
+}
+
+/* 详情头部：封面 + 信息 */
+.asmr-detail-head {
+  display: flex;
+  gap: 16px;
+  padding: 12px 4px 6px;
+}
+
+.asmr-detail-cover {
+  flex-shrink: 0;
+  width: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.asmr-detail-cover img {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+}
+
+.asmr-detail-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.asmr-detail-rid {
+  font-size: 12px;
+  color: #63e2b7;
+}
+
+.asmr-detail-circle {
+  font-size: 14px;
+  color: #e0e0e6;
+  cursor: pointer;
+}
+
+.asmr-detail-circle:hover {
+  color: #63e2b7;
+}
+
+.asmr-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #9a9aa5;
+}
+
+.asmr-detail-meta {
+  font-size: 12px;
+  color: #7a7a85;
+}
+
+.asmr-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* 作品属性表 */
+.asmr-attrs {
+  margin: 8px 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.asmr-attr-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.asmr-attr-key {
+  flex-shrink: 0;
+  width: 90px;
+  color: #63e2b7;
+}
+
+.asmr-attr-value {
+  flex: 1;
+  min-width: 0;
+  color: #c8c8d0;
+  word-break: break-all;
+}
+
+/* 音轨文件列表 */
+.asmr-files-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e6;
+  margin: 12px 0 6px;
+}
+
+.asmr-file-group {
+  margin-bottom: 6px;
+}
+
+.asmr-folder-name {
+  font-size: 12px;
+  color: #63e2b7;
+  padding: 6px 4px 2px;
+  word-break: break-all;
+}
+
+.asmr-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #c8c8d0;
+  transition: background 0.12s ease;
+}
+
+.asmr-file-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.asmr-file-row.active {
+  background: rgba(99, 226, 183, 0.14);
+  color: #63e2b7;
+}
+
+.asmr-file-row.text {
+  cursor: default;
+  color: #7a7a85;
+}
+
+.asmr-file-row.text:hover {
+  background: transparent;
+}
+
+.asmr-file-icon {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.asmr-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asmr-file-duration,
+.asmr-file-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #7a7a85;
+}
+
+/* 播放器底部占位（防悬浮播放器遮挡列表） */
+.asmr-player-space {
+  height: 64px;
+}
+
+/* 内置音频播放器（悬浮底部，锚定详情容器） */
+.asmr-player {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(24, 24, 28, 0.96);
+  border: 1px solid rgba(99, 226, 183, 0.25);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.asmr-player-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.asmr-player-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.asmr-player-name {
+  font-size: 12px;
+  color: #e0e0e6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asmr-player-track {
+  font-size: 10px;
+  color: #7a7a85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asmr-player-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #9a9aa5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 音量条 */
+.asmr-volume {
+  flex-shrink: 0;
+  width: 80px;
+  height: 4px;
+  accent-color: #63e2b7;
+  cursor: pointer;
+}
+
+/* ============================ ASMR 日间模式 ============================ */
+html.light-mode .asmr-thumb-sub {
+  background: rgba(56, 137, 255, 0.9);
+}
+
+html.light-mode .asmr-card-tags {
+  color: #8a8a95;
+}
+
+html.light-mode .asmr-detail-circle {
+  color: #333;
+}
+
+html.light-mode .asmr-detail-circle:hover {
+  color: #18a058;
+}
+
+html.light-mode .asmr-detail-stats {
+  color: #666;
+}
+
+html.light-mode .asmr-detail-meta {
+  color: #8a8a95;
+}
+
+html.light-mode .asmr-attrs {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+html.light-mode .asmr-attr-key {
+  color: #18a058;
+}
+
+html.light-mode .asmr-attr-value {
+  color: #444;
+}
+
+html.light-mode .asmr-files-title {
+  color: #333;
+}
+
+html.light-mode .asmr-folder-name {
+  color: #18a058;
+}
+
+html.light-mode .asmr-file-row {
+  color: #444;
+}
+
+html.light-mode .asmr-file-row:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .asmr-file-row.active {
+  background: rgba(24, 160, 88, 0.15);
+  color: #18a058;
+}
+
+html.light-mode .asmr-file-row.text {
+  color: #8a8a95;
+}
+
+html.light-mode .asmr-file-duration,
+html.light-mode .asmr-file-size {
+  color: #8a8a95;
+}
+
+html.light-mode .asmr-player {
+  background: rgba(255, 255, 255, 0.97);
+  border-color: rgba(24, 160, 88, 0.35);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
+html.light-mode .asmr-player-name {
+  color: #333;
+}
+
+html.light-mode .asmr-player-track {
+  color: #8a8a95;
+}
+
+html.light-mode .asmr-player-time {
+  color: #666;
 }
 </style>
