@@ -10346,15 +10346,29 @@ class DownloadManager:
         internal_task = live_manager.add_task()
 
         def _resolve_and_download() -> tuple[bool, str]:
-            """同步执行：解析直链 + 下载（带节流和重试）。"""
+            """同步执行：解析直链 + 下载（带节流和重试）。
+
+            重试策略（对应原站"图片加载失败点击刷新"）：
+            - 第 1 次：正常解析直链下载
+            - 后续重试：走原站 reload broken image（?nl=token 强制换 H@H 节点，
+              服务器返回的通常是分辨率更低的重采样版本）
+            - 兜底也失败才认定为下载失败（进入失败清单）；至少保证 1 次正常 + 1 次 reload 兜底
+            """
             import io
 
-            for attempt in range(max(1, max_retries)):
+            total_attempts = max(2, max(1, max_retries))
+            final_path = None  # 跟踪本次尝试的目标路径（最终失败时清理半截文件）
+            for attempt in range(total_attempts):
                 try:
                     # 1. 重新解析图片页（keystamp 时效签名，缓存的直链会过期）
                     #    首次失败后的重试走原站"刷新失效图片"链接（?nl=token 强制换 H@H 节点）
                     page_url_eff = item_page
                     if attempt > 0:
+                        if attempt == 1:
+                            live_manager.update_log(
+                                event="图片下载失败",
+                                details=f"{filename}（尝试原站 reload broken image 兜底，请求更低分辨率版本）",
+                            )
                         try:
                             page_url_eff = _exhentai_image_page_with_nl(item_page)
                         except Exception:
@@ -10453,6 +10467,7 @@ class DownloadManager:
                     if not _is_valid_cache_file(final_path):
                         final_path.unlink(missing_ok=True)
                         raise IOError("下载内容不是有效图片（H@H 节点故障，将换节点重试）")
+                    item.pop("error", None)  # 成功：清除之前失败尝试留下的错误信息
                     return True, str(final_path)
 
                 except InterruptedError:
@@ -10462,8 +10477,20 @@ class DownloadManager:
                         "ExHentai 图片下载失败(第 %d 次) %s: %s",
                         attempt + 1, filename, exc,
                     )
-                    if attempt < max(1, max_retries) - 1:
+                    item["error"] = str(exc) or exc.__class__.__name__
+                    if attempt < total_attempts - 1:
                         time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
+            # 全部尝试（含 reload broken image 兜底）都失败 → 才认定为下载失败
+            live_manager.update_log(
+                event="下载失败",
+                details=f"{filename}（含 reload 兜底共 {total_attempts} 次尝试全部失败）",
+            )
+            # 清理残留的半截文件（流式下载中断可能留下部分内容，避免下次误判"已存在同名文件"）
+            try:
+                if final_path is not None and final_path.exists():
+                    final_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             return False, ""
 
         try:
