@@ -705,6 +705,11 @@ async def gui_inspect(url: str, options: dict) -> None:
         await asmr_inspect(url, options)
         return
 
+    # JavDB 视频详情页（javdb.com/v/{id}），走独立解析流程
+    if is_javdb_url(url):
+        await javdb_video_info(normalize_url(url))
+        return
+
     args = create_args(options)
 
     try:
@@ -9560,6 +9565,11 @@ async def gui_search(query: str, page: int, per_page: int, options: dict) -> Non
         await asmr_search(query, page, bool(options.get("asmr_subtitle")))
         return
 
+    # 站点切换：JavDB 模式搜索（番号 / 标题 / 演员）
+    if options.get("site") == "javdb":
+        await javdb_search(query, page)
+        return
+
     emit({"event": "search_start", "query": query, "page": page})
     logging.info("开始搜索: '%s' (第 %d 页)", query, page)
 
@@ -9947,6 +9957,11 @@ class DownloadManager:
                     (f.get("artist") for f in files if f.get("artist")), None,
                 ) or "ExHentai 下载"
                 album_id = task.get("album_id") or None
+            elif is_javdb_url(validated_url):
+                # JavDB：封面/预览图直链下载（无需抓取页面），目录按番号组织
+                soup = None
+                album_name = task.get("album") or "JavDB 下载"
+                album_id = task.get("album_id") or None
             elif is_coomer_url(validated_url):
                 soup = await fetch_page(validated_url)
                 if soup is None:
@@ -10090,6 +10105,12 @@ class DownloadManager:
         elif item.get("site") == "asmr":
             # ASMR：文件直链永久有效（匿名可下载），filename 含文件夹相对路径
             await self._asmr_download_one(
+                task, item, album_path, task_id, max_retries,
+            )
+            return
+        elif item.get("site") == "javdb":
+            # JavDB：封面/预览图直链（jdbstatic CDN），filename 含番号子文件夹
+            await self._javdb_download_one(
                 task, item, album_path, task_id, max_retries,
             )
             return
@@ -11075,6 +11096,128 @@ class DownloadManager:
         self._save()
         self.emit_snapshot()
 
+    async def _javdb_download_one(
+        self,
+        task: dict,
+        item: dict,
+        album_path: str,
+        task_id: str,
+        max_retries: int,
+    ) -> None:
+        """下载单个 JavDB 图片（封面/预览，直链长期有效，走 javdb 会话代理）。
+
+        目录组织：下载根目录/任务文件夹/番号/文件名（filename 含番号子文件夹）。
+        """
+        rel = item.get("filename") or f"javdb_{int(time.time())}.jpg"
+        download_link = item.get("media_url") or ""
+
+        item["status"] = "downloading"
+        self._save()
+        self.emit_snapshot()
+
+        live_manager = GuiLiveManager()
+        live_manager.task_id = task_id
+        internal_task = live_manager.add_task()
+
+        options = task.get("options", {})
+        # filename 含子路径：逐段清理非法字符，但保留目录分隔
+        rel = "/".join(
+            re.sub(r'[\\/:*?"<>|]', "_", seg).strip() for seg in rel.replace("\\", "/").split("/")
+        ).strip("/")
+        final_name = rel.split("/")[-1] or f"javdb_{int(time.time())}.jpg"
+
+        def _resolve_and_download() -> tuple[bool, str]:
+            if not download_link.startswith("http"):
+                return False, ""
+            file_dir = str(Path(album_path) / Path(rel).parent) if "/" in rel else album_path
+            Path(file_dir).mkdir(parents=True, exist_ok=True)
+            # 跳过重复
+            _, dup_action = _resolve_duplicate(file_dir, final_name, item.get("size"), options)
+            if dup_action == "skip":
+                live_manager.update_log(event="跳过重复", details=f"{final_name}（已存在相同大小的文件）")
+                item["_final_name"] = final_name
+                item["_skip_history"] = True
+                return True, ""
+            for attempt in range(max(1, max_retries)):
+                try:
+                    _javdb_throttle()
+                    with _javdb_session.get(
+                        download_link, stream=True, timeout=60,
+                        headers={"Referer": JAVDB_BASE + "/"},
+                    ) as resp:
+                        resp.raise_for_status()
+                        size = int(resp.headers.get("Content-Length") or 0) or item.get("size")
+                        live_manager.set_task_info(internal_task, final_name, size)
+                        emit({"event": "file_start", "filename": final_name, "index": 0,
+                              "size": size, "task_id": task_id})
+                        downloaded = 0
+                        last_pct = -1
+                        final_path = Path(file_dir) / truncate_filename(final_name)
+                        with open(final_path, "wb") as f:
+                            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                                if task.get("status") in ("paused", "cancelled"):
+                                    raise InterruptedError("任务已暂停/取消")
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if size:
+                                        pct = round(downloaded / size * 100, 1)
+                                        if pct != last_pct:
+                                            live_manager.update_task(internal_task, pct)
+                                            last_pct = pct
+                        item["_final_path"] = str(final_path)
+                        item["_final_name"] = final_name
+                        item["size"] = size
+                        return True, str(final_path)
+                except InterruptedError:
+                    raise
+                except (requests.RequestException, PermissionError, OSError) as exc:
+                    logging.warning("JavDB 图片下载失败(第 %d 次) %s: %s", attempt + 1, final_name, exc)
+                    if attempt < max(1, max_retries) - 1:
+                        time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
+            return False, ""
+
+        try:
+            success, final_path = await asyncio.to_thread(_resolve_and_download)
+        except InterruptedError:
+            item["status"] = "pending"
+            self._save()
+            self.emit_snapshot()
+            return
+        except Exception as exc:
+            logging.exception("JavDB 图片下载出错: %s", exc)
+            success, final_path = False, ""
+
+        skip_history = item.pop("_skip_history", False)
+        final_name = item.pop("_final_name", final_name)
+        if success:
+            item["status"] = "completed"
+            item["completed"] = 100
+            task["done"] = task.get("done", 0) + 1
+            if not skip_history and final_path:
+                _add_history_entry({
+                    "id": f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
+                    "filename": final_name,
+                    "path": final_path,
+                    "size": item.get("size"),
+                    "album": task.get("album") or "下载",
+                    "time": datetime.now().isoformat(timespec="seconds"),
+                })
+        else:
+            item["status"] = "failed"
+            task["failed"] = task.get("failed", 0) + 1
+
+        emit({
+            "event": "file_complete",
+            "filename": final_name,
+            "success": success,
+            "skipped": bool(skip_history),
+            "size": item.get("size"),
+            "task_id": task_id,
+        })
+        self._save()
+        self.emit_snapshot()
+
 
 # 全局下载管理器单例
 download_manager = DownloadManager()
@@ -11500,10 +11643,11 @@ DEFAULT_SETTINGS = {
     "oreno_proxy": "",
     "erommd_proxy": "",
     "asmr_proxy": "",
-    # 三次元新站（xhamster/pornhub 走 OAuth + 代理；xvideos 默认直连）
+    # 三次元新站（xhamster/pornhub 走 OAuth + 代理；xvideos 默认直连；javdb 国内必须代理）
     "xhamster_proxy": "http://127.0.0.1:10809",
     "pornhub_proxy": "http://127.0.0.1:10809",
     "xvideos_proxy": "",
+    "javdb_proxy": "http://127.0.0.1:10809",
     # 每站点自定义子文件夹模板（留空=使用上方的组织规则；变量 {date}/{date_full}/{title}/{id}）
     "pawchive_folder_template": "",
     "exhentai_folder_template": "",
@@ -11534,6 +11678,10 @@ DEFAULT_SETTINGS = {
     "translate_engine": "google_free",   # "google_free" | "libretranslate" | "youdao"
     "libretranslate_url": "",             # 如 https://libretranslate.com 或自建实例
     "libretranslate_api_key": "",
+    # 翻译代理（Google 端点国内必须代理；留空=直连。先代理后直连自动回退）
+    "translate_proxy": "http://127.0.0.1:10809",
+    # 全局自动翻译目标语言（右侧 🌐 按钮开关；左侧翻译面板可修改）
+    "auto_translate_to": "zh-CN",
     # P3 设置功能：不息屏 / 快捷键 / 拟态模式
     "prevent_display_sleep": False,       # 不息屏开关（True=阻止系统休眠）
     "shortcut_toggle_prevent_sleep": "",  # 切换不息屏（Electron accelerator 格式，如 "Ctrl+Shift+S"）
@@ -11576,6 +11724,21 @@ YOUDAO_API = "https://openapi.youdao.com/api"
 GOOGLE_TRANSLATE_URL = "https://translate.google.com/translate_a/single"
 
 
+def _translate_proxy_attempts() -> list:
+    """翻译请求的代理尝试列表：先走设置的代理，再尝试直连。
+
+    国内网络访问 Google 翻译必须走代理；海外用户代理不通时自动回退直连。
+    返回 [{http,https} 代理配置 or None, ...]，requests.get(proxies=...) 依次尝试。
+    """
+    s = _load_settings()
+    proxy = (s.get("translate_proxy") or "").strip()
+    if proxy and not proxy.startswith(("http://", "https://", "socks5://")):
+        proxy = "http://" + proxy
+    if proxy:
+        return [{"http": proxy, "https": proxy}, None]
+    return [None]
+
+
 def _map_lang_code(lang: str) -> str:
     """统一语言代码：zh-CHS / zh-CHT → zh；其他原样返回。Google 用 zh 即可。"""
     if not lang or lang == "auto":
@@ -11603,42 +11766,48 @@ def translate_free(text: str, from_lang: str = "auto", to_lang: str = "zh-CN") -
     if sl != "auto" and sl == tl:
         tl = "en" if sl == "zh-CN" else "zh-CN"
 
-    # ---------- 1. Google 翻译免费端点 ----------
-    try:
-        params = {
-            "client": "at",
-            "dt": "t",       # 返回翻译片段
-            "dt": "bd",      # 返回备选词
-            "sl": sl,
-            "tl": tl,
-            "q": text,
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-        }
-        resp = requests.get(GOOGLE_TRANSLATE_URL, params=params, headers=headers, timeout=15)
-        data = resp.json()
-        # 响应结构：[[["译文","原文",None,None,1],...], null, "检测到的源语言", ...]
-        if isinstance(data, list) and data and isinstance(data[0], list):
-            segments = data[0]
-            translation = "".join(seg[0] for seg in segments if seg and seg[0])
-            detected = data[2] if len(data) > 2 and data[2] else sl
-            if translation:
-                emit({
-                    "event": "translate_result",
-                    "ok": True,
-                    "translation": translation,
-                    "query": text,
-                    "detected_source": detected,
-                    "engine": "google_free",
-                })
-                return
-        emit({"event": "translate_result", "ok": False, "error": "Google 翻译返回格式异常，请稍后重试"})
-        return
-    except Exception as exc:
-        # Google 失败（国内网络/速率限制）→ 尝试 LibreTranslate 自建实例
-        last_err = f"Google 翻译失败：{exc}"
+    # ---------- 1. Google 翻译免费端点（先代理后直连，自动回退） ----------
+    last_err = ""
+    for proxies in _translate_proxy_attempts():
+        try:
+            params = {
+                "client": "at",
+                "dt": "t",       # 返回翻译片段
+                "dt": "bd",      # 返回备选词
+                "sl": sl,
+                "tl": tl,
+                "q": text,
+            }
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+            }
+            resp = requests.get(GOOGLE_TRANSLATE_URL, params=params, headers=headers,
+                                proxies=proxies, timeout=15)
+            data = resp.json()
+            # 响应结构：[[["译文","原文",None,None,1],...], null, "检测到的源语言", ...]
+            if isinstance(data, list) and data and isinstance(data[0], list):
+                segments = data[0]
+                translation = "".join(seg[0] for seg in segments if seg and seg[0])
+                detected = data[2] if len(data) > 2 and data[2] else sl
+                if translation:
+                    emit({
+                        "event": "translate_result",
+                        "ok": True,
+                        "translation": translation,
+                        "query": text,
+                        "detected_source": detected,
+                        "engine": "google_free",
+                    })
+                    return
+                last_err = "Google 翻译返回空结果"
+                continue
+            last_err = "Google 翻译返回格式异常，请稍后重试"
+            continue
+        except Exception as exc:
+            last_err = f"Google 翻译失败：{exc}"
+            # 该代理不通 → 尝试下一个（直连）
+            continue
 
     # ---------- 2. LibreTranslate（用户自建/公开实例，可选）----------
     libre_url = (s.get("libretranslate_url") or "").strip()
@@ -11704,33 +11873,54 @@ def translate_batch(texts: list, from_lang: str = "auto", to_lang: str = "zh-CN"
     translations = list(texts)  # 原样回填，后续只覆盖非空位置
     # 分批处理（每批 30 条，避免 URL 过长）
     BATCH = 30
+    batch_total = 0   # 总批数
+    batch_failed = 0  # 失败批数
+    last_err = ""
     for start in range(0, len(non_empty_idx), BATCH):
         chunk_idx = non_empty_idx[start:start + BATCH]
         chunk_texts = [str(texts[i]) for i in chunk_idx]
-        try:
-            # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
-            params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-            }
-            # 用 GET 多 q 参数（requests 会自动重复 q）
-            q_params = [("q", t) for t in chunk_texts]
-            # 手动拼 URL（requests params dict 不支持重复 key）
-            from urllib.parse import urlencode
-            url = GOOGLE_TRANSLATE_URL + "?" + urlencode(params) + "&" + urlencode(q_params)
-            resp = requests.get(url, headers=headers, timeout=20)
-            data = resp.json()
-            if isinstance(data, list) and data and isinstance(data[0], list):
-                # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
-                for i, seg in enumerate(data[0]):
-                    if i < len(chunk_idx) and seg and seg[0]:
-                        translations[chunk_idx[i]] = seg[0]
-            # 静默失败：未取到译文的位置保留原文本
-        except Exception as exc:
-            # 单批失败不影响其他批次，继续
-            logging.warning("translate_batch 第 %d 批失败: %s", start, exc)
-            continue
+        batch_total += 1
+        chunk_ok = False
+        # 先代理后直连，自动回退（国内 Google 必须代理）
+        for proxies in _translate_proxy_attempts():
+            try:
+                # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
+                params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                }
+                # 用 GET 多 q 参数（requests 会自动重复 q）
+                q_params = [("q", t) for t in chunk_texts]
+                # 手动拼 URL（requests params dict 不支持重复 key）
+                from urllib.parse import urlencode
+                url = GOOGLE_TRANSLATE_URL + "?" + urlencode(params) + "&" + urlencode(q_params)
+                resp = requests.get(url, headers=headers, proxies=proxies, timeout=20)
+                data = resp.json()
+                if isinstance(data, list) and data and isinstance(data[0], list):
+                    # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
+                    got = 0
+                    for i, seg in enumerate(data[0]):
+                        if i < len(chunk_idx) and seg and seg[0]:
+                            translations[chunk_idx[i]] = seg[0]
+                            got += 1
+                    if got > 0:
+                        chunk_ok = True
+                        break
+                last_err = "Google 翻译返回格式异常"
+            except Exception as exc:
+                last_err = str(exc)
+                continue
+        if not chunk_ok:
+            batch_failed += 1
+            logging.warning("translate_batch 第 %d 批失败: %s", start, last_err)
+
+    if batch_failed == batch_total and batch_total > 0:
+        # 全部批次失败 → 明确报错（前端会弹提示，不再静默无效果）
+        emit({"event": "translate_batch_result", "ok": False,
+              "error": f"翻译失败：Google 端点不可达（{last_err}）。请在左侧翻译面板配置可用代理，或更换翻译引擎",
+              "translations": [], "batch_id": batch_id})
+        return
 
     emit({"event": "translate_batch_result", "ok": True,
           "translations": translations, "batch_id": batch_id,
@@ -11939,6 +12129,8 @@ def _site_cookie_str(site: str) -> str:
         return _asmr_load_cred().get("token") or ""
     if site in _GENERIC_OAUTH_SITES:
         return _generic_cookie_str(site)
+    if site == "javdb":
+        return _javdb_load_cred().get("cookie_str") or ""
     return ""
 
 
@@ -11958,7 +12150,477 @@ def _site_username(site: str) -> str:
         return _asmr_username or (_asmr_load_cred().get("username") or "")
     if site in _GENERIC_OAUTH_SITES:
         return _generic_load_cookies(site).get("username") or ""
+    if site == "javdb":
+        return _javdb_username or (_javdb_load_cred().get("username") or "")
     return ""
+
+
+# ============================
+# JavDB（javdb.com，X 站类型：webview 登录抓 cookie + HTML 解析）
+# ============================
+# 登录：Electron webview（partition persist:javdb）打开 javdb 登录页，
+#       用户输入邮箱密码（Cloudflare 人机验证在 webview 内完成），登录成功后抓 cookie；
+#       "记住此装置"勾选后 cookie 约 7 天有效（机器七天登录），失效提示重新登录。
+# 搜索：GET /search?q={关键词}&f=all（番号 / 标题 / 演员均可）
+# 详情：GET /v/{id} → 标题 / 封面 / 标签 / 预览图 / 磁力链接
+# 下载：封面 + 预览图直链下载；磁力链接一键复制（交给外部种子客户端）
+JAVDB_BASE = "https://javdb.com"
+JAVDB_LOGIN_URL = "https://javdb.com/zh/login"
+
+_javdb_proxy = "http://127.0.0.1:10809"
+_javdb_username = ""
+_javdb_last_req = 0.0
+_javdb_session = requests.Session()
+_javdb_session.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+})
+
+
+def _javdb_load_cred() -> dict:
+    """读取 JavDB 登录凭据（cookie + UA 加密存 theme_cache.dat）。"""
+    return _secure_store_read_cred("javdb")
+
+
+def _javdb_save_cred(data: dict) -> None:
+    _secure_store_write_cred("javdb", dict(data))
+
+
+def javdb_set_proxy(proxy: str) -> None:
+    """设置 JavDB 代理（国内必须；空 = 直连）。"""
+    global _javdb_proxy
+    proxy = (proxy or "").strip()
+    if proxy and not proxy.startswith(("http://", "https://", "socks5://")):
+        proxy = "http://" + proxy
+    _javdb_proxy = proxy
+    _javdb_session.proxies = {"http": proxy, "https": proxy} if proxy else {}
+    emit({"event": "javdb_proxy_set", "proxy": proxy})
+    logging.info("JavDB 代理已设置: %s", proxy or "（直连）")
+
+
+def _javdb_restore_session() -> None:
+    """启动时从加密凭据恢复 cookie + UA（cf_clearance 绑定 UA，必须与登录时一致）。"""
+    global _javdb_username
+    cred = _javdb_load_cred()
+    ua = cred.get("user_agent") or ""
+    if ua:
+        _javdb_session.headers["User-Agent"] = ua
+    for name, value in (cred.get("cookies") or {}).items():
+        try:
+            _javdb_session.cookies.set(name, value, domain=".javdb.com")
+        except Exception:
+            pass
+    # 年龄确认 + 界面语言 cookie（未登录也能用）
+    _javdb_session.cookies.set("over18", "1", domain=".javdb.com")
+    _javdb_session.cookies.set("locale", "zh", domain=".javdb.com")
+    _javdb_username = cred.get("username") or ""
+
+
+def javdb_set_cookies(cookie_str: str, user_agent: str = "", username: str = "") -> dict:
+    """保存 webview 抓取的 cookie（+ 登录时的 UA，cf_clearance 校验用）。"""
+    cookies = {}
+    for pair in (cookie_str or "").split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        idx = pair.find("=")
+        if idx <= 0:
+            continue
+        cookies[pair[:idx].strip()] = pair[idx + 1:].strip()
+    cred = {"cookies": cookies, "cookie_str": cookie_str or "",
+            "user_agent": user_agent or "", "username": username or "",
+            "saved_at": time.time()}
+    _javdb_save_cred(cred)
+    _javdb_restore_session()
+    # 立即验证登录态（推送 site_login_result）
+    javdb_check_login()
+    return {"ok": True, "count": len(cookies)}
+
+
+def javdb_check_login(silent: bool = False) -> dict:
+    """检查登录态：访问主页，页面有登出链接 = 已登录（cookie 有效期内免验证码）。
+
+    cookie 过期（约 7 天"记住装置"期限）→ logged_in=False，提示重新在 webview 登录。
+    """
+    logged_in = False
+    username = ""
+    network_issue = False
+    cred = _javdb_load_cred()
+    if cred.get("cookies"):
+        try:
+            _javdb_throttle()
+            resp = _javdb_session.get(f"{JAVDB_BASE}/zh/users/home", timeout=25,
+                                      allow_redirects=False)
+            if resp.status_code == 200:
+                logged_in = "/logout" in resp.text or "current-user" in resp.text
+            elif resp.status_code in (301, 302):
+                # 重定向到登录页 = cookie 失效
+                logged_in = False
+            else:
+                network_issue = resp.status_code in (403, 503, 530)
+            if logged_in:
+                username = cred.get("username") or ""
+                global _javdb_username
+                _javdb_username = username
+        except Exception as exc:
+            logging.warning("JavDB 登录态检查失败: %s", exc)
+            network_issue = True
+    result = {"logged_in": logged_in, "username": username,
+              "network_issue": network_issue}
+    if not silent:
+        emit({"event": "site_login_result", "site": "javdb", **result})
+    return result
+
+
+def javdb_logout() -> None:
+    """退出登录（清除本地凭据）。"""
+    global _javdb_username
+    _secure_store_clear_cred("javdb")
+    _javdb_username = ""
+    _javdb_session.cookies.clear()
+    emit({"event": "site_login_result", "site": "javdb", "logged_in": False,
+          "username": "", "logout": True})
+
+
+def _javdb_throttle(min_interval: float = 1.0) -> None:
+    """请求节流（javdb 有 Cloudflare，过快会触发验证）。"""
+    global _javdb_last_req
+    wait = _javdb_last_req + min_interval - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    _javdb_last_req = time.time()
+
+
+def _javdb_soup(path: str, params: dict | None = None) -> "BeautifulSoup":
+    """GET 页面并返回 BeautifulSoup；Cloudflare 拦截时给出中文提示。"""
+    _javdb_throttle()
+    resp = _javdb_session.get(f"{JAVDB_BASE}{path}", params=params, timeout=25)
+    if resp.status_code == 404:
+        raise FileNotFoundError("页面不存在（链接可能已失效）")
+    if resp.status_code in (403, 503, 530):
+        raise PermissionError(
+            "触发 Cloudflare 拦截：请在左侧重新登录 JavDB（webview 内完成人机验证后自动抓取新 cookie）")
+    if resp.status_code != 200:
+        raise PermissionError(f"JavDB 返回 HTTP {resp.status_code}")
+    return BeautifulSoup(resp.text, "html.parser")
+
+
+def _javdb_img_src(img) -> str:
+    """图片地址（懒加载 data-src 优先，其次 src）。"""
+    if img is None:
+        return ""
+    return img.get("data-src") or img.get("src") or ""
+
+
+def _javdb_abs(u: str) -> str:
+    """相对 URL 转绝对。"""
+    if not u:
+        return ""
+    if u.startswith("//"):
+        return "https:" + u
+    if u.startswith("/"):
+        return JAVDB_BASE + u
+    return u
+
+
+def _javdb_parse_cards(soup: "BeautifulSoup") -> list[dict]:
+    """解析搜索结果卡片（.movie-list .item）→ 统一卡片字段。"""
+    items: list[dict] = []
+    for it in soup.select(".movie-list .item"):
+        a = it.find("a", href=True)
+        if not a:
+            continue
+        href = _javdb_abs(a.get("href") or "")
+        if "/v/" not in href:
+            continue
+        title_el = it.select_one(".video-title strong") or it.select_one(".video-title")
+        title = title_el.get_text(strip=True) if title_el else ""
+        # 番号（.meta 第一个 span 或 title 前缀）
+        code = ""
+        meta_spans = it.select(".meta span")
+        if meta_spans:
+            code = meta_spans[0].get_text(strip=True)
+        if not code and title:
+            m = re.match(r"^([A-Za-z]{2,6}-\d{2,5})", title)
+            if m:
+                code = m.group(1)
+        # 评分 / 日期 / 标签
+        score = (it.select_one(".score") or {}).get_text(strip=True) if it.select_one(".score") else ""
+        date = ""
+        for sp in meta_spans[1:]:
+            if re.search(r"\d{4}-\d{2}-\d{2}", sp.get_text(strip=True)):
+                date = sp.get_text(strip=True)
+                break
+        tags = [t.get_text(strip=True) for t in it.select(".tag")]
+        cover = _javdb_img_src(it.select_one(".cover img") or it.find("img"))
+        thumb = _javdb_abs(cover)
+        # 标题去掉番号前缀展示
+        display = title
+        album_name = f"[{code}] {title}" if code and not title.startswith(code) else (title or code)
+        items.append({
+            "album_name": album_name or href.rsplit("/", 1)[-1],
+            "album_url": href,
+            "cover_url": thumb,
+            "thumbnail": thumb,
+            "code": code,
+            "title": display,
+            "score": score,
+            "date": date,
+            "tags": tags,
+            "duration": (it.select_one(".duration") or {}).get_text(strip=True) if it.select_one(".duration") else "",
+        })
+    return items
+
+
+async def javdb_search(query: str, page: int = 1) -> None:
+    """JavDB 搜索（番号 / 标题 / 演员）。GET /search?q=...&f=all"""
+    query = (query or "").strip()
+    if not query:
+        emit({"event": "search_error", "message": "搜索关键词为空"})
+        return
+    emit({"event": "search_start", "query": query, "page": page})
+    try:
+        page = max(1, page or 1)
+        soup = await asyncio.to_thread(
+            _javdb_soup, "/search", {"q": query, "f": "all", "page": page})
+        items = _javdb_parse_cards(soup)
+        _apply_cached_thumbnails(items)
+        asyncio.create_task(_cache_thumbnails(items))
+        # 分页（javdb 用 <a class="pagination-next"> / 最后一页链接判断）
+        has_more = bool(soup.select_one("a.pagination-next:not(.is-disabled)"))
+        emit({"event": "search_result", "query": query, "site": "javdb",
+              "items": items, "page": page, "has_more": has_more,
+              "total_pages": 0, "total_results": len(items)})
+        logging.info("JavDB 搜索 '%s' 第 %d 页: %d 个结果", query, page, len(items))
+    except Exception as exc:
+        msg = str(exc)
+        hint = ""
+        if "Cloudflare" in msg:
+            hint = "（请在左侧重新登录 JavDB 刷新 cookie）"
+        elif "ProxyError" in msg or "timed out" in msg or "Connection" in msg:
+            hint = "（请检查 JavDB 代理设置，国内必须代理）"
+        emit({"event": "search_error", "message": f"JavDB 搜索失败: {msg}{hint}"})
+
+
+def _javdb_parse_detail(soup: "BeautifulSoup", vid: str) -> dict:
+    """解析视频详情页 /v/{id}：标题/封面/信息/标签/预览图/磁力。"""
+    title_el = soup.select_one("h2.title.current-item") or soup.select_one("h2.title") or soup.select_one(".video-title")
+    title = title_el.get_text(strip=True) if title_el else vid
+    cover = _javdb_img_src(soup.select_one(".column-video-cover img") or soup.select_one(".cover img"))
+    code = ""
+    info: dict[str, str] = {}
+    # 信息面板（识别码/日期/时长/导演/片商/系列…）
+    for block in soup.select(".movie-panel-info .panel-block"):
+        strong = block.find("strong")
+        if not strong:
+            continue
+        key = strong.get_text(strip=True).rstrip("：:")
+        value = block.get_text(" ", strip=True).replace(strong.get_text(strip=True), "", 1).strip()
+        if key in ("識別碼", "识别码", "ID"):
+            code = value
+        elif key and value and key not in ("演員", "演员", "類別", "类别", "標籤", "标签"):
+            info[key] = value
+    # 标签 / 演员
+    tags = [a.get_text(strip=True) for a in soup.select(".movie-panel-info a[href*='/tags/']")]
+    actors = [a.get_text(strip=True) for a in soup.select(".movie-panel-info a[href*='/actors/']")]
+    # 预览图（需登录才可见）
+    previews = []
+    for a in soup.select(".preview-images a.tile-item"):
+        img = a.find("img")
+        if img:
+            previews.append(_javdb_abs(_javdb_img_src(img)))
+    # 磁力链接（含名称/大小/日期/字幕标签）
+    magnets = []
+    for it in soup.select("#magnets .item"):
+        a = it.select_one("a[href^='magnet:']")
+        if not a:
+            continue
+        name_el = it.select_one(".magnet-name .name")
+        meta_texts = [t.get_text(strip=True) for t in it.select(".magnet-name .meta")]
+        size = ""
+        date = ""
+        for t in meta_texts:
+            if re.search(r"^\d+(\.\d+)?\s*(GB|MB|KB|TB)$", t, re.I):
+                size = t
+            elif re.search(r"\d{4}-\d{2}-\d{2}", t):
+                date = t
+        magnet_tags = [t.get_text(strip=True) for t in it.select(".magnet-name .tags .tag")]
+        magnets.append({
+            "name": name_el.get_text(strip=True) if name_el else (a.get("href") or "")[:60],
+            "link": a.get("href") or "",
+            "size": size,
+            "date": date,
+            "tags": magnet_tags,
+        })
+    return {
+        "video_id": vid,
+        "title": title,
+        "code": code,
+        "cover": _javdb_abs(cover),
+        "info": info,
+        "tags": tags,
+        "actors": actors,
+        "previews": previews,
+        "magnets": magnets,
+        "url": f"{JAVDB_BASE}/v/{vid}",
+    }
+
+
+async def javdb_video_info(url: str) -> None:
+    """视频详情页解析（标题/封面/标签/预览图/磁力列表）。"""
+    m = re.search(r"javdb\.com/(?:zh/)?v/([0-9a-zA-Z]+)", url or "")
+    if not m:
+        emit({"event": "javdb_video_detail", "error": "无法识别的 JavDB 链接（支持 /v/{id}）"})
+        return
+    vid = m.group(1)
+    emit({"event": "javdb_detail_loading", "loading": True})
+    try:
+        soup = await asyncio.to_thread(_javdb_soup, f"/v/{vid}", None)
+        detail = _javdb_parse_detail(soup, vid)
+        if not detail["magnets"] and not detail["previews"] and not detail["cover"]:
+            emit({"event": "javdb_video_detail",
+                  "error": "解析结果为空（可能未登录：预览图与部分磁力需登录后可见，请在左侧登录 JavDB）"})
+            return
+        emit({"event": "javdb_video_detail", "video": detail})
+        logging.info("JavDB 详情解析完成: %s (%d 磁力 / %d 预览图)", vid, len(detail["magnets"]), len(detail["previews"]))
+    except Exception as exc:
+        msg = str(exc)
+        hint = "（请重新登录 JavDB 刷新 cookie）" if "Cloudflare" in msg else "（请检查网络或代理设置）"
+        emit({"event": "javdb_video_detail", "error": f"JavDB 解析失败: {msg}{hint}"})
+    finally:
+        emit({"event": "javdb_detail_loading", "loading": False})
+
+
+async def javdb_download_images(url: str, options: dict) -> None:
+    """下载封面 + 全部预览图（直链下载，磁力链接需外部种子客户端）。"""
+    m = re.search(r"javdb\.com/(?:zh/)?v/([0-9a-zA-Z]+)", url or "")
+    if not m:
+        emit({"event": "inspect_error", "message": "无法识别的 JavDB 链接"})
+        return
+    vid = m.group(1)
+    try:
+        soup = await asyncio.to_thread(_javdb_soup, f"/v/{vid}", None)
+        detail = _javdb_parse_detail(soup, vid)
+        code = detail.get("code") or vid
+        items: list[dict] = []
+        if detail.get("cover"):
+            items.append({
+                "filename": "cover.jpg",
+                "size": None,
+                "item_page": detail["url"],
+                "status": "ok",
+                "thumbnail": "",
+                "media_url": detail["cover"],
+                "site": "javdb",
+            })
+        for i, pv in enumerate(detail.get("previews") or [], 1):
+            items.append({
+                "filename": f"preview_{i:02d}.jpg",
+                "size": None,
+                "item_page": detail["url"],
+                "status": "ok",
+                "thumbnail": "",
+                "media_url": pv,
+                "site": "javdb",
+            })
+        if not items:
+            emit({"event": "inspect_error",
+                  "message": "没有可下载的图片（预览图需登录后可见）"})
+            return
+        # 逐个直链下载（走通用下载管理器，带进度）
+        task_id = download_manager.submit(
+            detail["url"], items, options,
+            f"JavDB {code}", f"javdb_{vid}",
+        )
+        download_manager.start(task_id)
+        emit({"event": "inspect_complete",
+              "album_name": f"JavDB {code}（{len(items)} 张图片，任务已提交）",
+              "album_id": f"javdb_{vid}",
+              "is_album": True,
+              "items": items})
+        logging.info("JavDB 图片下载已提交: %s (%d 张)", vid, len(items))
+    except Exception as exc:
+        emit({"event": "inspect_error", "message": f"JavDB 解析失败: {exc}"})
+
+
+async def javdb_batch_download(urls: list, options: dict) -> None:
+    """批量下载多个视频的封面+预览图（逐个解析，每个视频单独一个下载任务）。
+
+    options["batch_parent_folder"] 非空时：任务文件夹 = 母文件夹名，
+    每个视频按 <番号>/ 子文件夹归档（与 EX 批量下载归档规则一致）。
+    """
+    urls = [str(u).strip() for u in (urls or []) if str(u).strip()]
+    total = len(urls)
+    done = 0
+    failed: list[str] = []
+    parent = (options.get("batch_parent_folder") or "").strip()
+
+    def _progress(done_: int, msg: str) -> None:
+        emit({"event": "javdb_batch_progress", "done": done_, "total": total, "message": msg})
+
+    if not total:
+        _progress(0, "请先勾选要下载的视频")
+        emit({"event": "javdb_batch_done", "done": 0, "total": 0, "failed": []})
+        return
+
+    try:
+        for u in urls:
+            m = re.search(r"javdb\.com/(?:zh/)?v/([0-9a-zA-Z]+)", u)
+            if not m:
+                failed.append(f"{u}（无法识别链接）")
+                done += 1
+                continue
+            vid = m.group(1)
+            _progress(done, f"正在解析 {vid} ...")
+            try:
+                soup = await asyncio.to_thread(_javdb_soup, f"/v/{vid}", None)
+                detail = _javdb_parse_detail(soup, vid)
+                code = detail.get("code") or vid
+                items: list[dict] = []
+                if detail.get("cover"):
+                    items.append({
+                        "filename": f"{code}/cover.jpg",
+                        "size": None, "item_page": detail["url"], "status": "ok",
+                        "thumbnail": "", "media_url": detail["cover"], "site": "javdb",
+                    })
+                for i, pv in enumerate(detail.get("previews") or [], 1):
+                    items.append({
+                        "filename": f"{code}/preview_{i:02d}.jpg",
+                        "size": None, "item_page": detail["url"], "status": "ok",
+                        "thumbnail": "", "media_url": pv, "site": "javdb",
+                    })
+                if not items:
+                    failed.append(f"{code}（无图片，预览图需登录后可见）")
+                else:
+                    task_id = download_manager.submit(
+                        detail["url"], items, options,
+                        parent or f"JavDB {code}", f"javdb_{vid}",
+                    )
+                    download_manager.start(task_id)
+                    logging.info("JavDB 批量下载：已提交 %s（%d 张图）", code, len(items))
+            except Exception as exc:
+                failed.append(f"{vid}（{exc}）")
+                logging.exception("JavDB 批量下载解析失败: %s", vid)
+            done += 1
+            _progress(done, f"{done}/{total} 完成")
+
+        summary = f"JavDB 批量下载已提交：{done}/{total}"
+        if failed:
+            summary += f"；失败：{'、'.join(failed)}"
+        emit({"event": "javdb_batch_done", "done": done, "total": total,
+              "failed": failed, "message": summary})
+    except Exception as exc:
+        emit({"event": "javdb_batch_done", "done": done, "total": total, "failed": failed,
+              "message": f"批量下载中断: {exc}"})
+        logging.exception("JavDB 批量下载出错")
+
+
+def is_javdb_url(url: str) -> bool:
+    """判断是否为 JavDB 链接（/v/{id} 详情页）。"""
+    return bool(re.search(r"javdb\.com/(?:zh/)?v/[0-9a-zA-Z]+", url or "", re.I))
 
 
 # 通用 webview OAuth 站点（xhamster/pornhub/xvideos）凭据存取（AP1 阶段）
@@ -12043,6 +12705,7 @@ def _emit_login_info() -> None:
         ("xhamster", bool(_generic_load_cookies("xhamster").get("cookies")), _generic_cookie_str("xhamster")),
         ("pornhub", bool(_generic_load_cookies("pornhub").get("cookies")), _generic_cookie_str("pornhub")),
         ("xvideos", bool(_generic_load_cookies("xvideos").get("cookies")), _generic_cookie_str("xvideos")),
+        ("javdb", bool(_javdb_load_cred().get("cookies")), _javdb_load_cred().get("cookie_str") or ""),
     ):
         entry = accounts.get(site) or {}
         sites[site] = {
@@ -12337,6 +13000,11 @@ async def command_loop() -> None:
     _hanime_restore_session()
     if _hanime_load_cred().get("cookies"):
         await asyncio.to_thread(hanime_check_login, True)
+    # 恢复 JavDB 代理设置 + 会话（cookie 约 7 天有效，过期提示重新 webview 登录）
+    javdb_set_proxy(_settings.get("javdb_proxy") or "http://127.0.0.1:10809")
+    _javdb_restore_session()
+    if _javdb_load_cred().get("cookies"):
+        await asyncio.to_thread(javdb_check_login, True)
     # 推送全部站点登录信息（账号卡片数据源，切换站点不丢失）
     _emit_login_info()
     logging.info("GUI 桥接模块就绪，等待命令...")
@@ -12937,6 +13605,37 @@ async def command_loop() -> None:
                 settings[f"{site}_proxy"] = proxy
                 _save_settings(settings)
                 emit({"event": "log", "type": "设置", "message": f"{site} 代理已设置: {proxy or '直连'}"})
+
+            # ---------- JavDB（javdb.com）----------
+            elif cmd == "javdb_set_cookies":
+                # webview 登录成功后抓取的 cookie（+ UA，cf_clearance 校验绑定 UA）
+                javdb_set_cookies(
+                    command.get("cookie_str", ""),
+                    command.get("user_agent", ""),
+                    command.get("username", ""),
+                )
+
+            elif cmd == "javdb_check_login":
+                await asyncio.to_thread(javdb_check_login, bool(command.get("silent", False)))
+
+            elif cmd == "javdb_logout":
+                javdb_logout()
+
+            elif cmd == "javdb_set_proxy":
+                proxy = command.get("proxy", "")
+                settings["javdb_proxy"] = proxy
+                _save_settings(settings)
+                javdb_set_proxy(proxy)
+                emit({"event": "log", "type": "设置", "message": f"JavDB 代理已设置: {proxy or '直连'}"})
+
+            elif cmd == "javdb_video_info":
+                await javdb_video_info(command.get("url", ""))
+
+            elif cmd == "javdb_download_images":
+                await javdb_download_images(command.get("url", ""), command.get("options", {}))
+
+            elif cmd == "javdb_batch_download":
+                await javdb_batch_download(command.get("urls", []), command.get("options", {}))
 
             elif cmd == "cancel":
                 logging.info("收到取消命令")

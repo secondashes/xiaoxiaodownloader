@@ -64,6 +64,8 @@ const SITE_SESSIONS = {
   xhamster: { partition: 'persist:twitter', domains: ['.xhamster.com', '.xhcdn.com'] },
   pornhub:  { partition: 'persist:twitter', domains: ['.pornhub.com', '.phncdn.com'] },
   xvideos:  { partition: 'persist:xvideos', domains: ['.xvideos.com', '.xvideos-cdn.com'] },
+  // JavDB：独立会话（webview 内完成邮箱密码登录 + Cloudflare 人机验证，"记住装置"后 cookie 约 7 天有效）
+  javdb:    { partition: 'persist:javdb', domains: ['.javdb.com', '.jdbstatic.com'] },
 }
 
 let pythonProcess = null
@@ -872,7 +874,10 @@ ipcMain.handle('site-get-cookies', async (event, site) => {
     // 简单判定是否已登录：cookie 数量 > 3 或包含常见的会话 cookie 名
     const sessionKeys = ['session', 'sessid', 'phpsessid', 'sid', 'uid', 'user', 'login', 'remember', 'auth']
     const hasAuth = all.length > 3 || all.some(c => sessionKeys.some(k => c.name.toLowerCase().includes(k)))
-    return { ok: true, cookieStr, hasAuth, count: all.length }
+    // 返回会话 UA（cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需用同一 UA）
+    let userAgent = ''
+    try { userAgent = ses.getUserAgent() } catch (e) { /* 忽略 */ }
+    return { ok: true, cookieStr, hasAuth, count: all.length, userAgent }
   } catch (err) {
     debugLog(`读取 ${site} cookie 失败: ${err.message}`)
     return { ok: false, cookieStr: '', hasAuth: false, count: 0, error: err.message }

@@ -31,6 +31,7 @@
             :xhamster-user="xhamsterUser"
             :pornhub-user="pornhubUser"
             :xvideos-user="xvideosUser"
+            :javdb-user="javdbUser"
             @site-oauth-login="handleSiteOAuthLogin"
             @site-logout="handleSiteLogout"
             @site-set-proxy="handleSiteSetProxy"
@@ -111,6 +112,8 @@
             :ex-gallery-detail="exGalleryDetail"
             :ex-detail-loading="exDetailLoading"
             :ex-fav-mode="exFavMode"
+            :ex-batch-running="exBatchDownloading"
+            :ex-batch-progress="exBatchProgress"
             :pa-post-detail="paPostDetail"
             :pa-detail-loading="paDetailLoading"
             :pa-artist-posts="paArtistPosts"
@@ -215,13 +218,13 @@
             :reverse-running="reverseRunning"
             @reverse-search="handleReverseSearch"
             @reverse-reset="handleReverseReset"
-            :auto-translate-to="autoTranslateTo"
-            @update:auto-translate-to="handleUpdateAutoTranslateTo"
+            :javdb-detail="javdbDetail"
+            :javdb-detail-loading="javdbDetailLoading"
+            :javdb-batch-running="javdbBatchRunning"
+            :javdb-batch-progress="javdbBatchProgress"
             :auto-translating="autoTranslating"
             :auto-translate-mode="autoTranslateMode"
-            :auto-translate-lang-options="autoTranslateLangOptions"
             :translated-titles="translatedTitles"
-            @auto-translate="handleAutoTranslate"
             @toggle-auto-translate-mode="handleToggleAutoTranslateMode"
             @update:tw-local-search="twLocalSearch = $event; handleTwLocalSearch($event)"
             @tw-follow-list="handleTwFollowList"
@@ -293,6 +296,10 @@
             @asmr-open-circle="handleAsmrOpenCircle"
             @asmr-open-va="handleAsmrOpenVa"
             @asmr-batch-download="handleAsmrBatchDownload"
+            @javdb-open-detail="handleJavdbOpenDetail"
+            @javdb-detail-back="handleJavdbDetailBack"
+            @javdb-download-images="handleJavdbDownloadImages"
+            @javdb-batch-download="handleJavdbBatchDownload"
             @search="handleSearch"
             @load-more="handleLoadMore"
             @go-page="handleGoPage"
@@ -391,6 +398,7 @@
           :partition="wvLogin.partition"
           :success-patterns="wvLogin.successPatterns"
           :captcha-patterns="wvLogin.captchaPatterns"
+          :credentials="wvLogin.credentials"
           :title="`${wvLogin.site} webview 登录`"
           @login-success="handleSiteLoginSuccess"
           @login-failed="err => message.error(err || '登录失败')"
@@ -575,6 +583,12 @@ const exDetailLoading = ref(false)  // 详情加载中
 const exFavMode = ref(false)        // 当前搜索结果视图是否为"我的收藏"模式
 const exBatchDownloading = ref(false)  // EX 批量下载进行中（inspect_complete 时追加而非替换 fileList）
 const exBatchPending = ref(0)            // EX 批量下载待完成的 inspect_complete 计数（异步返回时减一）
+const exBatchTotal = ref(0)              // EX 批量下载总画廊数（进度显示 done/total）
+// 批量进度（传给 RightPanel 按钮）：done = 总数 - 待完成
+const exBatchProgress = computed(() => ({
+  done: Math.max(0, exBatchTotal.value - exBatchPending.value),
+  total: exBatchTotal.value,
+}))
 
 // Pawchive 帖子详情（完整信息 + 标签 + 附件预览）
 const paPostDetail = ref(null)
@@ -603,22 +617,16 @@ const translateResult = ref(null)
 // translatedTitles: {原标题: 译文}；展示时由 RightPanel.trTitle() 回填
 const translatedTitles = ref({})
 const autoTranslating = ref(false)
-// 目标语言（持久化到 settings.auto_translate_to，默认中文）
+// 目标语言（持久化到 settings.auto_translate_to，默认中文；左侧翻译面板可修改）
 const autoTranslateTo = ref('zh-CN')
-// 持续自动翻译模式（每次搜索后自动翻译全部结果）
+// 翻译开关：开=翻译当前页+后续新增内容自动翻译；关=停止并恢复原文
 const autoTranslateMode = ref(false)
-// 目标语言下拉选项（可修改：用户可在设置里增减）
-const autoTranslateLangOptions = ref([
-  { label: '中文', value: 'zh-CN' },
-  { label: '英文', value: 'en' },
-  { label: '日文', value: 'ja' },
-  { label: '韩文', value: 'ko' },
-  { label: '繁中', value: 'zh-TW' },
-  { label: '法文', value: 'fr' },
-  { label: '德文', value: 'de' },
-  { label: '俄文', value: 'ru' },
-  { label: '西班牙文', value: 'es' },
-])
+// 批量翻译在途请求：batch_id → 发送时的标题列表（回填时对位用）
+const translateBatchPending = new Map()
+// 目标语言改动时（左侧翻译面板修改 settings.auto_translate_to）同步到 ref
+watch(() => settings.auto_translate_to, v => {
+  if (v) autoTranslateTo.value = v
+})
 
 
 // GitHub 仓库更新检查结果（左侧设置区）
@@ -805,15 +813,22 @@ const reversePaste = ref('')           // 左侧粘贴板内容（后端 cache/r
 const xhamsterUser = ref('')
 const pornhubUser = ref('')
 const xvideosUser = ref('')
+const javdbUser = ref('')
+// JavDB 视频详情（封面/预览图/磁力列表）+ 批量下载进度
+const javdbDetail = ref(null)
+const javdbDetailLoading = ref(false)
+const javdbBatchRunning = ref(false)
+const javdbBatchProgress = reactive({ done: 0, total: 0 })
 // webview 登录弹窗（共用 WebviewLoginModal 组件）
 const wvLogin = reactive({
   visible: false,
-  site: '',                   // xhamster / pornhub / xvideos
+  site: '',                   // xhamster / pornhub / xvideos / javdb
   loginUrl: '',
   homeUrl: '',
   partition: 'persist:twitter',
   successPatterns: [],
   captchaPatterns: [],
+  credentials: null,          // 登录页自动预填账号（javdb 邮箱密码登录）
 })
 
 
@@ -876,6 +891,7 @@ const exBatchFolderVisible = ref(false)
 const exBatchFolderName = ref('')          // 输入框值（默认 = 当前搜索词）
 const exBatchParentFolder = ref('')        // 确认后保存的母文件夹名（传给下载 options）
 const exBatchFolderPendingUrls = ref([])   // 待批量下载的画廊 URL（确认后继续解析）
+const batchFolderContext = ref('ex')        // 母文件夹弹窗上下文（ex / javdb：确认后走对应批量逻辑）
 
 
 // RightPanel 组件引用（转发 ExHentai 种子/磁力事件）
@@ -989,6 +1005,8 @@ function handlePythonEvent(event) {
         window.api.sendCommand({ cmd: 'xhamster_check_login', silent: true })
         window.api.sendCommand({ cmd: 'pornhub_check_login', silent: true })
         window.api.sendCommand({ cmd: 'xvideos_check_login', silent: true })
+        // 静默检查 JavDB 登录状态（cookie "记住装置"约 7 天，过期提示重新登录）
+        window.api.sendCommand({ cmd: 'javdb_check_login', silent: true })
         // 加载 X 关注分类标签（本地持久化）
         window.api.sendCommand({ cmd: 'twitter_get_follow_tags' })
         // 加载 EX 隐藏标签列表（长期保存）
@@ -1337,6 +1355,7 @@ function handlePythonEvent(event) {
       iwHomeTotal.value = event.total || 0
       if (event.mode !== undefined) iwHomeMode.value = event.mode || ''
       if (iwView.value !== 'detail') iwView.value = 'home'
+      maybeAutoTranslateAfterSearch()
       break
 
     case 'iwara_home_loading':
@@ -1497,6 +1516,7 @@ function handlePythonEvent(event) {
       if (event.genres) haGenres.value = event.genres
       if (event.sorts) haSorts.value = event.sorts
       if (haView.value !== 'detail') haView.value = 'home'
+      maybeAutoTranslateAfterSearch()
       break
 
     case 'hanime_home_loading':
@@ -1614,6 +1634,7 @@ function handlePythonEvent(event) {
       orHomeHasMore.value = !!event.has_more
       if (event.sorts) orSorts.value = event.sorts
       if (orView.value !== 'detail' && orView.value !== 'list') orView.value = 'home'
+      maybeAutoTranslateAfterSearch()
       break
 
     case 'oreno_home_loading':
@@ -1810,6 +1831,7 @@ function handlePythonEvent(event) {
       asmrTotal.value = event.total || 0
       if (event.orders) asmrOrders.value = event.orders
       searchResults.value = []
+      maybeAutoTranslateAfterSearch()
       break
 
     // ============================
@@ -2040,10 +2062,16 @@ function handlePythonEvent(event) {
     case 'translate_batch_result': {
       // 全局自动翻译：批量译文回填到 translatedTitles 映射
       autoTranslating.value = false
-      if (event.ok && Array.isArray(event.translations)) {
-        const titles = collectCurrentTitles()
+      // 用发送时记录的标题列表对位（batch_id 关联），避免期间列表变化导致错位
+      const titles = translateBatchPending.get(event.batch_id) || collectCurrentTitles()
+      translateBatchPending.delete(event.batch_id)
+      if (!event.ok) {
+        message.error(event.error || '翻译失败（Google 免费端点不可达，可在左侧翻译面板配置代理或更换引擎）')
+        break
+      }
+      if (Array.isArray(event.translations)) {
         const map = { ...translatedTitles.value }
-        // 按收集顺序对位覆盖（后端保证顺序一致）
+        // 按发送顺序对位覆盖（后端保证顺序一致）
         for (let i = 0; i < titles.length && i < event.translations.length; i++) {
           const orig = titles[i]
           const tr = event.translations[i]
@@ -2210,31 +2238,61 @@ function handlePythonEvent(event) {
       if (!renameModal.visible) showNextRenamePrompt()
       break
 
-    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos）登录结果 ----------
+    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/javdb）登录结果 ----------
     case 'site_login_result': {
       const siteKey = event.site
+      const userRefs = { xhamster: xhamsterUser, pornhub: pornhubUser, xvideos: xvideosUser, javdb: javdbUser }
+      const userRef = userRefs[siteKey]
       if (event.logout) {
-        if (siteKey === 'xhamster') xhamsterUser.value = ''
-        else if (siteKey === 'pornhub') pornhubUser.value = ''
-        else if (siteKey === 'xvideos') xvideosUser.value = ''
+        if (userRef) userRef.value = ''
         if (!event.silent) message.info(event.message || `已退出 ${siteKey} 登录`)
         addLog('系统', `${siteKey} 已退出登录`)
       } else if (event.logged_in) {
         const uname = event.username || '已登录'
-        if (siteKey === 'xhamster') xhamsterUser.value = uname
-        else if (siteKey === 'pornhub') pornhubUser.value = uname
-        else if (siteKey === 'xvideos') xvideosUser.value = uname
+        if (userRef) userRef.value = uname
         if (!event.silent) message.success(event.message || `${siteKey} 登录成功`)
         addLog('系统', `${siteKey} 登录成功: ${uname}`)
       } else {
-        if (siteKey === 'xhamster') xhamsterUser.value = ''
-        else if (siteKey === 'pornhub') pornhubUser.value = ''
-        else if (siteKey === 'xvideos') xvideosUser.value = ''
-        if (!event.silent) message.warning(event.message || `${siteKey} 未登录或登录失效`)
+        if (userRef) userRef.value = ''
+        let hint = event.message || `${siteKey} 未登录或登录失效`
+        // javdb cookie 约 7 天有效（"记住装置"），过期提示重新登录
+        if (siteKey === 'javdb') hint = 'JavDB 登录已失效（"记住装置"约 7 天），请在左侧重新登录'
+        if (!event.silent) message.warning(hint)
         addLog('系统', `${siteKey} 未登录`)
       }
       break
     }
+
+    // ---------- JavDB 详情 ----------
+    case 'javdb_detail_loading':
+      javdbDetailLoading.value = !!event.loading
+      break
+
+    case 'javdb_video_detail':
+      javdbDetailLoading.value = false
+      if (event.error) {
+        message.error(event.error)
+        addLog('错误', event.error)
+        break
+      }
+      javdbDetail.value = event.video || null
+      addLog('解析', `JavDB 详情: ${event.video?.title || ''}（${event.video?.magnets?.length || 0} 磁力 / ${event.video?.previews?.length || 0} 预览图）`)
+      break
+
+    // ---------- JavDB 批量下载进度 ----------
+    case 'javdb_batch_progress':
+      javdbBatchRunning.value = true
+      javdbBatchProgress.done = event.done || 0
+      javdbBatchProgress.total = event.total || 0
+      break
+
+    case 'javdb_batch_done':
+      javdbBatchRunning.value = false
+      if (event.message) {
+        message.info(event.message)
+        addLog('下载', event.message)
+      }
+      break
   }
 }
 
@@ -2258,6 +2316,11 @@ function isPawchiveUrl(text) {
 // 判断输入是否为 ExHentai 画廊链接（exhentai.org / e-hentai.org）
 function isExhentaiUrl(text) {
   return /(e-hentai|exhentai)\.org\/g\/\d+\/[0-9a-f]+/i.test(text)
+}
+
+// 判断输入是否为 JavDB 链接（javdb.com/v/{id} 详情页）
+function isJavdbUrl(text) {
+  return /javdb\.com\/(?:zh\/)?v\/[0-9a-zA-Z]+/i.test((text || '').trim())
 }
 
 // 站点显示名
@@ -2320,8 +2383,8 @@ function updateSite(site) {
 function handleSearch() {
   const text = searchQuery.value.trim()
   if (!text) return
-  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isOrenoUrl(text) || isAsmrUrl(text)) {
-    // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR 链接，直接解析（后端按链接自动路由）
+  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isOrenoUrl(text) || isAsmrUrl(text) || isJavdbUrl(text)) {
+    // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR / JavDB 链接，直接解析（后端按链接自动路由）
     url.value = text
     cameFromSearch.value = false
     handleInspect()
@@ -2358,6 +2421,7 @@ function doSearch(query, page) {
   exGalleryDetail.value = null
   paPostDetail.value = null
   paArtistPosts.value = null
+  javdbDetail.value = null
   const options = JSON.parse(JSON.stringify(settings))
   window.api.sendCommand({
     cmd: 'search',
@@ -2713,29 +2777,31 @@ function collectCurrentTitles() {
   return titles
 }
 
-// 目标语言下拉切换：保存到 settings 持久化
-function handleUpdateAutoTranslateTo(v) {
-  autoTranslateTo.value = v || 'zh-CN'
-  settings.auto_translate_to = autoTranslateTo.value
-  saveSettings()
-}
-
-// 切换持续自动翻译模式（持久化）
+// 翻译开关（右侧缩小版 🌐 按钮）：
+// 开 → 立即翻译当前页面全部内容，后续新增内容自动翻译（转圈动效表示进行中）
+// 关 → 停止翻译，恢复原文
 function handleToggleAutoTranslateMode() {
   autoTranslateMode.value = !autoTranslateMode.value
   settings.auto_translate_mode = autoTranslateMode.value
   saveSettings()
-  // 开启后立即翻译一次当前结果
-  if (autoTranslateMode.value) handleAutoTranslate(autoTranslateTo.value)
+  if (autoTranslateMode.value) {
+    handleAutoTranslate(autoTranslateTo.value)
+  } else {
+    translatedTitles.value = {}
+  }
 }
 
-// 点击 🌐 按钮：把当前搜索/列表结果标题批量翻译到目标语言
+// 翻译当前页面所有标题（已翻译过的自动跳过，只翻译新增内容）
 function handleAutoTranslate(toLang) {
   if (!window.api) return
-  const titles = collectCurrentTitles()
+  let titles = collectCurrentTitles()
+  if (!titles.length) return
+  // 跳过已有译文的标题（翻页/加载更多时只翻译新增部分）
+  titles = titles.filter(t => !(t in translatedTitles.value))
   if (!titles.length) return
   autoTranslating.value = true
   const batchId = `auto_${Date.now()}`
+  translateBatchPending.set(batchId, titles)
   window.api.sendCommand({
     cmd: 'translate_batch',
     texts: titles,
@@ -2745,11 +2811,9 @@ function handleAutoTranslate(toLang) {
   })
 }
 
-// 搜索完成后若开启持续自动翻译，自动触发一次
+// 列表/搜索结果到达后：若翻译开关已开启，自动翻译新增内容（各站加载事件末尾调用）
 function maybeAutoTranslateAfterSearch() {
-  if (autoTranslateMode.value && searchResults.value.length) {
-    handleAutoTranslate(autoTranslateTo.value)
-  }
+  if (autoTranslateMode.value) handleAutoTranslate(autoTranslateTo.value)
 }
 
 
@@ -2900,6 +2964,7 @@ function handleExOpenGallery(galleryUrl) {
 async function handleExBatchDownload(urls) {
   if (!window.api || !Array.isArray(urls) || !urls.length) return
   // 弹出母文件夹命名弹窗：默认填入当前搜索词，用户可修改/留空
+  batchFolderContext.value = 'ex'
   exBatchFolderPendingUrls.value = urls.filter(u => u)
   exBatchFolderName.value = lastSearchKeyword.value || ''
   exBatchFolderVisible.value = true
@@ -2913,6 +2978,20 @@ async function confirmExBatchFolder(useFolder) {
   const urls = exBatchFolderPendingUrls.value
   exBatchFolderPendingUrls.value = []
   if (!urls.length) return
+
+  // JavDB 批量下载：确认后走 javdb 专用批量命令（逐个解析详情，每个视频一个下载任务）
+  if (batchFolderContext.value === 'javdb') {
+    const options = JSON.parse(JSON.stringify(settings))
+    if (exBatchParentFolder.value) options.batch_parent_folder = exBatchParentFolder.value
+    javdbBatchRunning.value = true
+    javdbBatchProgress.done = 0
+    javdbBatchProgress.total = urls.length
+    const tip = exBatchParentFolder.value ? `母文件夹「${exBatchParentFolder.value}」，` : ''
+    message.info(`开始批量解析 ${urls.length} 个视频，${tip}封面与预览图将逐个加入下载任务`)
+    window.api.sendCommand({ cmd: 'javdb_batch_download', urls, options })
+    return
+  }
+
   // 进入文件列表视图（如果还没进入）
   cameFromSearch.value = true
   // 清空 fileList 并发解析多个画廊
@@ -2920,6 +2999,7 @@ async function confirmExBatchFolder(useFolder) {
   exGalleryDetail.value = null
   exBatchDownloading.value = true
   exBatchPending.value = urls.length
+  exBatchTotal.value = urls.length
   const tip = exBatchParentFolder.value
     ? `母文件夹「${exBatchParentFolder.value}」，`
     : ''
@@ -3699,6 +3779,14 @@ function handleSiteOAuthLogin(siteKey, creds) {
       successPatterns: [/xvideos\.com\/(profiles|account|favorites)/i],
       captchaPatterns: [/challenge|captcha|areyouhuman|cdn\.xvideos/i],
     },
+    javdb: {
+      // JavDB 邮箱密码登录：webview 内完成 Cloudflare 人机验证；"记住此装置"后 cookie 约 7 天有效
+      loginUrl: 'https://javdb.com/zh/login',
+      homeUrl: 'https://javdb.com/zh/',
+      partition: 'persist:javdb',
+      successPatterns: [/javdb\.com\/(zh\/)?(users\/home|logout)/i, /javdb\.com\/zh\/?$/i],
+      captchaPatterns: [/challenge|captcha|cdn-cgi|turnstile/i],
+    },
   }
   const cfg = configs[siteKey]
   if (!cfg) return
@@ -3708,6 +3796,11 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.partition = cfg.partition
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
+  // javdb：邮箱密码登录，webview 登录页自动预填（用户只需完成人机验证并点登录）
+  wvLogin.credentials = (siteKey === 'javdb' && creds && creds.email) ? {
+    email: creds.email,
+    password: creds.password || '',
+  } : null
   wvLogin.visible = true
   // 同时设置 webview 会话代理（复用站点代理设置）
   const proxyKey = `${siteKey}_proxy`
@@ -3718,12 +3811,12 @@ function handleSiteOAuthLogin(siteKey, creds) {
 }
 
 // WebviewLoginModal 抓取 cookie 成功 → 发后端持久化 + 验证
-function handleSiteLoginSuccess({ cookieStr, count }) {
+// （javdb 附带 webview UA：cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需同 UA）
+function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   if (!window.api || !wvLogin.site) return
-  window.api.sendCommand({
-    cmd: `${wvLogin.site}_set_cookies`,
-    cookie_str: cookieStr,
-  })
+  const payload = { cmd: `${wvLogin.site}_set_cookies`, cookie_str: cookieStr }
+  if (wvLogin.site === 'javdb' && userAgent) payload.user_agent = userAgent
+  window.api.sendCommand(payload)
   addLog('系统', `${wvLogin.site} 抓取到 ${count} 个 cookie，已发给后端保存`)
 }
 
@@ -3746,6 +3839,42 @@ function handleSiteSetProxy(siteKey, proxy) {
 function handleSiteCheckLogin(siteKey, silent = true) {
   if (!window.api) return
   window.api.sendCommand({ cmd: `${siteKey}_check_login`, silent })
+}
+
+// ============================
+// JavDB（javdb.com）业务
+// ============================
+// 点击搜索结果卡片 → 解析视频详情（封面/预览图/磁力列表）
+function handleJavdbOpenDetail(item) {
+  if (!item || !item.album_url) return
+  javdbDetail.value = null
+  url.value = item.album_url
+  searchQuery.value = item.album_url
+  cameFromSearch.value = true
+  handleInspect()
+}
+
+// 关闭详情返回搜索结果
+function handleJavdbDetailBack() {
+  javdbDetail.value = null
+  fileList.value = []
+}
+
+// 下载当前详情页的封面 + 全部预览图（直链下载任务）
+function handleJavdbDownloadImages() {
+  if (!window.api || !javdbDetail.value) return
+  const options = JSON.parse(JSON.stringify(settings))
+  window.api.sendCommand({ cmd: 'javdb_download_images', url: javdbDetail.value.url, options })
+  message.success('已提交下载任务（封面 + 预览图）')
+}
+
+// JavDB 批量下载（弹母文件夹命名弹窗，与 EX 同一套交互）
+function handleJavdbBatchDownload(urls) {
+  if (!window.api || !Array.isArray(urls) || !urls.length) return
+  batchFolderContext.value = 'javdb'
+  exBatchFolderPendingUrls.value = urls.filter(u => u)
+  exBatchFolderName.value = lastSearchKeyword.value || ''
+  exBatchFolderVisible.value = true
 }
 
 // 热门作品（每页 100，进入站点时自动加载）

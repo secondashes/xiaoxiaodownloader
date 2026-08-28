@@ -395,13 +395,43 @@
           </div>
         </div>
 
+        <!-- JavDB 邮箱密码登录（webview 内自动预填 + Cloudflare 人机验证，"记住装置"约 7 天） -->
+        <div v-if="site === 'javdb'" class="pawchive-login-form">
+          <n-input
+            v-model:value="jdbEmailInput"
+            size="small"
+            placeholder="JavDB 登录邮箱"
+            @keyup.enter="handleJdbLogin"
+          />
+          <n-input
+            v-model:value="jdbPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+            @keyup.enter="handleJdbLogin"
+          />
+          <n-checkbox v-model:checked="jdbRemember" size="small">记住此装置（登录约 7 天有效）</n-checkbox>
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="handleJdbLogin"
+          >
+            登录（弹窗内完成人机验证）
+          </n-button>
+          <div class="login-hint">
+            JavDB 有 Cloudflare 验证，点登录后请在弹窗内完成验证并点击网站登录按钮；cookie 加密保存，约 7 天有效
+          </div>
+        </div>
+
         <!-- 登录引导：打开登录页 / 一键抓取 -->
         <div class="login-guide">
           <n-button size="small" block secondary @click="emit('open-login-page', site)">
             打开登录页（浏览器）
           </n-button>
           <n-button
-            v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos'"
+            v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'"
             size="small"
             block
             type="primary"
@@ -422,9 +452,11 @@
                       ? '推荐用上方 X 站 OAuth 登录；也可打开浏览器手动登录后用"一键抓取Cookie"'
                       : site === 'xvideos'
                         ? '推荐用上方邮箱密码登录（人机验证自动弹窗）；也可打开浏览器手动登录后用"一键抓取Cookie"'
-                        : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
+                        : site === 'javdb'
+                          ? '推荐用上方邮箱密码登录（自动预填 + 弹窗内完成 Cloudflare 验证）；国内必须配置下方 JavDB 代理'
+                          : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
           </div>
-          <div v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
+          <div v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
         </div>
 
         <!-- 未登录但保存过账号档案：直接选择切换即可恢复登录（当前账号过期也能换） -->
@@ -658,8 +690,34 @@
 
         <!-- 引擎配置（折叠） -->
         <details class="translate-config">
-          <summary>⚙ 翻译引擎（默认 Google 免费，国内可能需代理；可选 LibreTranslate / 有道）</summary>
+          <summary>⚙ 翻译引擎与全局设置（默认 Google 免费，国内需代理；右侧 🌐 按钮开关全局自动翻译）</summary>
           <div class="translate-config-body">
+            <!-- 全局自动翻译设置（右侧缩小版 🌐 按钮用） -->
+            <div class="translate-config-hint">搜索结果自动翻译目标语言（右侧 🌐 按钮开启/停止）：</div>
+            <n-select
+              size="small"
+              :value="settings.auto_translate_to || 'zh-CN'"
+              :options="[
+                { label: '中文（简体）', value: 'zh-CN' },
+                { label: '中文（繁體）', value: 'zh-TW' },
+                { label: 'English', value: 'en' },
+                { label: '日本語', value: 'ja' },
+                { label: '한국어', value: 'ko' },
+                { label: 'Français', value: 'fr' },
+                { label: 'Deutsch', value: 'de' },
+                { label: 'Русский', value: 'ru' },
+                { label: 'Español', value: 'es' },
+              ]"
+              @update:value="v => update('auto_translate_to', v)"
+            />
+            <!-- 翻译代理 -->
+            <div class="translate-config-hint">翻译代理（Google 端点国内必须；留空=直连）：</div>
+            <n-input
+              size="small"
+              :value="settings.translate_proxy || ''"
+              placeholder="如 http://127.0.0.1:10809（留空=直连）"
+              @update:value="v => update('translate_proxy', v.trim())"
+            />
             <n-select
               size="small"
               :value="settings.translate_engine || 'google_free'"
@@ -671,7 +729,7 @@
               @update:value="v => update('translate_engine', v)"
             />
             <div v-if="(settings.translate_engine || 'google_free') === 'google_free'" class="translate-config-hint">
-              走 translate.google.com 免费端点，无需 API key；国内网络通常需代理才能访问（在设置-代理里配）。
+              走 translate.google.com 免费端点，无需 API key；国内网络需在上方填写可用代理。
             </div>
             <template v-else-if="settings.translate_engine === 'libretranslate'">
               <n-input
@@ -1107,6 +1165,20 @@
             </div>
           </template>
 
+          <!-- JavDB 专属设置（代理，国内必须） -->
+          <template v-if="site === 'javdb'">
+            <div class="setting-item">
+              <div class="setting-label">JavDB 代理地址（登录 + 搜索 + 下载都走此代理）</div>
+              <n-input
+                :value="settings.javdb_proxy"
+                placeholder="如 http://127.0.0.1:10809，默认已填"
+                size="small"
+                @change="v => $emit('site-set-proxy', 'javdb', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">⚠️ 国内必须配置代理（默认 http://127.0.0.1:10809）；有 Cloudflare 验证，cookie 约 7 天有效</div>
+            </div>
+          </template>
+
           <!-- 按文件类型分类 -->
           <div class="setting-switch">
             <div>
@@ -1510,6 +1582,8 @@ const props = defineProps({
   xhamsterUser: { type: String, default: '' },
   pornhubUser: { type: String, default: '' },
   xvideosUser: { type: String, default: '' },
+  // JavDB 登录用户名
+  javdbUser: { type: String, default: '' },
   // 全站点登录信息（后端 login_info 事件：用户名/Cookie/账号档案）
   loginInfo: { type: Object, default: () => ({}) },
   loginLoading: { type: Boolean, default: false },
@@ -1615,7 +1689,7 @@ watch(() => props.reversePaste, (v) => {
 // ============================
 // 登录状态（账号卡片）
 // ============================
-const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr', 'xhamster', 'pornhub', 'xvideos'].includes(props.site))
+const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb'].includes(props.site))
 
 const siteLoggedIn = computed(() => {
   if (props.site === 'pawchive') return !!props.pawchiveUser
@@ -1627,6 +1701,7 @@ const siteLoggedIn = computed(() => {
   if (props.site === 'xhamster') return !!props.xhamsterUser
   if (props.site === 'pornhub') return !!props.pornhubUser
   if (props.site === 'xvideos') return !!props.xvideosUser
+  if (props.site === 'javdb') return !!props.javdbUser
   return false
 })
 
@@ -1641,6 +1716,7 @@ const loginSubtitle = computed(() => {
   if (props.site === 'xhamster') return props.xhamsterUser ? `xHamster 已登录: ${props.xhamsterUser}` : 'xHamster 未登录'
   if (props.site === 'pornhub') return props.pornhubUser ? `Pornhub 已登录: ${props.pornhubUser}` : 'Pornhub 未登录'
   if (props.site === 'xvideos') return props.xvideosUser ? `XVideos 已登录: ${props.xvideosUser}` : 'XVideos 未登录'
+  if (props.site === 'javdb') return props.javdbUser ? `JavDB 已登录: ${props.javdbUser}` : 'JavDB 未登录'
   return ''
 })
 
@@ -1653,6 +1729,7 @@ const siteUsername = computed(() => {
   if (props.site === 'xhamster' && props.xhamsterUser) return props.xhamsterUser
   if (props.site === 'pornhub' && props.pornhubUser) return props.pornhubUser
   if (props.site === 'xvideos' && props.xvideosUser) return props.xvideosUser
+  if (props.site === 'javdb' && props.javdbUser) return props.javdbUser
   return siteLoginInfo.value.username || ''
 })
 const siteCookieStr = computed(() => siteLoginInfo.value.cookie_str || '')
@@ -1684,6 +1761,7 @@ const SITE_URLS = {
   xhamster: 'https://jp.xhamster.com',
   pornhub: 'https://jp.pornhub.com',
   xvideos: 'https://www.xvideos.com',
+  javdb: 'https://javdb.com',
 }
 
 // 浏览器选择（默认 = 系统默认浏览器）
@@ -1928,6 +2006,22 @@ XVideos 是国际最大的免费视频站，无区域子域，全球可用，但
 - XVideos 一般可直连，也可填代理
 - 搜索/解析/下载待你给出具体要求后再补全（当前为登录框架占位）
 - 机器验证弹窗会通过 webview 自动显示，无需手动开浏览器`,
+  javdb: `🎬 JavDB（javdb.com）使用技巧
+
+JavDB 是影片信息数据库站：查番号/标题/演员、看封面预览图、拿磁力链接。
+
+🔑 登录（邮箱密码，约 7 天有效）：
+- 在左侧表单填入 JavDB 邮箱与密码，点登录
+- 弹窗内会自动预填账号，完成 Cloudflare 人机验证并点网站登录按钮即可
+- 勾选网站内"记住此装置"后 cookie 约 7 天有效，过期在左侧重新登录
+
+💡 本工具提示：
+- ⚠️ 国内必须配置代理（左侧 JavDB 代理设置，默认 http://127.0.0.1:10809）
+- 输入番号（如 SSIS-001）/标题/演员名搜索，点卡片看详情
+- 详情页含：封面、预览图、标签、演员、磁力链接列表（含大小/日期/字幕）
+- 点磁力链接自动复制到剪贴板，用外部种子客户端下载
+- "下载图片"保存封面+全部预览图；"批量下载全部"下载当前页全部视频的图片
+- 未登录时预览图与部分磁力不可见，建议先登录`,
 }
 
 // 当前站点的帮助内容
@@ -1955,7 +2049,7 @@ function handleSiteLogout() {
   else if (props.site === 'iwara') emit('iwara-logout')
   else if (props.site === 'hanime') emit('hanime-logout')
   else if (props.site === 'asmr') emit('asmr-logout')
-  else if (['xhamster', 'pornhub', 'xvideos'].includes(props.site)) emit('site-logout', props.site)
+  else if (['xhamster', 'pornhub', 'xvideos', 'javdb'].includes(props.site)) emit('site-logout', props.site)
 }
 
 // 清除 Twitter 专属缓存（确认后执行，保留登录与关注分类）
@@ -2035,6 +2129,21 @@ function handleXvLogin() {
     email: xvEmailInput.value.trim(),
     password: xvPasswordInput.value,
     remember: xvRemember.value,
+  })
+}
+
+// JavDB 邮箱密码登录表单（触发 webview 弹窗，登录页自动预填账号）
+const jdbEmailInput = ref('')
+const jdbPasswordInput = ref('')
+const jdbRemember = ref(true)
+
+function handleJdbLogin() {
+  if (!jdbEmailInput.value.trim() || !jdbPasswordInput.value) return
+  // 触发 App.vue 的 webview 登录弹窗（登录页自动预填邮箱密码，用户只需完成 Cloudflare 验证并点登录）
+  emit('site-oauth-login', 'javdb', {
+    email: jdbEmailInput.value.trim(),
+    password: jdbPasswordInput.value,
+    remember: jdbRemember.value,
   })
 }
 
@@ -2360,7 +2469,7 @@ function enterMimicMode() {
 }
 
 // 站点显示名
-const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站' }
+const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站', asmr: 'ASMR', xhamster: 'xHamster', pornhub: 'Pornhub', xvideos: 'XVideos', javdb: 'JavDB' }
 function siteName(s) {
   return siteNames[s] || (s ? String(s) : '未知')
 }

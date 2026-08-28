@@ -25,12 +25,12 @@
               @click="switchSite('coomer')"
             >Coomer</button>
             <button
-              v-for="s in ['xhamster', 'pornhub', 'xvideos']"
+              v-for="s in ['xhamster', 'pornhub', 'xvideos', 'javdb']"
               :key="s"
               class="site-chip"
               :class="{ on: site === s }"
               @click="switchSite(s)"
-            >{{ s === 'xhamster' ? 'xHamster' : (s === 'pornhub' ? 'Pornhub' : 'XVideos') }}</button>
+            >{{ s === 'xhamster' ? 'xHamster' : (s === 'pornhub' ? 'Pornhub' : (s === 'javdb' ? 'JavDB' : 'XVideos')) }}</button>
           </div>
         </div>
         <div class="site-group">
@@ -70,44 +70,26 @@
       </n-input>
       <n-button
         type="primary"
-        size="large"
+        size="small"
+        class="search-btn"
         :loading="searching || inspecting"
         :disabled="!searchQuery.trim() || downloading"
         @click="handleSearch"
       >
         {{ (searching || inspecting) ? '处理中...' : (isUrl ? '解析' : '搜索') }}
       </n-button>
-      <!-- 全局自动翻译按钮：每站展示界面常驻，翻译当前搜索结果标题到目标语言（默认中文） -->
-      <n-select
-        :value="autoTranslateTo"
-        :options="autoTranslateLangOptions"
-        size="small"
-        style="width: 90px"
-        title="翻译目标语言（点击右侧 🌐 按钮执行翻译）"
-        @update:value="$emit('update:auto-translate-to', $event)"
-      />
+      <!-- 全局自动翻译开关（缩小按钮）：点击一次开始翻译当前页面全部内容（转圈动效表示进行中），
+           开启后新增内容自动翻译；再点击一次停止翻译并恢复原文 -->
       <n-button
-        size="large"
+        size="tiny"
+        class="auto-translate-btn"
+        :class="{ on: autoTranslateMode }"
         :loading="autoTranslating"
-        :disabled="autoTranslating"
-        :title="autoTranslateMode ? '点击翻译当前搜索结果到目标语言（已开启持续自动翻译：每次搜索后自动翻译）' : '点击翻译当前搜索结果到目标语言'"
-        @click="$emit('auto-translate', autoTranslateTo)"
+        :title="autoTranslateMode ? '翻译已开启（后续内容自动翻译），点击停止并恢复原文' : '点击开始翻译当前页面全部内容（后续内容自动翻译）'"
+        @click="$emit('toggle-auto-translate-mode')"
       >
-        <span :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">🌐 译</span>
+        <span v-if="!autoTranslating" :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">🌐</span>
       </n-button>
-      <n-tooltip placement="bottom">
-        <template #trigger>
-          <n-button
-            size="large"
-            quaternary
-            :title="autoTranslateMode ? '关闭持续自动翻译' : '开启持续自动翻译（每次搜索后自动翻译全部结果）'"
-            @click="$emit('toggle-auto-translate-mode')"
-          >
-            <span :style="{ color: autoTranslateMode ? '#63e2b7' : '' }">{{ autoTranslateMode ? '🔁' : '➿' }}</span>
-          </n-button>
-        </template>
-        持续自动翻译{{ autoTranslateMode ? '（已开启）' : '（已关闭）' }}
-      </n-tooltip>
     </div>
 
     <!-- ExHentai 搜索选项栏：复刻原版搜索页过滤按钮（分类复选/评分/仅种子/页数范围），
@@ -2362,6 +2344,91 @@
         </template>
       </div>
 
+      <!-- JavDB 视频详情：封面大图 + 预览图网格 + 信息面板 + 标签/演员 + 磁力列表 + 下载图片 -->
+      <div v-else-if="site === 'javdb' && (javdbDetail || javdbDetailLoading)" class="ex-detail">
+        <div v-if="javdbDetailLoading && !javdbDetail" class="tw-follow-empty">
+          <n-spin size="medium" />
+          <span>正在获取视频详情...</span>
+        </div>
+        <template v-else-if="javdbDetail">
+          <div class="tw-follow-toolbar">
+            <n-button size="small" quaternary type="primary" @click="$emit('javdb-detail-back')">← 返回</n-button>
+            <span class="tw-follow-title iw-detail-title" :title="javdbDetail.title">{{ javdbDetail.title }}</span>
+            <n-button
+              size="tiny"
+              tertiary
+              type="primary"
+              title="下载封面 + 全部预览图（直链下载任务）"
+              @click="$emit('javdb-download-images')"
+            >下载图片</n-button>
+            <a
+              class="or-iwara-link"
+              title="在浏览器打开 JavDB 原页面"
+              @click.prevent="openOrExternal(javdbDetail.url)"
+            >原站 ↗</a>
+          </div>
+          <n-scrollbar class="iw-detail-scroll">
+            <!-- 封面 -->
+            <div class="iw-video-area javdb-cover-area">
+              <img
+                v-if="javdbDetail.cover"
+                :src="javdbDetail.cover"
+                referrerpolicy="no-referrer"
+                :alt="javdbDetail.title"
+                @click="openOrExternal(javdbDetail.cover)"
+              />
+            </div>
+            <!-- 信息面板 -->
+            <div v-if="javdbDetail.code || Object.keys(javdbDetail.info || {}).length" class="iw-detail-stats javdb-info-panel">
+              <span v-if="javdbDetail.code">🏷️ 番号: {{ javdbDetail.code }}</span>
+              <span v-for="(v, k) in javdbDetail.info" :key="k">{{ k }}: {{ v }}</span>
+            </div>
+            <!-- 演员 -->
+            <div v-if="javdbDetail.actors && javdbDetail.actors.length" class="iw-tags">
+              <n-tag size="small" round type="success" class="iw-tag">演员</n-tag>
+              <n-tag v-for="a in javdbDetail.actors" :key="a" size="small" round type="success" class="iw-tag">{{ a }}</n-tag>
+            </div>
+            <!-- 标签 -->
+            <div v-if="javdbDetail.tags && javdbDetail.tags.length" class="iw-tags">
+              <n-tag v-for="t in javdbDetail.tags" :key="t" size="small" round type="info" class="iw-tag">{{ t }}</n-tag>
+            </div>
+            <!-- 磁力链接列表 -->
+            <div v-if="javdbDetail.magnets && javdbDetail.magnets.length" class="javdb-magnets">
+              <div class="javdb-magnets-title">🧲 磁力链接（{{ javdbDetail.magnets.length }} 个，点击复制，用外部种子客户端下载）</div>
+              <div
+                v-for="(m, idx) in javdbDetail.magnets"
+                :key="idx"
+                class="javdb-magnet-item"
+                title="点击复制磁力链接"
+                @click="reverseCopyText(m.link)"
+              >
+                <span class="javdb-magnet-name">{{ m.name }}</span>
+                <span class="javdb-magnet-meta">
+                  <span v-if="m.size">{{ m.size }}</span>
+                  <span v-if="m.date">{{ m.date }}</span>
+                  <n-tag v-for="t in (m.tags || [])" :key="t" size="tiny" round type="warning">{{ t }}</n-tag>
+                </span>
+              </div>
+            </div>
+            <div v-else class="or-no-source">没有磁力链接（部分磁力需登录后可见，可在左侧登录 JavDB）</div>
+            <!-- 预览图 -->
+            <div v-if="javdbDetail.previews && javdbDetail.previews.length" class="javdb-previews">
+              <div class="javdb-magnets-title">🖼️ 预览图（{{ javdbDetail.previews.length }} 张，点击看原图）</div>
+              <div class="javdb-preview-grid">
+                <img
+                  v-for="(p, idx) in javdbDetail.previews"
+                  :key="idx"
+                  :src="p"
+                  referrerpolicy="no-referrer"
+                  loading="lazy"
+                  @click="openOrExternal(p)"
+                />
+              </div>
+            </div>
+          </n-scrollbar>
+        </template>
+      </div>
+
       <!-- ExHentai 浏览器视图（类浏览器界面，可登录/浏览/收藏；点"浏览器/搜索结果"切换） -->
       <div v-else-if="site === 'exhentai' && exViewMode === 'browser'" class="ex-browser">
         <!-- 浏览器工具栏 -->
@@ -2434,6 +2501,16 @@
               <n-button size="tiny" :type="exDisplayMode === 'list' ? 'primary' : 'default'" @click="exDisplayMode = 'list'" title="列表视图（原版 List 模式）">列表</n-button>
               <n-button size="tiny" :type="exDisplayMode === 'thumbnail' ? 'primary' : 'default'" @click="exDisplayMode = 'thumbnail'" title="缩略图视图（原版 Thumbnail 模式）">缩略图</n-button>
             </n-button-group>
+            <!-- 批量下载全部：常驻按钮（无需逐个勾选，直接批量解析当前页全部画廊） -->
+            <n-button
+              size="tiny"
+              type="warning"
+              :disabled="exBatchRunning"
+              :title="exBatchRunning
+                ? '批量解析进行中，请稍候…'
+                : `批量解析当前页全部 ${searchResults.length} 个画廊的图片并加入文件列表，可统一勾选下载（确认时可设置母文件夹）`"
+              @click="$emit('ex-batch-download', searchResults.map(i => i.album_url).filter(Boolean))"
+            >{{ exBatchRunning ? `批量解析中 (${exBatchProgress.done}/${exBatchProgress.total})` : `批量下载全部 (${searchResults.length})` }}</n-button>
             <n-button
               v-if="exChecked.length"
               size="tiny"
@@ -2870,6 +2947,65 @@
           />
         </div>
 
+        <!-- JavDB：搜索结果卡片（封面 + 番号 + 标题 + 分页 + 批量下载） -->
+        <div v-else-if="site === 'javdb'" class="pa-results">
+          <div class="pa-toolbar">
+            <span class="pa-result-count">
+              {{ searchQuery ? `「${searchQuery}」` : 'JavDB' }} · 第 {{ searchPage }} 页
+            </span>
+            <n-button
+              size="tiny"
+              type="warning"
+              :loading="javdbBatchRunning"
+              :title="`批量下载当前页全部 ${searchResults.length} 个视频的封面+预览图`"
+              @click="startJavdbBatch"
+            >批量下载全部{{ javdbBatchRunning ? `（${javdbBatchProgress.done}/${javdbBatchProgress.total}）` : '' }}</n-button>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+          <div class="search-grid">
+            <div
+              v-for="item in searchResults"
+              :key="item.album_url"
+              class="search-card iw-card"
+              :title="`${item.album_name}${item.author ? `\n演员: ${item.author}` : ''}${(item.tags && item.tags.length) ? `\n${item.tags.join(' ')}` : ''}${item.duration ? `\n时长: ${item.duration}` : ''}${item.score != null ? `\n评分: ${item.score}` : ''}${item.date ? `\n日期: ${item.date}` : ''}`"
+              @click="$emit('javdb-open-detail', item)"
+            >
+              <div class="thumb-wrapper">
+                <img
+                  :src="item.thumbnail"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  :alt="item.album_name"
+                />
+                <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }}</span>
+                <span v-if="item.has_subtitle" class="asmr-thumb-sub">字幕</span>
+                <span v-if="item.is_vr" class="asmr-thumb-sub" style="background: #722ed1">VR</span>
+                <div class="iw-thumb-stats">
+                  <span v-if="item.score != null" title="评分">★ {{ item.score }}</span>
+                  <span v-if="item.date" title="发行日期">{{ item.date }}</span>
+                </div>
+              </div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
+              <div class="iw-card-meta">
+                <span class="iw-card-author" :title="item.author ? `演员: ${item.author}` : ''">{{ item.author || '未知演员' }}</span>
+              </div>
+            </div>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+        </div>
+
         <!-- 其他站点：网格卡片 -->
         <div v-else class="search-grid">
           <div
@@ -2949,6 +3085,10 @@
         <template v-else-if="site === 'asmr'">
           <div class="empty-text">ASMR 音声作品下载（asmr-100.com）</div>
           <div class="empty-hint">点上方"热门作品"看推荐；"媒体库"按最新入库/评分等排序浏览；社团/标签/声优分类筛选；输入关键词或 RJ 号搜索；详情页可在线试听整包音轨</div>
+        </template>
+        <template v-else-if="site === 'javdb'">
+          <div class="empty-text">JavDB 影片信息数据库（javdb.com）</div>
+          <div class="empty-hint">输入番号（如 SSIS-001）/标题/演员名搜索，点卡片看详情（封面/预览/标签/磁力）；国内必须在左侧设置里配置 JavDB 代理</div>
         </template>
         <template v-else>
           <div class="empty-text">搜索 Bunkr 相册，或粘贴 Bunkr 链接</div>
@@ -3205,6 +3345,8 @@ const props = defineProps({
   exGalleryDetail: { type: Object, default: null },   // EX 画廊详情（完整信息 + 分组标签）
   exDetailLoading: { type: Boolean, default: false }, // 详情加载中
   exFavMode: { type: Boolean, default: false },       // 当前结果视图是否为"我的收藏"
+  exBatchRunning: { type: Boolean, default: false },  // EX 批量解析进行中
+  exBatchProgress: { type: Object, default: () => ({ done: 0, total: 0 }) }, // 批量进度 done/total
   paPostDetail: { type: Object, default: null },       // PA 帖子详情（完整信息 + 附件预览）
   paDetailLoading: { type: Boolean, default: false }, // PA 详情加载中
   paArtistPosts: { type: Object, default: null },      // PA 画师子项目列表（按发布日期的全部帖子）
@@ -3319,24 +3461,25 @@ const props = defineProps({
   asmrBatchRunning: { type: Boolean, default: false },
   asmrBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
   // 全局自动翻译（每站搜索结果常驻）
-  autoTranslateTo: { type: String, default: 'zh-CN' },          // 目标语言
-  autoTranslating: { type: Boolean, default: false },          // 翻译进行中
-  autoTranslateMode: { type: Boolean, default: false },        // 持续自动翻译（每次搜索后自动）
-  autoTranslateLangOptions: { type: Array, default: () => [] }, // 目标语言下拉选项
+  autoTranslating: { type: Boolean, default: false },          // 翻译进行中（转圈动效）
+  autoTranslateMode: { type: Boolean, default: false },        // 翻译已开启（后续内容自动翻译）
   translatedTitles: { type: Object, default: () => ({}) },     // {原标题: 译文}，展示时回填
   // 识图（反向图片搜索）：占用右侧内容区
   reverseActive: { type: Boolean, default: false },            // 识图视图激活（左侧识图按钮开关）
   reverseSites: { type: Array, default: () => [] },           // [{key,name,status,results,url,error}]
   reverseRunning: { type: Boolean, default: false },          // 搜索进行中
+  // JavDB 视频详情（封面/预览图/磁力列表，非空 = 占用右侧内容区）
+  javdbDetail: { type: Object, default: null },
+  javdbDetailLoading: { type: Boolean, default: false },
+  javdbBatchRunning: { type: Boolean, default: false },
+  javdbBatchProgress: { type: Object, default: () => ({ done: 0, total: 0 }) },
 })
 
 const emit = defineEmits([
   'update:search-query',
   'update:site',
   'update:search-mode',
-  'update:auto-translate-to',  // 目标语言下拉切换
-  'auto-translate',            // 点击 🌐 翻译当前搜索结果（参数：目标语言）
-  'toggle-auto-translate-mode', // 切换持续自动翻译
+  'toggle-auto-translate-mode', // 翻译开关：开=翻译当前页+后续自动；关=停止并恢复原文
   'search',
   'load-more',
   'go-page',
@@ -3441,6 +3584,11 @@ const emit = defineEmits([
   'asmr-open-circle',       // 点击社团查看全部作品（参数：详情对象）
   'asmr-open-va',           // 点击声优查看作品（参数：详情对象）
   'asmr-batch-download',    // 批量下载（参数：[work_id]）
+  // JavDB
+  'javdb-open-detail',      // 点击搜索卡片打开视频详情（参数：条目对象）
+  'javdb-detail-back',      // 关闭详情返回搜索结果
+  'javdb-download-images',  // 下载封面+预览图（当前详情页）
+  'javdb-batch-download',   // 批量下载（参数：URL 数组）
   // 识图（反向图片搜索）
   'reverse-search',        // 开始识图（参数：图片本地路径）
   'reverse-reset',         // 清空结果回到拖拽框
@@ -4277,6 +4425,13 @@ function startAsmrBatch() {
   asmrBatchChecked.value = new Set()
 }
 
+// JavDB 批量下载：当前页全部视频（弹母文件夹命名弹窗，与 EX 批量下载同交互）
+function startJavdbBatch() {
+  const urls = props.searchResults.map(i => i.album_url).filter(u => u)
+  if (!urls.length) return
+  emit('javdb-batch-download', urls)
+}
+
 // 详情作品属性（description 为 dict）
 const asmrDescEntries = computed(() => {
   const d = (props.asmrDetail && props.asmrDetail.description) || {}
@@ -4887,6 +5042,21 @@ defineExpose({
   padding: 12px 16px;
   background: #1e1e22;
   border-bottom: 1px solid #2d2d33;
+}
+
+/* 搜索按钮（缩小版） */
+.search-btn {
+  flex-shrink: 0;
+}
+
+/* 全局自动翻译开关（缩小版，约原按钮 1/3 大小；开启时绿色描边） */
+.auto-translate-btn {
+  flex-shrink: 0;
+  min-width: 28px;
+  padding: 0 6px;
+}
+.auto-translate-btn.on {
+  border-color: #63e2b7;
 }
 
 .site-switch {
@@ -7531,6 +7701,88 @@ html.light-mode .preview-volume-text {
   font-size: 10px;
   line-height: 16px;
 }
+
+/* JavDB 详情：封面区域（限宽居中） */
+.javdb-cover-area {
+  display: flex;
+  justify-content: center;
+  background: transparent;
+  padding: 8px 0;
+}
+.javdb-cover-area img {
+  max-width: min(100%, 480px);
+  max-height: 420px;
+  border-radius: 8px;
+  cursor: zoom-in;
+  object-fit: contain;
+}
+/* JavDB 信息面板 */
+.javdb-info-panel {
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+/* JavDB 磁力列表 */
+.javdb-magnets {
+  margin: 10px 0;
+}
+.javdb-magnets-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d4d4dc;
+  margin: 8px 0 6px;
+}
+.javdb-magnet-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  margin-bottom: 5px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.javdb-magnet-item:hover {
+  background: rgba(56, 137, 255, 0.12);
+}
+.javdb-magnet-name {
+  font-size: 12px;
+  color: #d4d4dc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+.javdb-magnet-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #7a7a85;
+  margin-left: auto;
+}
+/* JavDB 预览图网格 */
+.javdb-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+.javdb-preview-grid img {
+  width: 100%;
+  aspect-ratio: 16/11;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: zoom-in;
+  transition: transform 0.15s;
+}
+.javdb-preview-grid img:hover {
+  transform: scale(1.03);
+}
+html.light-mode .javdb-magnets-title { color: #333338; }
+html.light-mode .javdb-magnet-item { background: rgba(0, 0, 0, 0.04); }
+html.light-mode .javdb-magnet-name { color: #333338; }
+html.light-mode .javdb-magnet-meta { color: #8a8a93; }
 
 /* 卡片 tags 摘要行 */
 .asmr-card-tags {

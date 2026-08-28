@@ -82,6 +82,8 @@ const props = defineProps({
   successPatterns: { type: Array, default: () => [] },
   // captcha/机器验证 URL 匹配模式（RegExp 数组，命中即弹提示让用户手动通过）
   captchaPatterns: { type: Array, default: () => [] },
+  // 登录账号预填（{ email, password }）：加载登录页后自动填入表单（javdb/xvideos 邮箱密码登录）
+  credentials: { type: Object, default: null },
 })
 
 const emit = defineEmits(['update:show', 'login-success', 'login-failed', 'close'])
@@ -146,6 +148,38 @@ async function onNav(e) {
 
 function onStop() {
   if (status.value === 'loading') status.value = 'idle'
+  // 登录页加载完成：自动预填账号密码（用户只需完成人机验证并点登录）
+  prefillCredentials()
+}
+
+// 自动预填登录表单（javdb：#session_email / #session_password；其他站按 name/id 候选匹配）
+async function prefillCredentials() {
+  const creds = props.credentials
+  const wv = wvRef.value
+  if (!creds || !creds.email || !wv) return
+  try {
+    const js = `
+      (() => {
+        const setVal = (input, v) => {
+          if (!input || input.value) return false
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+          setter.call(input, v)
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+          return true
+        }
+        const candidates = {
+          email: ['input#session_email', 'input[name="session[email]"]', 'input[type="email"]', 'input[name="email"]', 'input[name="user[email]"]', 'input[name="username"]'],
+          password: ['input#session_password', 'input[name="session[password]"]', 'input[type="password"]', 'input[name="password"]', 'input[name="user[password]"]'],
+        }
+        let filled = 0
+        for (const sel of candidates.email) { if (setVal(document.querySelector(sel), ${JSON.stringify(creds.email)})) { filled++; break } }
+        for (const sel of candidates.password) { if (setVal(document.querySelector(sel), ${JSON.stringify(creds.password || '')})) { filled++; break } }
+        return filled
+      })()
+    `
+    await wv.executeJavaScript(js, true)
+  } catch (err) { /* 页面未就绪或跨域，忽略 */ }
 }
 
 // 手动抓取 cookie（用户点"完成抓取"或自动触发）
@@ -162,7 +196,7 @@ async function grabCookies(auto = false) {
     }
     if (res.hasAuth) {
       status.value = 'success'
-      emit('login-success', { cookieStr: res.cookieStr, count: res.count })
+      emit('login-success', { cookieStr: res.cookieStr, count: res.count, userAgent: res.userAgent || '' })
       setTimeout(() => { visible.value = false }, 800)
     } else {
       // cookie 数量不足，可能还没登录完成
