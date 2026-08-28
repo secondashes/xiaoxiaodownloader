@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>下载悬浮窗</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      user-select: none;
+    }
+
+    /* 钻石镜面容器 */
+    .float {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      border-radius: 16px;
+      color: #e0e0e6;
+      cursor: pointer;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.02) 35%, rgba(120,200,255,0.09) 60%, rgba(255,255,255,0.05)),
+        linear-gradient(160deg, rgba(40,40,48,0.90), rgba(20,20,24,0.88));
+      border: 1px solid rgba(255,255,255,0.22);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.30),
+        inset 0 -1px 0 rgba(255,255,255,0.08),
+        inset 1px 0 0 rgba(255,255,255,0.10),
+        0 12px 36px rgba(0,0,0,0.55);
+    }
+    /* 镜面扫光 */
+    .float::after {
+      content: '';
+      position: absolute;
+      top: -20%;
+      left: -80%;
+      width: 45%;
+      height: 140%;
+      background: linear-gradient(100deg, transparent, rgba(255,255,255,0.30), transparent);
+      transform: skewX(-20deg);
+      animation: shine 4.5s ease-in-out infinite;
+      pointer-events: none;
+      z-index: 5;
+    }
+    @keyframes shine {
+      0%, 55% { left: -80%; }
+      100% { left: 140%; }
+    }
+
+    /* 波浪背景 */
+    .waves {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      border-radius: inherit;
+      z-index: 1;
+    }
+    .wave-holder {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: 200%;
+      transition: top 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .wave {
+      position: absolute;
+      left: -50%;
+      width: 200%;
+      height: 100%;
+      border-radius: 44% 48% 45% 50%;
+      background: linear-gradient(135deg, var(--w1, #63e2b7), var(--w2, #18a058));
+      animation: waveSpin 8s linear infinite;
+      will-change: transform;
+    }
+    .wave.back { opacity: 0.55; }
+    .wave.front { opacity: 0.85; animation-duration: 5.5s; animation-delay: -2.5s; }
+    @keyframes waveSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* 文字内容 */
+    .content {
+      position: relative;
+      z-index: 3;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    }
+    .icon {
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5));
+    }
+    .icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    .info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .meta-line {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .speed {
+      font-size: 16px;
+      font-weight: 700;
+      font-family: monospace;
+      color: #ffffff;
+    }
+    .pct {
+      font-size: 13px;
+      font-weight: 700;
+      font-family: monospace;
+      color: #ffffff;
+      opacity: 0.95;
+    }
+    .count {
+      font-size: 11px;
+      color: rgba(255,255,255,0.75);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .close {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      line-height: 1;
+      color: rgba(255,255,255,0.65);
+      border-radius: 50%;
+      cursor: pointer;
+      z-index: 6;
+      -webkit-app-region: no-drag;
+    }
+    .close:hover {
+      color: #fff;
+      background: rgba(255,255,255,0.15);
+    }
+  </style>
+</head>
+<body>
+  <div class="float" id="float">
+    <div class="waves">
+      <div class="wave-holder" id="waveHolder">
+        <div class="wave back" id="waveBack"></div>
+        <div class="wave front" id="waveFront"></div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="url(#arrowGrad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <defs>
+            <linearGradient id="arrowGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="55%" stop-color="#c8fff0"/>
+              <stop offset="100%" stop-color="#63e2b7"/>
+            </linearGradient>
+          </defs>
+          <path d="M12 3v13"/>
+          <path d="M7 11l5 5 5-5"/>
+          <path d="M5 21h14"/>
+        </svg>
+      </div>
+      <div class="info">
+        <div class="name" id="name">无下载任务</div>
+        <div class="meta-line">
+          <span class="speed" id="speed">0 B/s</span>
+          <span class="pct" id="pct">0%</span>
+        </div>
+        <div class="count" id="count"></div>
+      </div>
+    </div>
+    <div class="close" id="close" title="关闭悬浮窗">×</div>
+  </div>
+
+  <script>
+    const floatEl = document.getElementById('float')
+    const waveHolder = document.getElementById('waveHolder')
+    const waveBack = document.getElementById('waveBack')
+    const waveFront = document.getElementById('waveFront')
+    const nameEl = document.getElementById('name')
+    const speedEl = document.getElementById('speed')
+    const pctEl = document.getElementById('pct')
+    const countEl = document.getElementById('count')
+
+    // 不同任务使用不同渐变色
+    const GRADIENTS = [
+      ['#43e97b', '#38f9d7'],
+      ['#4facfe', '#00f2fe'],
+      ['#f093fb', '#f5576c'],
+      ['#fa709a', '#fee140'],
+      ['#a18cd1', '#fbc2eb'],
+      ['#f6d365', '#fda085'],
+      ['#84fab0', '#8fd3f4'],
+      ['#5ee7df', '#b490ca'],
+    ]
+
+    let tasks = []
+    let currentIndex = 0
+    let currentTaskId = null
+
+    function formatSize(bytes) {
+      if (!bytes || bytes <= 0) return '0 B'
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      const i = Math.floor(Math.log(bytes) / Math.log(1024))
+      return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
+    }
+
+    function setWaves(percent, colors) {
+      const p = Math.max(0, Math.min(100, percent || 0))
+      // 水位：0% 时波浪沉到底部，100% 时铺满
+      waveHolder.style.top = (100 - p) + '%'
+      floatEl.style.setProperty('--w1', colors[0])
+      floatEl.style.setProperty('--w2', colors[1])
+      waveBack.style.background = 'linear-gradient(135deg, ' + colors[0] + ', ' + colors[1] + ')'
+      waveFront.style.background = 'linear-gradient(135deg, ' + colors[1] + ', ' + colors[0] + ')'
+    }
+
+    function render() {
+      const task = tasks[currentIndex]
+      currentTaskId = task ? task.id : null
+      if (!task) {
+        nameEl.textContent = '无下载任务'
+        speedEl.textContent = '0 B/s'
+        pctEl.textContent = '0%'
+        countEl.textContent = ''
+        setWaves(0, ['#4a4a55', '#2d2d33'])
+        return
+      }
+      nameEl.textContent = task.album || '下载任务'
+      speedEl.textContent = formatSize(task.speed) + '/s'
+      pctEl.textContent = task.percent + '%'
+      countEl.textContent = (tasks.length > 1 ? (currentIndex + 1) + '/' + tasks.length + ' · ' : '') + (task.done || 0) + '/' + (task.total || 0)
+      const colors = GRADIENTS[currentIndex % GRADIENTS.length]
+      setWaves(task.percent, colors)
+    }
+
+    function switchTask() {
+      if (tasks.length <= 1) return
+      currentIndex = (currentIndex + 1) % tasks.length
+      render()
+    }
+
+    if (window.floatApi && window.floatApi.onData) {
+      window.floatApi.onData((data) => {
+        tasks = data.tasks || []
+        if (currentIndex >= tasks.length) {
+          currentIndex = 0
+        }
+        render()
+      })
+    }
+
+    // 拖动悬浮窗（JS 实现，避免 -webkit-app-region: drag 吞掉鼠标事件）
+    const drag = { active: false, moved: false, lastX: 0, lastY: 0 }
+    floatEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      drag.active = true
+      drag.moved = false
+      drag.lastX = e.screenX
+      drag.lastY = e.screenY
+    })
+    window.addEventListener('mousemove', (e) => {
+      if (!drag.active) return
+      const dx = e.screenX - drag.lastX
+      const dy = e.screenY - drag.lastY
+      if (Math.abs(dx) + Math.abs(dy) > 3) {
+        drag.moved = true
+        drag.lastX = e.screenX
+        drag.lastY = e.screenY
+        if (window.floatApi && window.floatApi.moveWindow) {
+          window.floatApi.moveWindow(dx, dy)
+        }
+      }
+    })
+    window.addEventListener('mouseup', () => {
+      drag.active = false
+    })
+
+    // 单击：切换显示下一个任务（区分双击）
+    let clickTimer = null
+    floatEl.addEventListener('click', () => {
+      if (drag.moved) return
+      if (clickTimer) {
+        clearTimeout(clickTimer)
+        clickTimer = null
+        return
+      }
+      clickTimer = setTimeout(() => {
+        clickTimer = null
+        switchTask()
+      }, 250)
+    })
+
+    // 双击：打开下载管理窗口
+    floatEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation()
+      if (clickTimer) {
+        clearTimeout(clickTimer)
+        clickTimer = null
+      }
+      if (window.floatApi && window.floatApi.openDownloads) {
+        window.floatApi.openDownloads()
+      }
+    })
+
+    // 右键：弹出系统原生菜单（完整显示，不受悬浮窗小尺寸裁剪）
+    floatEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (window.floatApi && window.floatApi.showContextMenu) {
+        window.floatApi.showContextMenu({ currentTaskId, tasks })
+      }
+    })
+
+    const closeEl = document.getElementById('close')
+    closeEl.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (window.floatApi && window.floatApi.close) {
+        window.floatApi.close()
+      }
+    })
+  </script>
+</body>
+</html>
