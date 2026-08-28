@@ -11805,7 +11805,14 @@ def _save_settings(settings: dict) -> None:
 # 翻译 API（免费方案优先：Google 翻译无 key 端点；可选 LibreTranslate 自建实例）
 # ============================
 YOUDAO_API = "https://openapi.youdao.com/api"
-GOOGLE_TRANSLATE_URL = "https://translate.google.com/translate_a/single"
+# Google 翻译免费端点（多个域名轮换：googleapis 国内多数网络可直连，translate.google.com 必须代理）
+GOOGLE_TRANSLATE_URLS = [
+    "https://translate.googleapis.com/translate_a/single",
+    "https://translate.google.com/translate_a/single",
+    "https://clients5.google.com/translate_a/single",
+]
+# 兼容旧引用（单数常量）
+GOOGLE_TRANSLATE_URL = GOOGLE_TRANSLATE_URLS[0]
 
 
 def _translate_proxy_attempts() -> list:
@@ -11850,50 +11857,79 @@ def translate_free(text: str, from_lang: str = "auto", to_lang: str = "zh-CN") -
     if sl != "auto" and sl == tl:
         tl = "en" if sl == "zh-CN" else "zh-CN"
 
-    # ---------- 1. Google 翻译免费端点（先代理后直连，自动回退） ----------
+    # ---------- 1. Google 翻译免费端点（多域名 × 先代理后直连，自动回退） ----------
     last_err = ""
-    for proxies in _translate_proxy_attempts():
-        try:
-            params = {
-                "client": "at",
-                "dt": "t",       # 返回翻译片段
-                "dt": "bd",      # 返回备选词
-                "sl": sl,
-                "tl": tl,
-                "q": text,
-            }
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-            }
-            resp = requests.get(GOOGLE_TRANSLATE_URL, params=params, headers=headers,
-                                proxies=proxies, timeout=15)
-            data = resp.json()
-            # 响应结构：[[["译文","原文",None,None,1],...], null, "检测到的源语言", ...]
-            if isinstance(data, list) and data and isinstance(data[0], list):
-                segments = data[0]
-                translation = "".join(seg[0] for seg in segments if seg and seg[0])
-                detected = data[2] if len(data) > 2 and data[2] else sl
-                if translation:
-                    emit({
-                        "event": "translate_result",
-                        "ok": True,
-                        "translation": translation,
-                        "query": text,
-                        "detected_source": detected,
-                        "engine": "google_free",
-                    })
-                    return
-                last_err = "Google 翻译返回空结果"
+    for base_url in GOOGLE_TRANSLATE_URLS:
+        for proxies in _translate_proxy_attempts():
+            try:
+                # 注意：dt=t 必须保留（返回翻译片段）；之前的 dict 重复键 bug 让 dt=bd 覆盖了 dt=t，
+                # 导致 Google 返回结构不含译文 → 一直"格式异常"报错
+                params = {
+                    "client": "at",
+                    "dt": "t",       # 返回翻译片段（核心，不能丢）
+                    "sl": sl,
+                    "tl": tl,
+                    "q": text,
+                }
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                }
+                resp = requests.get(base_url, params=params, headers=headers,
+                                    proxies=proxies, timeout=15)
+                data = resp.json()
+                # 响应结构：[[["译文","原文",None,None,1],...], null, "检测到的源语言", ...]
+                if isinstance(data, list) and data and isinstance(data[0], list):
+                    segments = data[0]
+                    translation = "".join(seg[0] for seg in segments if seg and seg[0])
+                    detected = data[2] if len(data) > 2 and data[2] else sl
+                    if translation:
+                        emit({
+                            "event": "translate_result",
+                            "ok": True,
+                            "translation": translation,
+                            "query": text,
+                            "detected_source": detected,
+                            "engine": "google_free",
+                        })
+                        return
+                    last_err = "Google 翻译返回空结果"
+                    continue
+                last_err = "Google 翻译返回格式异常，请稍后重试"
                 continue
-            last_err = "Google 翻译返回格式异常，请稍后重试"
-            continue
-        except Exception as exc:
-            last_err = f"Google 翻译失败：{exc}"
-            # 该代理不通 → 尝试下一个（直连）
-            continue
+            except Exception as exc:
+                last_err = f"Google 翻译失败：{exc}"
+                # 该端点/代理不通 → 尝试下一个
+                continue
 
-    # ---------- 2. LibreTranslate（用户自建/公开实例，可选）----------
+    # ---------- 2. MyMemory 免费接口兜底（免配置，5000 字/天/IP） ----------
+    try:
+        # MyMemory 不支持 auto 源语言：默认按 en（多数场景英→中）；已检测语言则用检测结果
+        src = "en" if sl == "auto" else sl
+        resp = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": text[:500], "langpair": f"{src}|{tl}"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        data = resp.json()
+        tr = (data.get("responseData") or {}).get("translatedText") or ""
+        # MyMemory 限流时 translatedText 是告警文本（含 MYMEMORY WARNING）
+        if tr and "MYMEMORY WARNING" not in tr and "MYMEMORY WARNING" not in str(data.get("responseStatus", "")):
+            emit({
+                "event": "translate_result",
+                "ok": True,
+                "translation": tr,
+                "query": text,
+                "detected_source": src,
+                "engine": "mymemory",
+            })
+            return
+        last_err = f"MyMemory 兜底未返回结果：{str(data.get('responseStatus'))} {tr[:60]}"
+    except Exception as exc:
+        last_err = f"{last_err}；MyMemory 兜底失败：{exc}"
+
+    # ---------- 3. LibreTranslate（用户自建/公开实例，可选）----------
     libre_url = (s.get("libretranslate_url") or "").strip()
     if libre_url:
         try:
@@ -11965,36 +12001,60 @@ def translate_batch(texts: list, from_lang: str = "auto", to_lang: str = "zh-CN"
         chunk_texts = [str(texts[i]) for i in chunk_idx]
         batch_total += 1
         chunk_ok = False
-        # 先代理后直连，自动回退（国内 Google 必须代理）
-        for proxies in _translate_proxy_attempts():
-            try:
-                # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
-                params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                    "Accept": "application/json, text/plain, */*",
-                }
-                # 用 GET 多 q 参数（requests 会自动重复 q）
-                q_params = [("q", t) for t in chunk_texts]
-                # 手动拼 URL（requests params dict 不支持重复 key）
-                from urllib.parse import urlencode
-                url = GOOGLE_TRANSLATE_URL + "?" + urlencode(params) + "&" + urlencode(q_params)
-                resp = requests.get(url, headers=headers, proxies=proxies, timeout=20)
-                data = resp.json()
-                if isinstance(data, list) and data and isinstance(data[0], list):
-                    # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
-                    got = 0
-                    for i, seg in enumerate(data[0]):
-                        if i < len(chunk_idx) and seg and seg[0]:
-                            translations[chunk_idx[i]] = seg[0]
-                            got += 1
-                    if got > 0:
-                        chunk_ok = True
-                        break
-                last_err = "Google 翻译返回格式异常"
-            except Exception as exc:
-                last_err = str(exc)
-                continue
+        # 多域名 × 先代理后直连，自动回退（国内 Google 必须代理或走 googleapis 直连）
+        for base_url in GOOGLE_TRANSLATE_URLS:
+            if chunk_ok:
+                break
+            for proxies in _translate_proxy_attempts():
+                try:
+                    # Google 端点支持多个 q 参数（返回 data[0] 多段拼接）
+                    params = {"client": "at", "dt": "t", "sl": sl, "tl": tl}
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                        "Accept": "application/json, text/plain, */*",
+                    }
+                    # 用 GET 多 q 参数（requests 会自动重复 q）
+                    q_params = [("q", t) for t in chunk_texts]
+                    # 手动拼 URL（requests params dict 不支持重复 key）
+                    from urllib.parse import urlencode
+                    url = base_url + "?" + urlencode(params) + "&" + urlencode(q_params)
+                    resp = requests.get(url, headers=headers, proxies=proxies, timeout=20)
+                    data = resp.json()
+                    if isinstance(data, list) and data and isinstance(data[0], list):
+                        # data[0] 是 [[译文, 原文, ...], ...] 列表，按顺序对应每个 q
+                        got = 0
+                        for i, seg in enumerate(data[0]):
+                            if i < len(chunk_idx) and seg and seg[0]:
+                                translations[chunk_idx[i]] = seg[0]
+                                got += 1
+                        if got > 0:
+                            chunk_ok = True
+                            break
+                    last_err = "Google 翻译返回格式异常"
+                except Exception as exc:
+                    last_err = str(exc)
+                    continue
+        if not chunk_ok:
+            # MyMemory 兜底：逐条翻译该失败批（免配置；0.3s 间隔防限流）
+            src = "en" if sl == "auto" else sl
+            mm_got = 0
+            for i in chunk_idx:
+                try:
+                    r = requests.get(
+                        "https://api.mymemory.translated.net/get",
+                        params={"q": str(texts[i])[:500], "langpair": f"{src}|{tl}"},
+                        headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
+                    )
+                    d = r.json()
+                    tr = (d.get("responseData") or {}).get("translatedText") or ""
+                    if tr and "MYMEMORY WARNING" not in tr:
+                        translations[i] = tr
+                        mm_got += 1
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+            if mm_got > 0:
+                chunk_ok = True
         if not chunk_ok:
             batch_failed += 1
             logging.warning("translate_batch 第 %d 批失败: %s", start, last_err)
