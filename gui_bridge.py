@@ -2311,9 +2311,13 @@ def exhentai_set_cookies(cookie_str: str) -> None:
             "message": "Cookie 缺少 ipb_member_id 或 ipb_pass_hash，请确认已在浏览器中登录",
         })
         return
-    # 丢弃旧 igneous（由后端自动重新获取）
+    # 同一账号重新同步：保留 igneous（避免首请求 sadpanda）；
+    # 切换账号（member id 变化）：旧账号的 igneous / 用户名一并丢弃
     saved = _exhentai_load_cookies()
-    saved = {k: v for k, v in saved.items() if k == "_igneous"}
+    if cookies.get("ipb_member_id") == saved.get("ipb_member_id"):
+        saved = {k: v for k, v in saved.items() if k == "_igneous"}
+    else:
+        saved = {}
     saved.update(cookies)
     _exhentai_save_cookies(saved)
     # 立即验证
@@ -2409,8 +2413,47 @@ def _exhentai_fetch(url: str, params: dict | None = None, timeout: int = 25) -> 
     return response
 
 
+def _exhentai_parse_username(html: str) -> str:
+    """从页面 HTML 解析登录用户名（多模式匹配，失败返回空串）。"""
+    if not html:
+        return ""
+    # 1. IPB 论坛顶栏 "Logged in as: <a ...>username</a>"
+    m = re.search(r"[Ll]ogged in as[^<]{0,20}<a[^>]*>([^<]{1,50})</a>", html)
+    if m:
+        return m.group(1).strip()
+    # 2. showuser 个人资料链接（论坛顶栏）
+    m = re.search(r"showuser=\d+[\"'][^>]*>([^<]{1,50})</a>", html)
+    if m:
+        return m.group(1).strip()
+    # 3. 画廊站顶栏问候 "Hello <a ...>username</a>"
+    m = re.search(r"Hello[^<]{0,20}<a[^>]*>([^<]{1,50})</a>", html)
+    if m:
+        return m.group(1).strip()
+    # 4. 画廊站用户页链接 /u/<id>/<name>
+    m = re.search(r"href=[\"'](?:https?://[^\"']*)?/u/\d+/([^\"'?#]{1,50})[\"']", html)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
+def _exhentai_fetch_username() -> str:
+    """从 e-hentai 论坛首页解析用户名（cookie 在论坛域同样有效，IPB userlinks 结构稳定）。"""
+    try:
+        _exhentai_throttle()
+        cookie = _exhentai_cookie_str()
+        headers = dict(_exhentai_session.headers)
+        if cookie:
+            headers["Cookie"] = cookie
+        resp = _exhentai_session.get("https://forums.e-hentai.org/", timeout=20, headers=headers)
+        if resp.status_code == 200:
+            return _exhentai_parse_username(resp.text)
+    except requests.RequestException:
+        pass
+    return ""
+
+
 def _exhentai_check_login() -> tuple[bool, str | None, str]:
-    """检查 ExHentai 登录状态，返回 (是否成功, 用户名/IPB ID, 消息)。"""
+    """检查 ExHentai 登录状态，返回 (是否成功, 用户名, 消息)。"""
     global _exhentai_logged_in
     cookies = _exhentai_load_cookies()
     if not cookies.get("ipb_member_id"):
@@ -2423,7 +2466,15 @@ def _exhentai_check_login() -> tuple[bool, str | None, str]:
             logged = bool(soup.select_one("a[href*='favorites.php'], #userlinks"))
             _exhentai_logged_in = logged
             if logged:
-                return True, cookies.get("ipb_member_id", ""), "ExHentai 登录有效"
+                # 解析真实用户名（账号卡片/档案展示用），解析不到回退 IPB ID
+                username = _exhentai_parse_username(response.text) or _exhentai_fetch_username()
+                if not username:
+                    username = cookies.get("ipb_member_id", "")
+                # 持久化用户名，避免每次重新解析
+                if username and cookies.get("_username") != username:
+                    cookies["_username"] = username
+                    _exhentai_save_cookies(cookies)
+                return True, username, "ExHentai 登录有效"
         _exhentai_logged_in = False
         return False, None, "ExHentai 登录已失效，请重新同步 Cookie"
     except PermissionError:
@@ -12300,7 +12351,8 @@ def _site_username(site: str) -> str:
     if site == "twitter":
         return _twitter_load_cookies().get("screen_name") or ""
     if site == "exhentai":
-        return _exhentai_load_cookies().get("ipb_member_id") or ""
+        ex = _exhentai_load_cookies()
+        return ex.get("_username") or ex.get("ipb_member_id") or ""
     if site == "pawchive":
         return _pawchive_username or ""
     if site == "iwara":

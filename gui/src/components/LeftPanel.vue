@@ -212,14 +212,22 @@
           </div>
         </div>
 
-        <!-- ExHentai cookie 登录（也可在右侧浏览器视图同步） -->
+        <!-- ExHentai cookie 登录（推荐 webview 论坛登录，也可粘贴 cookie） -->
         <div v-if="site === 'exhentai'" class="pawchive-login-form">
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="$emit('exhentai-webview-login')"
+          >
+            打开浏览器登录（推荐）
+          </n-button>
           <n-input
             v-model:value="exCookieInput"
             size="small"
             type="password"
             show-password-on="click"
-            placeholder="粘贴 Cookie（含 ipb_member_id / ipb_pass_hash）"
+            placeholder="或粘贴 Cookie（含 ipb_member_id / ipb_pass_hash）"
             @keyup.enter="handleExLogin"
           />
           <n-button
@@ -232,7 +240,8 @@
             保存并验证登录
           </n-button>
           <div class="login-hint">
-            也可在右侧"浏览器"视图登录后点"同步Cookie"按钮
+            推荐点上方按钮：弹出浏览器登录 e-hentai 论坛账号（EX 账号即论坛账号），
+            登录后点下方"确认"自动抓取 Cookie；也可在右侧"浏览器"视图登录后点"同步Cookie"
           </div>
         </div>
 
@@ -1644,6 +1653,7 @@ const emit = defineEmits([
   'toggle-theme',         // 切换日间/夜间模式
   // ExHentai
   'exhentai-set-cookies', // 粘贴 cookie 登录 EX
+  'exhentai-webview-login', // 打开 webview 浏览器登录 e-hentai 论坛（EX 推荐方式）
   'exhentai-logout',      // 退出 EX 登录
   // 通用 webview OAuth 三站（xhamster/pornhub/xvideos）
   'site-oauth-login',     // 触发 webview OAuth 登录弹窗（参数：站点 key）

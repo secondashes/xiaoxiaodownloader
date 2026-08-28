@@ -28,6 +28,7 @@
         </template>
       </n-input>
       <n-button
+        v-if="!manualConfirm"
         size="small"
         type="primary"
         :loading="grabbing"
@@ -59,6 +60,15 @@
       @did-start-loading="loading = true; status = 'loading'"
       @did-stop-loading="loading = false; onStop()"
     />
+
+    <!-- 手动确认模式（EX 站）：底部提示 + 取消/确认按钮，用户确认后抓取 cookie -->
+    <div v-if="manualConfirm" class="wv-confirm-bar">
+      <span class="wv-confirm-hint">请登录，如果已登录请点击确认。</span>
+      <span class="wv-confirm-btns">
+        <n-button size="small" quaternary @click="visible = false">取消</n-button>
+        <n-button size="small" type="primary" :loading="grabbing" @click="grabCookies()">确认</n-button>
+      </span>
+    </div>
   </n-modal>
 </template>
 
@@ -84,6 +94,9 @@ const props = defineProps({
   captchaPatterns: { type: Array, default: () => [] },
   // 登录账号预填（{ email, password }）：加载登录页后自动填入表单（javdb/xvideos 邮箱密码登录）
   credentials: { type: Object, default: null },
+  // 手动确认模式（EX 站）：不自动检测登录成功，底部显示提示 + 取消/确认按钮，
+  // 用户点"确认"后才抓取 cookie（e-hentai 论坛登录成功后 URL 不确定，自动检测不可靠）
+  manualConfirm: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:show', 'login-success', 'login-failed', 'close'])
@@ -135,8 +148,8 @@ async function onNav(e) {
     status.value = 'captcha'
     return
   }
-  // 2. 检测登录成功（URL 在站点域 + 满足成功模式）
-  if (props.successPatterns.some(re => re.test(url))) {
+  // 2. 检测登录成功（URL 在站点域 + 满足成功模式）；手动确认模式跳过（用户点"确认"才抓）
+  if (!props.manualConfirm && props.successPatterns.some(re => re.test(url))) {
     // 等页面渲染稳定后抓 cookie（避免 cookie 还没 set 就抓）
     setTimeout(() => grabCookies(true), 800)
   }
@@ -265,5 +278,26 @@ function onClose() {
 }
 html.light-mode .login-webview {
   border-color: #e0e0e6;
+}
+/* 手动确认模式底部栏（EX 站）：提示 + 取消/确认按钮 */
+.wv-confirm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #63e2b7;
+  border-radius: 4px;
+  background: rgba(99, 226, 183, 0.08);
+}
+.wv-confirm-hint {
+  font-size: 13px;
+  color: #63e2b7;
+}
+.wv-confirm-btns {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>

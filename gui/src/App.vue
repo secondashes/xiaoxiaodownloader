@@ -62,6 +62,7 @@
             @tw-delete-follow-tag="handleTwDeleteFollowTag"
             @tw-clear-cache="handleTwClearCache"
             @exhentai-set-cookies="handleExSyncCookies"
+            @exhentai-webview-login="handleSiteOAuthLogin('exhentai')"
             @exhentai-logout="handleExLogout"
             @open-login-page="handleOpenLoginPage"
             @fetch-cookies="handleFetchCookies"
@@ -402,6 +403,7 @@
           :success-patterns="wvLogin.successPatterns"
           :captcha-patterns="wvLogin.captchaPatterns"
           :credentials="wvLogin.credentials"
+          :manual-confirm="wvLogin.manualConfirm"
           :title="`${wvLogin.site} webview 登录`"
           @login-success="handleSiteLoginSuccess"
           @login-failed="err => message.error(err || '登录失败')"
@@ -830,13 +832,14 @@ const javdbBatchProgress = reactive({ done: 0, total: 0 })
 // webview 登录弹窗（共用 WebviewLoginModal 组件）
 const wvLogin = reactive({
   visible: false,
-  site: '',                   // xhamster / pornhub / xvideos / javdb
+  site: '',                   // xhamster / pornhub / xvideos / javdb / exhentai
   loginUrl: '',
   homeUrl: '',
   partition: 'persist:twitter',
   successPatterns: [],
   captchaPatterns: [],
   credentials: null,          // 登录页自动预填账号（javdb 邮箱密码登录）
+  manualConfirm: false,       // 手动确认模式（EX：底部提示+确认按钮，用户点确认才抓 cookie）
 })
 
 
@@ -3893,6 +3896,17 @@ function handleSiteOAuthLogin(siteKey, creds) {
       successPatterns: [/javdb\.com\/(zh\/)?(users\/home|logout)/i, /javdb\.com\/zh\/?$/i],
       captchaPatterns: [/challenge|captcha|cdn-cgi|turnstile/i],
     },
+    exhentai: {
+      // EX 登录：弹窗内打开 e-hentai 论坛登录页（EX 账号即论坛账号）；
+      // 登录成功后论坛域会自动下发 ipb_member_id/ipb_pass_hash cookie，
+      // 用户点下方"确认"抓取（手动确认模式，不依赖 URL 检测）
+      loginUrl: 'https://forums.e-hentai.org/index.php?act=Login&CODE=00',
+      homeUrl: 'https://forums.e-hentai.org/',
+      partition: 'persist:exhentai',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|turnstile|hcaptcha/i],
+      manualConfirm: true,
+    },
   }
   const cfg = configs[siteKey]
   if (!cfg) return
@@ -3902,14 +3916,15 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.partition = cfg.partition
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
+  wvLogin.manualConfirm = !!cfg.manualConfirm
   // javdb：邮箱密码登录，webview 登录页自动预填（用户只需完成人机验证并点登录）
   wvLogin.credentials = (siteKey === 'javdb' && creds && creds.email) ? {
     email: creds.email,
     password: creds.password || '',
   } : null
   wvLogin.visible = true
-  // 同时设置 webview 会话代理（复用站点代理设置）
-  const proxyKey = `${siteKey}_proxy`
+  // 同时设置 webview 会话代理（复用站点代理设置；EX 站用 exhentai_proxy）
+  const proxyKey = siteKey === 'exhentai' ? 'exhentai_proxy' : `${siteKey}_proxy`
   const proxyUrl = settings[proxyKey] || ''
   if (window.api && proxyUrl) {
     window.api.siteSetProxy(siteKey, proxyUrl)
@@ -3918,9 +3933,11 @@ function handleSiteOAuthLogin(siteKey, creds) {
 
 // WebviewLoginModal 抓取 cookie 成功 → 发后端持久化 + 验证
 // （javdb 附带 webview UA：cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需同 UA）
+// （exhentai 后端命令读 cookies 字段，其他站读 cookie_str）
 function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   if (!window.api || !wvLogin.site) return
   const payload = { cmd: `${wvLogin.site}_set_cookies`, cookie_str: cookieStr }
+  if (wvLogin.site === 'exhentai') payload.cookies = cookieStr
   if (wvLogin.site === 'javdb' && userAgent) payload.user_agent = userAgent
   window.api.sendCommand(payload)
   addLog('系统', `${wvLogin.site} 抓取到 ${count} 个 cookie，已发给后端保存`)

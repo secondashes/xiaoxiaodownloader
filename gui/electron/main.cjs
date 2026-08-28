@@ -66,6 +66,9 @@ const SITE_SESSIONS = {
   xvideos:  { partition: 'persist:xvideos', domains: ['.xvideos.com', '.xvideos-cdn.com'] },
   // JavDB：独立会话（webview 内完成邮箱密码登录 + Cloudflare 人机验证，"记住装置"后 cookie 约 7 天有效）
   javdb:    { partition: 'persist:javdb', domains: ['.javdb.com', '.jdbstatic.com'] },
+  // ExHentai：与右侧浏览器视图共用 persist:exhentai 会话（cookie 互通）；
+  // 登录走 e-hentai 论坛账号（forums.e-hentai.org），登录后自动下发 exhentai.org 的 ipb cookie
+  exhentai: { partition: 'persist:exhentai', domains: ['.e-hentai.org', '.exhentai.org'], authNames: ['ipb_member_id', 'ipb_pass_hash'] },
 }
 
 let pythonProcess = null
@@ -871,9 +874,15 @@ ipcMain.handle('site-get-cookies', async (event, site) => {
       }
     }
     const cookieStr = all.map(c => `${c.name}=${c.value}`).join('; ')
-    // 简单判定是否已登录：cookie 数量 > 3 或包含常见的会话 cookie 名
-    const sessionKeys = ['session', 'sessid', 'phpsessid', 'sid', 'uid', 'user', 'login', 'remember', 'auth']
-    const hasAuth = all.length > 3 || all.some(c => sessionKeys.some(k => c.name.toLowerCase().includes(k)))
+    // 判定是否已登录：优先按站点专属 cookie 名（authNames，如 exhentai 的 ipb_member_id/ipb_pass_hash）；
+    // 无配置时用通用启发式（cookie 数量 > 3 或含常见会话 cookie 名）
+    let hasAuth
+    if (Array.isArray(cfg.authNames) && cfg.authNames.length) {
+      hasAuth = all.some(c => cfg.authNames.includes(c.name))
+    } else {
+      const sessionKeys = ['session', 'sessid', 'phpsessid', 'sid', 'uid', 'user', 'login', 'remember', 'auth']
+      hasAuth = all.length > 3 || all.some(c => sessionKeys.some(k => c.name.toLowerCase().includes(k)))
+    }
     // 返回会话 UA（cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需用同一 UA）
     let userAgent = ''
     try { userAgent = ses.getUserAgent() } catch (e) { /* 忽略 */ }
