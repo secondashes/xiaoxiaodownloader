@@ -1,6 +1,6 @@
 {
   "custom_path": "",
-  "site": "iwara",
+  "site": "exhentai",
   "pawchive_search_mode": "artist",
   "pawchive_subfolder": "date_post",
   "exhentai_proxy": "http://127.0.0.1:10809",
@@ -62,7 +62,20 @@
   "ignore": [],
   "include": [],
   "float_visible": true,
+  "xhamster_proxy": "http://127.0.0.1:10809",
+  "pornhub_proxy": "http://127.0.0.1:10809",
+  "xvideos_proxy": "",
   "youdao_app_id": "",
   "youdao_app_secret": "",
+  "translate_engine": "google_free",
+  "libretranslate_url": "",
+  "libretranslate_api_key": "",
+  "prevent_display_sleep": false,
+  "shortcut_toggle_prevent_sleep": "",
+  "shortcut_quick_minimize": "",
+  "shortcut_toggle_mimic": "",
+  "shortcut_toggle_float": "",
+  "mimic_file_path": "",
+  "mimic_enabled": false,
   "github_proxy": "http://127.0.0.1:10809"
 }

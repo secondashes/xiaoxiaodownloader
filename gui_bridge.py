@@ -5365,14 +5365,15 @@ async def iwara_following_list(page: int = 1) -> None:
         _apply_cached_thumbnails(items)
         asyncio.create_task(_cache_thumbnails(items))
         emit({"event": "iwara_follow_list", "items": items, "page": max(1, page),
-              "has_more": (api_page + 1) * 50 < count, "total": count})
+              "has_more": (api_page + 1) * 50 < count, "total": count,
+              "site": iwara_current_site()})
         logging.info("Iwara 关注列表第 %d 页: %d 人", page, len(items))
     except PermissionError as exc:
         emit({"event": "iwara_follow_list", "items": [], "page": max(1, page),
-              "has_more": False, "error": str(exc)})
+              "has_more": False, "error": str(exc), "site": iwara_current_site()})
     except Exception as exc:
         emit({"event": "iwara_follow_list", "items": [], "page": max(1, page),
-              "has_more": False, "error": f"获取关注列表失败: {exc}"})
+              "has_more": False, "error": f"获取关注列表失败: {exc}", "site": iwara_current_site()})
         logging.exception("Iwara 关注列表获取失败")
     finally:
         emit({"event": "iwara_follow_loading", "loading": False})
@@ -5403,14 +5404,15 @@ async def iwara_friend_list(page: int = 1) -> None:
         _apply_cached_thumbnails(items)
         asyncio.create_task(_cache_thumbnails(items))
         emit({"event": "iwara_friend_list", "items": items, "page": max(1, page),
-              "has_more": (api_page + 1) * 50 < count, "total": count})
+              "has_more": (api_page + 1) * 50 < count, "total": count,
+              "site": iwara_current_site()})
         logging.info("Iwara 好友列表第 %d 页: %d 人", page, len(items))
     except PermissionError as exc:
         emit({"event": "iwara_friend_list", "items": [], "page": max(1, page),
-              "has_more": False, "error": str(exc)})
+              "has_more": False, "error": str(exc), "site": iwara_current_site()})
     except Exception as exc:
         emit({"event": "iwara_friend_list", "items": [], "page": max(1, page),
-              "has_more": False, "error": f"获取好友列表失败: {exc}"})
+              "has_more": False, "error": f"获取好友列表失败: {exc}", "site": iwara_current_site()})
         logging.exception("Iwara 好友列表获取失败")
     finally:
         emit({"event": "iwara_friend_loading", "loading": False})
@@ -5488,10 +5490,11 @@ async def iwara_video_detail(video_id: str) -> None:
               "comment_count": v.get("numComments") or 0, "site": iwara_current_site()})
         logging.info("Iwara 视频详情: %s", video_id)
     except PermissionError as exc:
-        emit({"event": "iwara_video_detail", "video": None, "comments": [], "error": str(exc)})
+        emit({"event": "iwara_video_detail", "video": None, "comments": [], "error": str(exc),
+              "site": iwara_current_site()})
     except Exception as exc:
         emit({"event": "iwara_video_detail", "video": None, "comments": [],
-              "error": f"获取视频详情失败: {exc}"})
+              "error": f"获取视频详情失败: {exc}", "site": iwara_current_site()})
         logging.exception("Iwara 视频详情获取失败")
     finally:
         emit({"event": "iwara_detail_loading", "loading": False})

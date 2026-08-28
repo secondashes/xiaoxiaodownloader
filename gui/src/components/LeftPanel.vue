@@ -1574,10 +1574,11 @@ const SITE_URLS = {
   pawchive: 'https://pawchive.pw',
   exhentai: 'https://exhentai.org',
   twitter: 'https://x.com',
-  iwara: 'https://www.iwara.tv',
+  iwara: 'https://www.iwara.tv',          // 注：iwara 站实际 URL 由 openSiteInBrowser 按 iwSite 动态切换
   hanime: 'https://hanime1.me',
   oreno3d: 'https://oreno3d.com',
   erommdtube: 'https://erommdtube.com',
+  asmr: 'https://asmr-100.com/popular',   // 音声站主页（热门作品页）
   // 三次元新站（选用 jp 区域版本，规避国内/中文区限制）
   xhamster: 'https://jp.xhamster.com',
   pornhub: 'https://jp.pornhub.com',
@@ -1597,7 +1598,11 @@ const showHelp = ref(false)
 
 // 打开当前站点首页（按所选浏览器）
 async function openSiteInBrowser() {
-  const url = SITE_URLS[props.site] || 'https://bunkr.sk'
+  let url = SITE_URLS[props.site] || 'https://bunkr.sk'
+  // iwara 站动态：AI 站用 iwara.ai，否则 iwara.tv
+  if (props.site === 'iwara') {
+    url = props.iwSite === 'ai' ? 'https://www.iwara.ai' : 'https://www.iwara.tv'
+  }
   try {
     if (window.api && window.api.openWithBrowser) {
       const r = await window.api.openWithBrowser(url, browserChoice.value)

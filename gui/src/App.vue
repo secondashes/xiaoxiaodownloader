@@ -256,6 +256,7 @@
             @update:ex-search="handleExSearchUpdate"
             @ex-favorites="handleExFavorites"
             @ex-open-gallery="handleExOpenGallery"
+            @ex-batch-download="handleExBatchDownload"
             @ex-close-detail="handleExCloseDetail"
             @ex-save-torrent="handleExSaveTorrent"
             @pa-open-post="handlePaOpenPost"
@@ -493,6 +494,8 @@ const iwaraLoginLoading = ref(false)
 const exGalleryDetail = ref(null)   // EX 画廊详情（完整信息 + 分组标签）
 const exDetailLoading = ref(false)  // 详情加载中
 const exFavMode = ref(false)        // 当前搜索结果视图是否为"我的收藏"模式
+const exBatchDownloading = ref(false)  // EX 批量下载进行中（inspect_complete 时追加而非替换 fileList）
+const exBatchPending = ref(0)            // EX 批量下载待完成的 inspect_complete 计数（异步返回时减一）
 
 // Pawchive 帖子详情（完整信息 + 标签 + 附件预览）
 const paPostDetail = ref(null)
@@ -857,10 +860,14 @@ function handlePythonEvent(event) {
         window.api.sendCommand({ cmd: 'get_favorites' })
         // 拉取全部站点登录信息（账号卡片：用户名/Cookie/账号档案）
         window.api.sendCommand({ cmd: 'get_login_info' })
+        // 统一提示：正在后台静默检查登录状态（不弹各站单独的提示，避免来回切换观感）
+        message.loading('正在后台检查各站登录状态（需外网环境的站点请保持代理通畅）', {
+          duration: 4000,
+        })
         // 静默检查 ExHentai 登录状态（cookie 已持久化时自动恢复显示）
-        window.api.sendCommand({ cmd: 'exhentai_check_login' })
+        window.api.sendCommand({ cmd: 'exhentai_check_login', silent: true })
         // 静默检查 Twitter 登录状态
-        window.api.sendCommand({ cmd: 'twitter_check_login' })
+        window.api.sendCommand({ cmd: 'twitter_check_login', silent: true })
         // 静默检查通用 webview OAuth 三站登录状态（xhamster/pornhub/xvideos，cookie 已持久化时自动恢复）
         window.api.sendCommand({ cmd: 'xhamster_check_login', silent: true })
         window.api.sendCommand({ cmd: 'pornhub_check_login', silent: true })
@@ -890,15 +897,39 @@ function handlePythonEvent(event) {
       albumInfo.album_name = event.album_name
       albumInfo.album_id = event.album_id
       albumInfo.is_album = event.is_album
-      fileList.value = (event.items || []).map((item) => ({
-        ...item,
-        selected: item.status === 'ok',
-        size_text: formatSize(item.size),
-        file_type: getFileType(item.filename),
-      }))
-      // 非图片/视频文件加载系统图标作为缩略图占位
-      applyFileIcons()
-      addLog('解析', `完成: ${event.album_name} (${fileList.value.length} 个文件)`)
+      // EX 批量下载进行中时追加到 fileList，否则替换
+      if (exBatchDownloading.value || exBatchPending.value > 0) {
+        const newItems = (event.items || []).map((item) => ({
+          ...item,
+          selected: item.status === 'ok',
+          size_text: formatSize(item.size),
+          file_type: getFileType(item.filename),
+        }))
+        fileList.value.push(...newItems)
+        addLog('解析', `批量追加: ${event.album_name} (+${newItems.length} 个文件，共 ${fileList.value.length} 个)`)
+        if (window.api && window.api.applyFileIcons) {
+          // 触发图标重算（非图片/视频文件加载系统图标作为缩略图占位）
+          applyFileIcons()
+        }
+        // 待完成计数减一，全部完成时关闭批量模式
+        if (exBatchPending.value > 0) {
+          exBatchPending.value -= 1
+          if (exBatchPending.value === 0) {
+            exBatchDownloading.value = false
+            addLog('系统', `批量解析全部完成，共收集 ${fileList.value.length} 个文件`)
+          }
+        }
+      } else {
+        fileList.value = (event.items || []).map((item) => ({
+          ...item,
+          selected: item.status === 'ok',
+          size_text: formatSize(item.size),
+          file_type: getFileType(item.filename),
+        }))
+        // 非图片/视频文件加载系统图标作为缩略图占位
+        applyFileIcons()
+        addLog('解析', `完成: ${event.album_name} (${fileList.value.length} 个文件)`)
+      }
       break
 
     case 'inspect_error':
@@ -1165,6 +1196,12 @@ function handlePythonEvent(event) {
       iwHomeLoading.value = false
       iwHomeError.value = event.error || ''
       if (event.error) break
+      // 强校验：丢弃来自错误站点的数据（防止未切换 AI 站时显示 AI 站内容）
+      if (event.site && event.site !== iwSite.value) {
+        console.warn('[iwara_home] 丢弃站点不匹配的数据', { expected: iwSite.value, got: event.site })
+        addLog('系统', `丢弃 IW/${iwSite.value === 'ai' ? 'AI' : '普通'}站不匹配的旧数据`)
+        break
+      }
       if ((event.page || 1) <= 1) {
         iwHomeItems.value = event.items || []
       } else {
@@ -1185,6 +1222,10 @@ function handlePythonEvent(event) {
       iwFollowLoading.value = false
       iwFollowError.value = event.error || ''
       if (event.error) break
+      if (event.site && event.site !== iwSite.value) {
+        console.warn('[iwara_follow_list] 丢弃站点不匹配数据', { expected: iwSite.value, got: event.site })
+        break
+      }
       if ((event.page || 1) <= 1) {
         iwFollowItems.value = event.items || []
       } else {
@@ -1203,6 +1244,10 @@ function handlePythonEvent(event) {
       iwFriendLoading.value = false
       iwFriendError.value = event.error || ''
       if (event.error) break
+      if (event.site && event.site !== iwSite.value) {
+        console.warn('[iwara_friend_list] 丢弃站点不匹配数据', { expected: iwSite.value, got: event.site })
+        break
+      }
       if ((event.page || 1) <= 1) {
         iwFriendItems.value = event.items || []
       } else {
@@ -1241,6 +1286,12 @@ function handlePythonEvent(event) {
       iwDetailLoading.value = false
       if (event.error || !event.video) {
         message.error(event.error || '获取视频详情失败')
+        break
+      }
+      // 强校验：丢弃来自错误站点的视频详情
+      if (event.site && event.site !== iwSite.value) {
+        console.warn('[iwara_video_detail] 丢弃站点不匹配数据', { expected: iwSite.value, got: event.site })
+        addLog('系统', `丢弃 IW/${iwSite.value === 'ai' ? 'AI' : '普通'}站不匹配的视频详情`)
         break
       }
       iwDetail.value = event.video
@@ -2545,11 +2596,12 @@ function handleExFavorites(page = 1) {
 
 // EX 画廊详情（点击搜索结果 → 完整信息 + 分组标签 + 种子入口）
 // 同时自动解析全部图片并展示文件列表（点开链接自动解析展示）
-function handleExOpenGallery(url) {
-  if (!window.api || !url) return
+// 注意参数名用 galleryUrl 而非 url，避免遮蔽（shadow）外层 url ref 导致 url.value = url 自赋值
+function handleExOpenGallery(galleryUrl) {
+  if (!window.api || !galleryUrl) return
   // 同步 URL 栏 + 标记来自搜索（"后退"按钮可用，回到搜索结果）
-  url.value = url
-  searchQuery.value = url
+  url.value = galleryUrl
+  searchQuery.value = galleryUrl
   cameFromSearch.value = true
   // 退出其他站点视图，进入 EX 详情+文件列表视图
   paPostDetail.value = null
@@ -2566,11 +2618,35 @@ function handleExOpenGallery(url) {
   twNavStack.value = []
   // 1) 画廊详情（标题/标签/上传者/评分/封面 + 第1页缩略图）—— 立即返回
   exDetailLoading.value = true
-  window.api.sendCommand({ cmd: 'exhentai_gallery_info', url })
+  window.api.sendCommand({ cmd: 'exhentai_gallery_info', url: galleryUrl })
   // 2) 自动解析全部图片直链，进入文件列表视图（带批量下载）
   fileList.value = []
   const options = JSON.parse(JSON.stringify(settings))
-  window.api.sendCommand({ cmd: 'inspect', url, options })
+  window.api.sendCommand({ cmd: 'inspect', url: galleryUrl, options })
+}
+
+// EX 批量下载：把多个画廊的全部图片解析后追加到 fileList，统一勾选下载
+async function handleExBatchDownload(urls) {
+  if (!window.api || !Array.isArray(urls) || !urls.length) return
+  // 进入文件列表视图（如果还没进入）
+  cameFromSearch.value = true
+  // 清空 fileList 并发解析多个画廊
+  fileList.value = []
+  exGalleryDetail.value = null
+  exBatchDownloading.value = true
+  exBatchPending.value = urls.filter(u => u).length
+  message.info(`开始批量解析 ${exBatchPending.value} 个画廊，请稍候（图片将逐个加入文件列表）`)
+  const options = JSON.parse(JSON.stringify(settings))
+  // 顺序解析（并发会触发 EX 限流 509）；解析结果会通过 inspect_complete 累加进 fileList
+  for (const u of urls) {
+    if (!u) continue
+    url.value = u
+    window.api.sendCommand({ cmd: 'inspect', url: u, options })
+    // 间隔 1.5s 防 509
+    await new Promise(r => setTimeout(r, 1500))
+  }
+  // 注：exBatchPending 异步递减；全部完成后 inspect_complete handler 内会关闭 exBatchDownloading
+  addLog('系统', `批量解析请求已派发（${exBatchPending.value} 个画廊待返回）`)
 }
 
 function handleExCloseDetail() {

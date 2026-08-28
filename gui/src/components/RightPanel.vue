@@ -2343,6 +2343,14 @@
               ghost
               @click="batchFavoriteEx"
             >收藏选中 ({{ exChecked.length }})</n-button>
+            <n-button
+              v-if="exChecked.length"
+              size="tiny"
+              type="warning"
+              ghost
+              title="批量解析选中画廊的全部图片并加入文件列表，可统一勾选下载"
+              @click="$emit('ex-batch-download', exChecked)"
+            >批量下载选中 ({{ exChecked.length }})</n-button>
             <span class="ex-result-count">
               {{ exFavMode ? '我的收藏' : `共约 ${formatCount(searchTotalResults)} 条结果` }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
             </span>
@@ -3237,6 +3245,7 @@ const emit = defineEmits([
   'update:ex-search',       // ExHentai 搜索选项更新（分类/评分/种子/页数范围）
   'ex-favorites',           // 打开我的收藏（参数：页码）
   'ex-open-gallery',        // 打开画廊详情（参数：画廊 URL）
+  'ex-batch-download',      // 批量下载选中画廊（参数：URL 数组，解析全部图片加入文件列表）
   'ex-close-detail',        // 关闭画廊详情（返回搜索结果）
   'ex-save-torrent',        // 保存 .torrent 种子文件（参数：种子条目）
   'pa-open-post',           // 打开 PA 帖子详情（参数：帖子 URL）
