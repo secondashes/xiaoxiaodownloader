@@ -688,16 +688,17 @@
           </div>
         </div>
       </div>
-      <!-- 文件列表视图 -->
-      <div v-else-if="fileList.length > 0" class="file-list-area">
+      <!-- 文件列表视图（后台批量收集期间与完成后均不切换：保持当前视图，静默后台下载） -->
+      <div v-else-if="fileList.length > 0 && !exBatchRunning && !batchFileCollected" class="file-list-area">
         <!-- 列表操作栏 -->
         <div class="list-toolbar">
           <div class="album-info">
             <n-button
-              v-if="cameFromSearch"
+              v-if="cameFromSearch || (site === 'exhentai' && exGalleryDetail)"
               size="small"
               quaternary
               type="primary"
+              title="清空文件列表返回"
               @click="$emit('back-to-search')"
             >
               <template #icon>
@@ -3357,6 +3358,8 @@ const props = defineProps({
   exFavMode: { type: Boolean, default: false },       // 当前结果视图是否为"我的收藏"
   exBatchRunning: { type: Boolean, default: false },  // EX 批量解析进行中
   exBatchProgress: { type: Object, default: () => ({ done: 0, total: 0 }) }, // 批量进度 done/total
+  // 批量收集视图锁定：批量下载收集过文件后不自动切到文件列表（静默后台下载，用户返回时解锁）
+  batchFileCollected: { type: Boolean, default: false },
   paPostDetail: { type: Object, default: null },       // PA 帖子详情（完整信息 + 附件预览）
   paDetailLoading: { type: Boolean, default: false }, // PA 详情加载中
   paArtistPosts: { type: Object, default: null },      // PA 画师子项目列表（按发布日期的全部帖子）

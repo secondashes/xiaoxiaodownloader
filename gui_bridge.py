@@ -10015,7 +10015,15 @@ class DownloadManager:
                 if task["status"] in ("paused", "cancelled"):
                     return
                 if item.get("status") == "completed":
-                    return
+                    # 本地校验：记录的最终路径文件已被删除 → 重置为待下载（本地没有的重新下载）
+                    fp = item.get("_final_path")
+                    if fp and not Path(fp).exists():
+                        logging.info("本地文件缺失，重新下载: %s", fp)
+                        item["status"] = "pending"
+                        item["completed"] = 0
+                        task["done"] = max(0, task.get("done", 0) - 1)
+                    else:
+                        return
                 async with semaphore:
                     await self._download_one_file(
                         task, item, args, session_info, album_path, task_id, max_retries,
@@ -10217,6 +10225,7 @@ class DownloadManager:
             live_manager.update_log(event="跳过重复", details=f"{filename}（已存在相同大小的文件）")
             item["status"] = "completed"
             item["completed"] = 100
+            item["_final_path"] = str(Path(file_download_path) / truncate_filename(filename))
             task["done"] = task.get("done", 0) + 1
             emit({"event": "file_complete", "filename": filename, "success": True,
                   "skipped": True, "size": size, "task_id": task_id})
@@ -10277,6 +10286,7 @@ class DownloadManager:
             item["completed"] = 100
             task["done"] = task.get("done", 0) + 1
             final_path = str(Path(file_download_path) / truncate_filename(filename))
+            item["_final_path"] = final_path  # 持久化最终路径（续传时校验本地文件是否存在）
             _add_history_entry({
                 "id": f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
                 "filename": filename,
@@ -10535,6 +10545,7 @@ class DownloadManager:
             live_manager.update_log(event="跳过重复", details=f"{filename}（已存在相同大小的文件）")
             item["status"] = "completed"
             item["completed"] = 100
+            item["_final_path"] = str(Path(file_dir) / truncate_filename(filename))
             task["done"] = task.get("done", 0) + 1
             emit({"event": "file_complete", "filename": filename, "success": True,
                   "skipped": True, "size": expected_size, "task_id": task_id})

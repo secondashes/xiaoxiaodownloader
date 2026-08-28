@@ -115,6 +115,7 @@
             :ex-fav-mode="exFavMode"
             :ex-batch-running="exBatchDownloading"
             :ex-batch-progress="exBatchProgress"
+            :batch-file-collected="batchFileCollected"
             :pa-post-detail="paPostDetail"
             :pa-detail-loading="paDetailLoading"
             :pa-artist-posts="paArtistPosts"
@@ -635,6 +636,9 @@ watch(() => settings.auto_translate_to, v => {
 const githubUpdateInfo = ref(null)
 // 检查进行中标志（仅手动点击"检查更新"时为 true；启动后不发任何 GitHub 请求）
 const githubChecking = ref(false)
+// 后台批量收集锁定：批量解析收集过文件后不自动切换到文件列表视图（静默后台下载），
+// 用户点"返回"/新搜索/导航切换时解锁
+const batchFileCollected = ref(false)
 
 // X (Twitter) 关注列表 / 关注分类 / 浏览模式
 // twFollowMode: ''=普通视图 | 'following'=关注列表 | 'followers'=关注我的人 | 'follows'=我的分类
@@ -1018,6 +1022,11 @@ function handlePythonEvent(event) {
       break
 
     case 'inspect_start':
+      // 批量模式：静默（不清空已收集的文件、不显示全局 loading，避免视图闪烁）
+      if (exBatchDownloading.value || exBatchPending.value > 0) {
+        addLog('解析', `后台解析: ${event.url}`)
+        break
+      }
       inspecting.value = true
       fileList.value = []
       inspectProgress.current = 0
@@ -2535,6 +2544,10 @@ function handleInspect() {
     return
   }
   fileList.value = []
+  // URL 解析也标记来自搜索视图（文件列表显示"返回"按钮，可清空文件列表回主页）
+  cameFromSearch.value = true
+  // 用户主动解析 → 解锁批量收集的视图锁定（显示文件列表）
+  batchFileCollected.value = false
   // 单次解析（非批量）：清空 EX 批量母文件夹，避免误套用到本次下载
   exBatchParentFolder.value = ''
   // reactive 对象是 Proxy，无法被 IPC 克隆，必须先转成纯对象
@@ -2615,6 +2628,8 @@ function handleBackToSearch() {
   // 清空文件列表，返回搜索结果视图
   fileList.value = []
   cameFromSearch.value = false
+  // 解锁批量收集视图锁定（用户主动返回）
+  batchFileCollected.value = false
   // 同步清理各站点详情/子项目视图（避免回退后被旧详情卡住看不到搜索结果）
   exGalleryDetail.value = null
   exDetailLoading.value = false
@@ -3028,6 +3043,8 @@ async function confirmExBatchFolder(useFolder) {
 
   // 后台批量：不切换视图（用户留在搜索结果页可继续浏览/翻页），解析结果静默收集进 fileList
   cameFromSearch.value = false
+  // 视图锁定：批量收集期间与完成后都不自动切到文件列表（完全静默后台下载）
+  batchFileCollected.value = true
   // 清空 fileList（后台解析模式，避免与旧文件列表混在一起）
   fileList.value = []
   exGalleryDetail.value = null
