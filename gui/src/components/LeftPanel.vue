@@ -526,11 +526,11 @@
           </svg>
         </n-icon>
       </button>
-      <!-- 识图（占位：未来以图搜源，暂未开放） -->
+      <!-- 识图：以图搜源（拖拽图片到右侧拖拽框，多网站并发查询出处） -->
       <button
         class="round-btn"
         :class="{ 'round-btn-active': activePanel === 'ocr' }"
-        title="识图（以网站识图获取详情，开发中）"
+        title="识图（拖拽图片到右侧开始，多网站并发搜索来源）"
         @click="activePanel = activePanel === 'ocr' ? '' : 'ocr'"
       >
         <n-icon size="20">
@@ -560,13 +560,40 @@
       </button>
     </div>
 
-    <!-- 识图占位面板 -->
+    <!-- 识图面板：粘贴窗口（存放搜出来的结果）+ 代理设置 -->
     <div v-show="activePanel === 'ocr'" class="settings-section">
       <div class="settings-content">
-        <div class="section-title">识图</div>
-        <div class="placeholder-tip">
-          以图搜源：上传/粘贴图片，调用识图网站获取来源详情。<br>
-          该功能正在开发中，敬请期待。
+        <div class="section-title">识图（以图搜源）</div>
+        <div class="setting-item">
+          <div class="setting-label">搜索结果粘贴板（自动保存，可存放识图搜到的出处信息）</div>
+          <n-input
+            v-model:value="reversePasteLocal"
+            type="textarea"
+            :rows="8"
+            placeholder="可以粘贴搜索结果到此处（自动保存，长期记录）"
+            @change="v => emit('reverse-paste-save', v)"
+          />
+          <div class="switch-hint" style="margin-top: 4px">
+            将图片拖到右侧拖拽框即可开始识图；全部网站返回后展示结果（失效网站自动移除）
+          </div>
+        </div>
+        <div class="setting-item">
+          <div class="setting-label">识图代理地址（Google / Yandex 国内必须；其他站一般直连）</div>
+          <n-input
+            :value="settings.reverse_proxy"
+            placeholder="如 http://127.0.0.1:10809，留空直连"
+            size="small"
+            @change="v => emit('reverse-set-proxy', v)"
+          />
+        </div>
+        <div class="setting-item">
+          <div class="setting-label">Lenso.ai API Token（可选；官方 API 需付费订阅，留空则跳过该站）</div>
+          <n-input
+            :value="settings.reverse_lenso_token"
+            placeholder="留空 = 跳过 Lenso.ai"
+            size="small"
+            @change="v => update('reverse_lenso_token', v)"
+          />
         </div>
       </div>
     </div>
@@ -1477,6 +1504,8 @@ const props = defineProps({
   // ASMR-100 登录用户名（音声站，用户名+密码登录）
   asmrUser: { type: String, default: '' },
   asmrLoginLoading: { type: Boolean, default: false },
+  // 识图（反向图片搜索）：粘贴板内容（后端 cache/reverse_paste.txt 持久化）
+  reversePaste: { type: String, default: '' },
   // 通用 webview OAuth 三站登录用户名（xhamster/pornhub/xvideos）
   xhamsterUser: { type: String, default: '' },
   pornhubUser: { type: String, default: '' },
@@ -1526,6 +1555,10 @@ const emit = defineEmits([
   'asmr-login',            // 用户名密码登录（参数：用户名, 密码）
   'asmr-logout',           // 退出 ASMR 登录
   'asmr-set-proxy',       // 修改 ASMR 代理（参数：代理地址，空=直连）
+  // 识图（反向图片搜索）
+  'reverse-toggle',       // 识图视图开关（参数：true=占用右侧展示区 / false=退出）
+  'reverse-paste-save',   // 保存粘贴板内容（参数：文本）
+  'reverse-set-proxy',    // 修改识图代理（参数：代理地址，空=直连）
   // Oreno3D（O3D）/ EroMMDTube（E站）
   'oreno-set-proxy',       // 修改 O3D/E站 代理（参数：代理地址, 可选 site_key 'erommdtube'，空=直连）
   'tw-add-follow-tag',    // 新增关注分类（参数：母类, 子类）
@@ -1567,6 +1600,17 @@ const message = useMessage()
 
 // 当前展开的面板：'' | 'settings' | 'history' | 'favorites'
 const activePanel = ref('')
+
+// 识图：面板开关联动右侧识图视图（占用/退出右侧展示区）
+watch(activePanel, (p) => {
+  emit('reverse-toggle', p === 'ocr')
+})
+
+// 识图粘贴板本地编辑（prop 同步进本地，失焦保存回后端）
+const reversePasteLocal = ref('')
+watch(() => props.reversePaste, (v) => {
+  if (v !== reversePasteLocal.value) reversePasteLocal.value = v || ''
+}, { immediate: true })
 
 // ============================
 // 登录状态（账号卡片）

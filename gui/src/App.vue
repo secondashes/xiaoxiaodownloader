@@ -23,6 +23,10 @@
             @asmr-login="handleAsmrLogin"
             @asmr-logout="handleAsmrLogout"
             @asmr-set-proxy="handleAsmrSetProxy"
+            :reverse-paste="reversePaste"
+            @reverse-toggle="handleReverseToggle"
+            @reverse-paste-save="handleReversePasteSave"
+            @reverse-set-proxy="handleReverseSetProxy"
             @oreno-set-proxy="handleOrenoSetProxy"
             :xhamster-user="xhamsterUser"
             :pornhub-user="pornhubUser"
@@ -206,6 +210,11 @@
             :asmr-logged-in="asmrLoggedIn"
             :asmr-batch-running="asmrBatchRunning"
             :asmr-batch-progress="asmrBatchProgress"
+            :reverse-active="reverseActive"
+            :reverse-sites="reverseSites"
+            :reverse-running="reverseRunning"
+            @reverse-search="handleReverseSearch"
+            @reverse-reset="handleReverseReset"
             :auto-translate-to="autoTranslateTo"
             @update:auto-translate-to="handleUpdateAutoTranslateTo"
             :auto-translating="autoTranslating"
@@ -442,6 +451,9 @@ const settings = reactive({
   asmr_seek_back: 5,            // 播放器倒带秒数
   asmr_smooth: false,           // 音质流畅优先（优先低码率流畅播放）
   asmr_smart_path: true,        // 智能路径（按文件夹结构整理下载目录）
+  // 识图（反向图片搜索）设置
+  reverse_proxy: '',            // 识图代理（Google/Yandex 国内必须；留空 = 直连）
+  reverse_lenso_token: '',      // Lenso.ai API Token（官方 API 需付费订阅；留空跳过该站）
   asmr_sound_effect: '',        // 效果音偏好（如：耳舐め/環境音）
   asmr_audio_type: 'mp3',       // 音频类型偏好（mp3>flac>wav>opus>m4a>aac 顺序）
   asmr_show_hot: true,          // 详情页显示热门作品
@@ -777,6 +789,14 @@ const asmrDetailLoading = ref(false)
 // 批量下载
 const asmrBatchRunning = ref(false)
 const asmrBatchProgress = reactive({ done: 0, total: 0, message: '' })
+
+// ============================
+// 识图（反向图片搜索）状态：拖拽图片 → 多网站并发查询 → 全部返回后展示
+// ============================
+const reverseActive = ref(false)      // 识图视图激活（占用右侧内容区）
+const reverseRunning = ref(false)      // 搜索进行中
+const reverseSites = ref([])           // [{key,name,status:running|done|failed,results,url,error}]
+const reversePaste = ref('')           // 左侧粘贴板内容（后端 cache/reverse_paste.txt 持久化）
 
 // ============================
 // 通用 webview OAuth 三站（xhamster/pornhub/xvideos）状态
@@ -1790,6 +1810,57 @@ function handlePythonEvent(event) {
       asmrTotal.value = event.total || 0
       if (event.orders) asmrOrders.value = event.orders
       searchResults.value = []
+      break
+
+    // ============================
+    // 识图（反向图片搜索）事件
+    // ============================
+    case 'reverse_start':
+      reverseRunning.value = true
+      reverseSites.value = (event.sites || []).map(s => ({
+        ...s, status: 'running', results: [], url: '', error: '',
+      }))
+      break
+
+    case 'reverse_site_update': {
+      const site = reverseSites.value.find(x => x.key === event.site)
+      if (site) {
+        site.status = event.status
+        site.results = event.results || []
+        site.url = event.url || ''
+        site.error = event.error || ''
+      }
+      break
+    }
+
+    case 'reverse_all_done': {
+      reverseRunning.value = false
+      const okCount = (event.ok_sites || []).length
+      const failCount = (event.failed_sites || []).length
+      if (okCount > 0) {
+        message.success(`识图完成：${okCount} 个网站返回结果${failCount ? `（${failCount} 个网站失败已移除）` : ''}`)
+      } else {
+        message.error('识图失败：所有网站均未返回结果（请检查网络或代理设置）')
+      }
+      addLog('识图', `搜索完成：成功 ${okCount} 个网站，失败 ${failCount} 个`)
+      break
+    }
+
+    case 'reverse_error':
+      reverseRunning.value = false
+      message.error(event.message || '识图失败')
+      addLog('识图', `失败: ${event.message || '未知错误'}`)
+      break
+
+    case 'reverse_paste':
+      reversePaste.value = event.text || ''
+      break
+
+    case 'reverse_proxy_set':
+      if ((event.proxy || '') !== settings.reverse_proxy) {
+        settings.reverse_proxy = event.proxy || ''
+        saveSettings()
+      }
       break
 
     case 'asmr_list_loading':
@@ -3559,6 +3630,42 @@ function handleAsmrSetProxy(proxy) {
   updateSettings({ asmr_proxy: proxy })
   if (window.api) {
     window.api.sendCommand({ cmd: 'asmr_set_proxy', proxy: proxy || '' })
+  }
+}
+
+// ============================
+// 识图（反向图片搜索）：拖拽/选择图片 → 后端并发查询全部识图网站 → 展示结果
+// ============================
+// 识图视图开关（左侧识图按钮触发；占用/退出右侧展示区）
+function handleReverseToggle(active) {
+  reverseActive.value = !!active
+}
+
+// 开始识图（图片本地路径 → 后端 reverse_search 并发查询全部网站）
+function handleReverseSearch(path) {
+  if (!window.api || !path) return
+  reverseRunning.value = true
+  reverseSites.value = []
+  window.api.sendCommand({ cmd: 'reverse_search', path })
+  addLog('识图', `开始以图搜源: ${path}`)
+}
+
+// 清空结果回到拖拽框（重新识图）
+function handleReverseReset() {
+  reverseSites.value = []
+  reverseRunning.value = false
+}
+
+// 保存左侧粘贴板内容（cache/reverse_paste.txt 长期记录）
+function handleReversePasteSave(text) {
+  if (window.api) window.api.sendCommand({ cmd: 'reverse_paste_save', text: text || '' })
+}
+
+// 识图代理修改（Google / Yandex 国内必须；其他站一般直连）
+function handleReverseSetProxy(proxy) {
+  updateSettings({ reverse_proxy: proxy })
+  if (window.api) {
+    window.api.sendCommand({ cmd: 'reverse_set_proxy', proxy: proxy || '' })
   }
 }
 

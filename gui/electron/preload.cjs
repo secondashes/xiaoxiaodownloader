@@ -119,4 +119,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // 查询后端启动错误（页面加载完成时主动拉取，避免错过启动早期的事件）
   getBackendError: () => ipcRenderer.invoke('get-backend-error'),
+
+  // 识图（反向图片搜索）：拖拽的 File 对象 → 真实文件路径
+  // （Electron 30 移除了 File.path，必须用 webUtils.getPathForFile）
+  getPathForFile: (file) => {
+    const { webUtils } = require('electron')
+    return webUtils.getPathForFile(file)
+  },
 })

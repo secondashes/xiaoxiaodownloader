@@ -142,4 +142,18 @@
 - [x] Python 后端 PyInstaller 重打包并替换根目录 bunkr_bridge/（onedir，exe+internal）
 - [x] bugfile/ 同步（gui_bridge.py / App.vue / LeftPanel.vue / dist / bunkr_bridge / 上下文 md / 本 md）
 - [x] 事件任务对话压缩上下文.md 已更新（本轮记录段）
-- [ ] 新单文件 EXE（npm run dist）+ 补丁.exe（patch_runtime.spec 重打包）——若积分受限列为后续任务
+- [x] 新单文件 EXE：`小小下载器/小小下载器.exe`（100.7MB，含本轮全部修复）
+- [x] 补丁.exe：`补丁.exe`（54.2MB，bugfile/ 内嵌全部改动）
+- [x] git commit 5ebfb6e + push 成功（含之前积压的 2 个本地提交一并推送）
+
+---
+
+## 六、识图功能实现（2026-08-28 第二轮）
+
+按用户需求完成（详见 事件任务对话压缩上下文.md "识图功能实现轮"）：
+- **左侧识图按钮下方粘贴窗口**：placeholder "可以粘贴搜索结果到此处"，自动保存 `cache/reverse_paste.txt`（启动加载、失焦保存）
+- **点击识图 → 右侧内容区被占用**：显示拖拽框（拖图或点击选图）
+- **全部网站返回后展示**：逐站进度（✓ n 条 / ✕ 失败），失效网站直接不展示；结果按站点分组、标注网站来源、缩略图/标题/相似度/链接（复制/打开/点击卡片跳转）
+- **内置识图网站 9 站并发**：trace.moe（补充，免费 JSON API，番剧识别最强）、SauceNAO（补充，二次元插画最常用）、IQDB、ascii2d、搜图bot酱（soutubot.moe）、Google、Yandex（后两站国内需在左侧填识图代理）、Lenso.ai（官方 API 需付费订阅，设置中填 Token 后启用，留空跳过）、Whos.tv（无公开免费 API，失败自动移除）
+- 新增设置：`reverse_proxy`（识图代理）、`reverse_lenso_token`（Lenso Token）；preload 新增 `getPathForFile`（Electron 30 拖拽取路径）
+- 构建产物：前端 dist 重建、后端 bunkr_bridge 重打包、bugfile 同步、新 EXE + 补丁.exe 已产出

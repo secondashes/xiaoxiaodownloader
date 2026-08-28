@@ -11120,10 +11120,366 @@ def _add_history_entry(entry: dict) -> None:
 # ============================
 SETTINGS_FILE = "settings.json"
 
-# 默认设置（与前端默认值保持一致，作为兜底）
+# ============================
+# 识图（反向图片搜索，多站点并发；失效网站自动移除）
+# ============================
+_reverse_proxy = ""
+# 模块级 settings 引用（main() 加载后 update 进来，供 lenso token 等读取）
+_reverse_settings: dict = {}
+
+# 内置识图网站（展示时显示网站来源；解析失败/无免费接口的站点自动从结果移除）
+REVERSE_SITES = [
+    {"key": "tracemoe", "name": "trace.moe"},
+    {"key": "saucenao", "name": "SauceNAO"},
+    {"key": "iqdb", "name": "IQDB"},
+    {"key": "ascii2d", "name": "ascii2d"},
+    {"key": "soutubot", "name": "搜图bot酱"},
+    {"key": "google", "name": "Google"},
+    {"key": "yandex", "name": "Yandex"},
+    {"key": "lenso", "name": "Lenso.ai"},
+    {"key": "whos", "name": "Whos.tv"},
+]
+
+_REVERSE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+def reverse_set_proxy(proxy: str) -> None:
+    global _reverse_proxy
+    p = (proxy or "").strip()
+    if p and not p.startswith("http"):
+        p = "http://" + p
+    _reverse_proxy = p
+    emit({"event": "reverse_proxy_set", "proxy": p})
+
+
+def _reverse_proxies() -> dict | None:
+    return {"http": _reverse_proxy, "https": _reverse_proxy} if _reverse_proxy else None
+
+
+def _reverse_post_file(url: str, field: str, path: str, extra_data: dict | None = None,
+                       timeout: int = 40) -> requests.Response:
+    """以 multipart 上传本地图片到识图网站。"""
+    with open(path, "rb") as f:
+        files = {field: (os.path.basename(path), f, "image/jpeg")}
+        return requests.post(url, files=files, data=extra_data or {},
+                             headers={"User-Agent": _REVERSE_UA},
+                             proxies=_reverse_proxies(), timeout=timeout)
+
+
+def _reverse_clean(text: str, limit: int = 80) -> str:
+    return " ".join((text or "").split())[:limit]
+
+
+def _reverse_tracemoe(path: str) -> dict:
+    """trace.moe：番剧截图识别（免费 JSON API，返回动画/集数/时间点）。"""
+    with open(path, "rb") as f:
+        r = requests.post("https://api.trace.moe/search", files={"image": f}, timeout=40)
+    r.raise_for_status()
+    data = r.json() or {}
+    items = []
+    for it in (data.get("result") or [])[:8]:
+        ani = it.get("anilist") or {}
+        title = ani.get("title") or {}
+        name = title.get("native") or title.get("romaji") or title.get("english") \
+            or it.get("filename") or "未知作品"
+        try:
+            sub = f"第 {it.get('episode') or '?'} 集 · {int(it.get('from') or 0)}s ~ {int(it.get('to') or 0)}s"
+        except Exception:
+            sub = f"第 {it.get('episode') or '?'} 集"
+        items.append({
+            "title": _reverse_clean(name, 120),
+            "subtitle": sub,
+            "similarity": f"{(it.get('similarity') or 0) * 100:.1f}%",
+            "url": f"https://anilist.co/anime/{ani['id']}" if ani.get("id") else "https://trace.moe/",
+            "thumbnail": it.get("image") or "",
+        })
+    return {"results": items, "url": "https://trace.moe/"}
+
+
+def _reverse_saucenao(path: str) -> dict:
+    """SauceNAO：二次元插画/漫画来源（P站/推特等，无 key 走免费配额）。"""
+    r = _reverse_post_file("https://saucenao.com/search.php", "file", path, timeout=45)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for block in soup.select(".result")[:8]:
+        link, title = "", ""
+        for a in block.select(".resulttitle a") or block.select("a"):
+            href = a.get("href") or ""
+            if href.startswith("http"):
+                link = href
+                title = _reverse_clean(a.get_text(), 120)
+                break
+        sim_el = block.select_one(".resultsimilarityinfo")
+        sim = _reverse_clean(sim_el.get_text()).strip("()") if sim_el else ""
+        img_el = block.select_one(".resultimage img")
+        thumb = (img_el.get("src") or "") if img_el else ""
+        if thumb.startswith("/"):
+            thumb = "https://saucenao.com" + thumb
+        content_el = block.select_one(".resultcontent")
+        subtitle = _reverse_clean(content_el.get_text(), 100) if content_el else ""
+        if link:
+            items.append({"title": title or "匹配结果", "subtitle": subtitle,
+                          "similarity": sim, "url": link, "thumbnail": thumb})
+    if not items:
+        raise RuntimeError("未解析到结果（可能无匹配或被限流）")
+    return {"results": items, "url": "https://saucenao.com/"}
+
+
+def _reverse_iqdb(path: str) -> dict:
+    """IQDB：二次元图库聚合搜索（danbooru/gelbooru 等，soutubot 同核心引擎）。"""
+    r = _reverse_post_file("https://iqdb.org/", "file", path, timeout=45)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for tbl in soup.select("table.result")[:8]:
+        a = tbl.select_one("a[href]")
+        if not a:
+            continue
+        href = a.get("href") or ""
+        if href.startswith("//"):
+            href = "https:" + href
+        elif href.startswith("/"):
+            href = "https://iqdb.org" + href
+        text = _reverse_clean(tbl.get_text(), 120)
+        m = re.search(r"(\d+%) ?similar", text)
+        img = tbl.select_one("img")
+        thumb = (img.get("src") or "") if img else ""
+        if thumb.startswith("/"):
+            thumb = "https://iqdb.org" + thumb
+        if href.startswith("http"):
+            items.append({"title": _reverse_clean(a.get_text(), 100) or "匹配结果",
+                          "subtitle": text, "similarity": m.group(1) if m else "",
+                          "url": href, "thumbnail": thumb})
+    if not items:
+        raise RuntimeError("未解析到结果（可能无匹配）")
+    return {"results": items, "url": "https://iqdb.org/"}
+
+
+def _reverse_ascii2d(path: str) -> dict:
+    """ascii2d：日系以图搜图（色合/特征检索，返回 P站/推特来源）。"""
+    r = _reverse_post_file("https://ascii2d.net/search/by-image", "file", path, timeout=50)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for block in soup.select(".item")[:8]:
+        links = [a for a in block.select(".detail a[href], a[href]")
+                 if (a.get("href") or "").startswith("http")]
+        if not links:
+            continue
+        a = links[0]
+        img = block.select_one("img")
+        thumb = (img.get("src") or "") if img else ""
+        if thumb.startswith("/"):
+            thumb = "https://ascii2d.net" + thumb
+        author = _reverse_clean(links[1].get_text(), 60) if len(links) > 1 else ""
+        items.append({"title": _reverse_clean(a.get_text(), 120) or "匹配结果",
+                      "subtitle": author, "similarity": "",
+                      "url": a.get("href"), "thumbnail": thumb})
+    if not items:
+        raise RuntimeError("未解析到结果")
+    return {"results": items, "url": "https://ascii2d.net/"}
+
+
+def _reverse_soutubot(path: str) -> dict:
+    """搜图bot酱：本子/漫画出处（与 IQDB 同核心引擎，泛化解析卡片链接）。"""
+    r = _reverse_post_file("https://soutubot.moe/query", "file", path, timeout=50)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items, seen = [], set()
+    for a in soup.select("a[href]"):
+        href = a.get("href") or ""
+        text = _reverse_clean(a.get_text(), 80)
+        if (not href.startswith("http") or href in seen or len(text) < 4
+                or "soutubot.moe/static" in href):
+            continue
+        seen.add(href)
+        items.append({"title": text, "subtitle": "", "similarity": "",
+                      "url": href, "thumbnail": ""})
+    if not items:
+        raise RuntimeError("未解析到结果（站点改版或需等待）")
+    return {"results": items[:8], "url": "https://soutubot.moe/"}
+
+
+def _reverse_google(path: str) -> dict:
+    """Google 以图搜图（上传端点 + 解析结果页；国内需代理）。"""
+    with open(path, "rb") as f:
+        r = requests.post("https://www.google.com/searchbyimage/upload",
+                          files={"encoded_image": (os.path.basename(path), f, "image/jpeg")},
+                          headers={"User-Agent": _REVERSE_UA},
+                          proxies=_reverse_proxies(), timeout=40)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    # 最佳猜测（"Best guess for this image"）
+    m = re.search(r"Best guess for this image[^<]*(?:<[^>]+>)*<a[^>]*>([^<]+)</a>", r.text)
+    if m:
+        items.append({"title": f"最佳猜测: {_reverse_clean(m.group(1), 100)}",
+                      "subtitle": "", "similarity": "",
+                      "url": r.url, "thumbnail": ""})
+    for h3 in soup.select("h3")[:10]:
+        a = h3.find_parent("a")
+        if not a:
+            continue
+        href = a.get("href") or ""
+        if href.startswith("/url"):
+            q = re.search(r"[?&]q=([^&]+)", href)
+            if q:
+                from urllib.parse import unquote as _unquote
+                href = _unquote(q.group(1))
+        elif href.startswith("/"):
+            href = "https://www.google.com" + href
+        title = _reverse_clean(h3.get_text(), 120)
+        if title and href.startswith("http"):
+            items.append({"title": title, "subtitle": "", "similarity": "",
+                          "url": href, "thumbnail": ""})
+    if not items:
+        raise RuntimeError("未解析到结果（可能被验证码拦截或需代理）")
+    return {"results": items[:8], "url": r.url}
+
+
+def _reverse_yandex(path: str) -> dict:
+    """Yandex 以图搜图（上传后解析相似图片/包含该图的页面；国内需代理）。"""
+    r = _reverse_post_file("https://yandex.com/images/search?rpt=imageview", "upfile", path,
+                           extra_data={"original_image": ""}, timeout=50)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items, seen = [], set()
+    for a in soup.select("a[href]"):
+        cls = " ".join(a.get("class") or [])
+        if ("CbirSites-ItemTitleLink" in cls or "SerpItem-Title" in cls
+                or "Link ViewLink" in cls):
+            href = a.get("href") or ""
+            text = _reverse_clean(a.get_text(), 100)
+            if href and text and href not in seen:
+                seen.add(href)
+                items.append({"title": text, "subtitle": "", "similarity": "",
+                              "url": href, "thumbnail": ""})
+    if not items:
+        raise RuntimeError("未解析到结果（可能需代理或站点改版）")
+    return {"results": items[:8], "url": r.url}
+
+
+def _reverse_lenso(path: str) -> dict:
+    """Lenso.ai：AI 反向图片搜索（官方 API 需付费订阅 token；留空则跳过该站）。"""
+    import base64
+    token = (_reverse_settings.get("reverse_lenso_token") or "").strip()
+    if not token:
+        raise RuntimeError("Lenso.ai 官方 API 需付费订阅；在设置中填写 Token 后启用")
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    r = requests.post("https://api.lenso.ai/search",
+                      json={"image": b64, "category": "similar", "page": 1},
+                      headers={"Authorization": f"Bearer {token}",
+                               "User-Agent": _REVERSE_UA},
+                      proxies=_reverse_proxies(), timeout=40)
+    r.raise_for_status()
+    data = r.json() or {}
+    items = []
+    for res in (data.get("results") or [])[:8]:
+        for u in (res.get("urlList") or [])[:1]:
+            items.append({"title": _reverse_clean(u.get("title"), 120) or "匹配结果",
+                          "subtitle": "", "similarity": "",
+                          "url": u.get("sourceUrl") or "",
+                          "thumbnail": u.get("imageUrl") or ""})
+    if not items:
+        raise RuntimeError("未返回结果")
+    return {"results": items, "url": "https://lenso.ai/"}
+
+
+def _reverse_whos(path: str) -> dict:
+    """Whos.tv：动漫角色识别（无公开免费 API，尝试上传端点；失败自动移除）。"""
+    r = _reverse_post_file("https://whos.tv/api/search", "image", path, timeout=40)
+    try:
+        data = r.json()
+    except Exception:
+        raise RuntimeError("接口不可用（站点改版或需登录）")
+    rows = data if isinstance(data, list) else (data.get("results") or data.get("data") or [])
+    items = []
+    for it in rows[:8]:
+        if not isinstance(it, dict):
+            continue
+        items.append({"title": _reverse_clean(str(it.get("name") or it.get("title") or ""), 100) or "角色",
+                      "subtitle": _reverse_clean(str(it.get("anime") or it.get("source") or ""), 80),
+                      "similarity": _reverse_clean(str(it.get("similarity") or ""), 20),
+                      "url": it.get("url") or "", "thumbnail": it.get("image") or it.get("thumbnail") or ""})
+    if not items:
+        raise RuntimeError("未返回结果")
+    return {"results": items, "url": "https://whos.tv/"}
+
+
+_REVERSE_PARSERS = {
+    "tracemoe": _reverse_tracemoe,
+    "saucenao": _reverse_saucenao,
+    "iqdb": _reverse_iqdb,
+    "ascii2d": _reverse_ascii2d,
+    "soutubot": _reverse_soutubot,
+    "google": _reverse_google,
+    "yandex": _reverse_yandex,
+    "lenso": _reverse_lenso,
+    "whos": _reverse_whos,
+}
+
+
+async def reverse_search(path: str) -> None:
+    """识图入口：并发请求全部识图网站，逐站推送进度，全部返回后推送完成事件。"""
+    path = (path or "").strip()
+    if not path or not os.path.isfile(path):
+        emit({"event": "reverse_error", "message": f"图片文件不存在: {path}"})
+        return
+    emit({"event": "reverse_start", "sites": REVERSE_SITES})
+    ok_names: list[str] = []
+    fail_names: list[str] = []
+
+    async def _run(site: dict) -> None:
+        key, name = site["key"], site["name"]
+        try:
+            data = await asyncio.to_thread(_REVERSE_PARSERS[key], path)
+            ok_names.append(name)
+            emit({"event": "reverse_site_update", "site": key, "name": name,
+                  "status": "done", "results": data.get("results") or [],
+                  "url": data.get("url") or ""})
+        except Exception as exc:
+            fail_names.append(name)
+            emit({"event": "reverse_site_update", "site": key, "name": name,
+                  "status": "failed", "error": str(exc)[:200], "results": []})
+
+    await asyncio.gather(*[_run(s) for s in REVERSE_SITES])
+    emit({"event": "reverse_all_done", "ok_sites": ok_names, "failed_sites": fail_names})
+
+
+def _reverse_paste_path() -> str:
+    return os.path.join("cache", "reverse_paste.txt")
+
+
+def reverse_paste_get() -> None:
+    """读取左侧识图粘贴板内容（cache/reverse_paste.txt）。"""
+    text = ""
+    try:
+        with open(_reverse_paste_path(), "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        text = ""
+    emit({"event": "reverse_paste", "text": text})
+
+
+def reverse_paste_save(text: str) -> None:
+    """保存识图粘贴板内容。"""
+    try:
+        with open(_reverse_paste_path(), "w", encoding="utf-8") as f:
+            f.write(text or "")
+        emit({"event": "reverse_paste_saved", "ok": True})
+    except Exception as exc:
+        emit({"event": "reverse_paste_saved", "ok": False, "error": str(exc)})
+
+
 DEFAULT_SETTINGS = {
     "custom_path": "",
     "site": "bunkr",
+    # 识图（反向图片搜索）设置：代理（Google/Yandex 国内必须）；Lenso.ai 需付费 API token
+    "reverse_proxy": "",
+    "reverse_lenso_token": "",
     "pawchive_search_mode": "artist",
     "pawchive_subfolder": "date_post",
     "exhentai_proxy": "http://127.0.0.1:10809",
@@ -11974,6 +12330,10 @@ async def command_loop() -> None:
     asmr_set_proxy(_settings.get("asmr_proxy") or "")
     if _asmr_load_cred().get("token"):
         await asyncio.to_thread(asmr_check_login, True)
+    # 恢复识图（反向图片搜索）代理设置 + 粘贴板内容推送
+    _reverse_settings.update(_settings)
+    reverse_set_proxy(_settings.get("reverse_proxy") or "")
+    reverse_paste_get()
     _hanime_restore_session()
     if _hanime_load_cred().get("cookies"):
         await asyncio.to_thread(hanime_check_login, True)
@@ -12052,6 +12412,7 @@ async def command_loop() -> None:
 
             elif cmd == "save_settings":
                 _save_settings(command.get("settings", {}))
+                _reverse_settings.update(command.get("settings", {}))
 
             elif cmd == "get_history":
                 emit({"event": "history", "items": _load_history()})
@@ -12443,6 +12804,15 @@ async def command_loop() -> None:
             # ---------- ASMR 音声站（asmr-100.com） ----------
             elif cmd == "asmr_set_proxy":
                 asmr_set_proxy(command.get("proxy", ""))
+
+            elif cmd == "reverse_set_proxy":
+                reverse_set_proxy(command.get("proxy", ""))
+            elif cmd == "reverse_search":
+                await reverse_search(command.get("path", ""))
+            elif cmd == "reverse_paste_get":
+                reverse_paste_get()
+            elif cmd == "reverse_paste_save":
+                reverse_paste_save(command.get("text", ""))
 
             elif cmd == "asmr_login":
                 await asyncio.to_thread(

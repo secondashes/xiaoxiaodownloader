@@ -639,8 +639,75 @@
 
     <!-- 中间内容区 -->
     <div class="content-area">
+      <!-- 识图视图：拖拽/选择图片 → 多站点并发识图 → 全部返回后展示结果（占用整个内容区） -->
+      <div v-if="reverseActive" class="reverse-view">
+        <!-- 拖拽/选择图片 -->
+        <div v-if="!(reverseSites || []).length" class="reverse-dropzone" :class="{ 'drop-over': reverseDragOver }"
+             @click="reversePickFile()"
+             @dragover.prevent="reverseDragOver = true"
+             @dragleave.prevent="reverseDragOver = false"
+             @drop.prevent="handleReverseDrop">
+          <input ref="reverseFileInput" type="file" accept="image/*" style="display: none" @change="handleReversePick" />
+          <div class="reverse-dropzone-icon">🖼️</div>
+          <div class="reverse-dropzone-title">把图片拖到这里开始识图</div>
+          <div class="reverse-dropzone-tip">也可以点击此处选择图片（JPG / PNG / WebP）</div>
+          <div class="reverse-dropzone-sites">
+            将同时查询：trace.moe · SauceNAO · IQDB · ascii2d · 搜图bot酱 · Google · Yandex · Lenso.ai · Whos.tv<br>
+            （全部网站返回后展示结果，失效网站自动移除；Google / Yandex 需在左侧设置代理）
+          </div>
+        </div>
+        <!-- 搜索中：各站进度 -->
+        <div v-else-if="reverseRunning" class="reverse-progress">
+          <div class="reverse-progress-title">识图中，请稍候...（全部网站返回后自动展示结果）</div>
+          <div v-for="s in reverseSites" :key="s.key" class="reverse-progress-item">
+            <span class="reverse-progress-name">{{ s.name }}</span>
+            <span v-if="s.status === 'running'" class="reverse-progress-running">查询中...</span>
+            <span v-else-if="s.status === 'done'" class="reverse-progress-ok">✓ {{ (s.results || []).length }} 条</span>
+            <span v-else class="reverse-progress-fail">✕ 失败</span>
+          </div>
+        </div>
+        <!-- 结果展示（全部网站返回后） -->
+        <div v-else class="reverse-results">
+          <div class="reverse-results-header">
+            <span class="reverse-results-title">识图结果（{{ reverseTotalCount }} 条）</span>
+            <n-button size="small" quaternary @click="$emit('reverse-reset')">↺ 重新识图</n-button>
+          </div>
+          <div v-for="s in reverseDoneSites" :key="s.key" class="reverse-site-block">
+            <div class="reverse-site-header">
+              <span class="reverse-site-name">{{ s.name }}</span>
+              <span class="reverse-site-count">{{ (s.results || []).length }} 条结果</span>
+              <a v-if="s.url" class="reverse-site-link" href="javascript:void(0)" @click="reverseOpenExternal(s.url)">打开网站 ↗</a>
+            </div>
+            <div class="reverse-item-list">
+              <div v-for="(it, idx) in s.results" :key="idx" class="reverse-item"
+                   :class="{ clickable: !!it.url }"
+                   @click="it.url && reverseOpenExternal(it.url)">
+                <div class="reverse-item-thumb">
+                  <img v-if="it.thumbnail" :src="it.thumbnail" loading="lazy" referrerpolicy="no-referrer" />
+                  <span v-else class="reverse-item-thumb-empty">无图</span>
+                </div>
+                <div class="reverse-item-info">
+                  <div class="reverse-item-title">{{ it.title || '未知结果' }}</div>
+                  <div v-if="it.subtitle" class="reverse-item-subtitle">{{ it.subtitle }}</div>
+                  <div class="reverse-item-meta">
+                    <n-tag v-if="it.similarity" size="tiny" type="success" round>{{ it.similarity }}</n-tag>
+                    <span v-if="it.url" class="reverse-item-url">{{ it.url }}</span>
+                  </div>
+                </div>
+                <div class="reverse-item-actions" @click.stop>
+                  <n-button v-if="it.url" size="tiny" quaternary @click="reverseCopyText(it.url)">复制</n-button>
+                  <n-button v-if="it.url" size="tiny" quaternary @click="reverseOpenExternal(it.url)">打开</n-button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="!reverseDoneSites.length" class="reverse-empty">
+            所有网站均未返回结果（可能图片无匹配、被限流或网络不通；Google / Yandex 请配置代理）
+          </div>
+        </div>
+      </div>
       <!-- 文件列表视图 -->
-      <div v-if="fileList.length > 0" class="file-list-area">
+      <div v-else-if="fileList.length > 0" class="file-list-area">
         <!-- 列表操作栏 -->
         <div class="list-toolbar">
           <div class="album-info">
@@ -3257,6 +3324,10 @@ const props = defineProps({
   autoTranslateMode: { type: Boolean, default: false },        // 持续自动翻译（每次搜索后自动）
   autoTranslateLangOptions: { type: Array, default: () => [] }, // 目标语言下拉选项
   translatedTitles: { type: Object, default: () => ({}) },     // {原标题: 译文}，展示时回填
+  // 识图（反向图片搜索）：占用右侧内容区
+  reverseActive: { type: Boolean, default: false },            // 识图视图激活（左侧识图按钮开关）
+  reverseSites: { type: Array, default: () => [] },           // [{key,name,status,results,url,error}]
+  reverseRunning: { type: Boolean, default: false },          // 搜索进行中
 })
 
 const emit = defineEmits([
@@ -3370,6 +3441,9 @@ const emit = defineEmits([
   'asmr-open-circle',       // 点击社团查看全部作品（参数：详情对象）
   'asmr-open-va',           // 点击声优查看作品（参数：详情对象）
   'asmr-batch-download',    // 批量下载（参数：[work_id]）
+  // 识图（反向图片搜索）
+  'reverse-search',        // 开始识图（参数：图片本地路径）
+  'reverse-reset',         // 清空结果回到拖拽框
 ])
 
 const checkedKeys = ref([])
@@ -3956,6 +4030,62 @@ function openOrExternal(url) {
   if (!url) return
   if (window.api && window.api.openExternal) window.api.openExternal(url)
   else window.open(url, '_blank')
+}
+
+// ============================
+// 识图（反向图片搜索）：拖拽/选择图片 → 通知后端并发查询全部识图网站
+// ============================
+const reverseDragOver = ref(false)
+const reverseFileInput = ref(null)
+
+// 已成功返回的站点（失效/失败站点直接不展示）
+const reverseDoneSites = computed(() => (props.reverseSites || []).filter(s => s.status === 'done'))
+const reverseTotalCount = computed(() =>
+  reverseDoneSites.value.reduce((n, s) => n + (s.results || []).length, 0))
+
+// 从 File 对象取真实路径（Electron 30 需 webUtils）
+function _reversePathFromFile(file) {
+  if (!file) return ''
+  try {
+    if (window.api && window.api.getPathForFile) return window.api.getPathForFile(file)
+  } catch (e) { /* ignore */ }
+  return file.path || ''
+}
+
+function handleReverseDrop(e) {
+  reverseDragOver.value = false
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+  if (!file) return
+  if (file.type && !file.type.startsWith('image/')) {
+    emit('reverse-reset')
+    return
+  }
+  const p = _reversePathFromFile(file)
+  if (!p) return
+  emit('reverse-search', p)
+}
+
+function reversePickFile() {
+  reverseFileInput.value && reverseFileInput.value.click()
+}
+
+function handleReversePick(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  const p = _reversePathFromFile(file)
+  if (!p) return
+  emit('reverse-search', p)
+}
+
+function reverseOpenExternal(url) {
+  if (!url) return
+  if (window.api && window.api.openExternal) window.api.openExternal(url)
+  else window.open(url, '_blank')
+}
+
+function reverseCopyText(text) {
+  if (!text) return
+  if (navigator.clipboard) navigator.clipboard.writeText(text)
 }
 
 // 热门分类弹窗（打开时向后端请求 分类组 + 全部标签）
@@ -7729,5 +7859,323 @@ html.light-mode .asmr-player-track {
 
 html.light-mode .asmr-player-time {
   color: #666;
+}
+
+/* ============================ 识图（反向图片搜索） ============================ */
+.reverse-view {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+
+/* 拖拽框 */
+.reverse-dropzone {
+  flex: 1;
+  min-height: 320px;
+  border: 2px dashed rgba(99, 226, 183, 0.4);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  padding: 24px;
+}
+
+.reverse-dropzone:hover,
+.reverse-dropzone.drop-over {
+  border-color: #63e2b7;
+  background: rgba(99, 226, 183, 0.08);
+}
+
+.reverse-dropzone-icon {
+  font-size: 48px;
+}
+
+.reverse-dropzone-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.reverse-dropzone-tip {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.reverse-dropzone-sites {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.8;
+}
+
+/* 搜索中进度 */
+.reverse-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+}
+
+.reverse-progress-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 8px;
+}
+
+.reverse-progress-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.reverse-progress-name {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.reverse-progress-running {
+  font-size: 12px;
+  color: #63e2b7;
+}
+
+.reverse-progress-ok {
+  font-size: 12px;
+  color: #63e2b7;
+  font-weight: 600;
+}
+
+.reverse-progress-fail {
+  font-size: 12px;
+  color: #e88080;
+}
+
+/* 结果展示 */
+.reverse-results {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reverse-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reverse-results-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.reverse-site-block {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.reverse-site-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(99, 226, 183, 0.07);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.reverse-site-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #63e2b7;
+}
+
+.reverse-site-count {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.reverse-site-link {
+  margin-left: auto;
+  font-size: 12px;
+  color: #63e2b7;
+  text-decoration: none;
+}
+
+.reverse-site-link:hover {
+  text-decoration: underline;
+}
+
+.reverse-item-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.reverse-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.reverse-item:last-child {
+  border-bottom: none;
+}
+
+.reverse-item.clickable {
+  cursor: pointer;
+}
+
+.reverse-item.clickable:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.reverse-item-thumb {
+  width: 72px;
+  height: 54px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reverse-item-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.reverse-item-thumb-empty {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.reverse-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reverse-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-item-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reverse-item-url {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.reverse-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+}
+
+/* 日间模式适配 */
+html.light-mode .reverse-dropzone-title {
+  color: #333;
+}
+
+html.light-mode .reverse-dropzone-tip {
+  color: #777;
+}
+
+html.light-mode .reverse-dropzone-sites {
+  color: #999;
+}
+
+html.light-mode .reverse-progress-title,
+html.light-mode .reverse-results-title {
+  color: #333;
+}
+
+html.light-mode .reverse-progress-item,
+html.light-mode .reverse-item.clickable:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+html.light-mode .reverse-progress-name,
+html.light-mode .reverse-item-title {
+  color: #333;
+}
+
+html.light-mode .reverse-site-block {
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+html.light-mode .reverse-site-header {
+  background: rgba(99, 226, 183, 0.12);
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .reverse-site-count,
+html.light-mode .reverse-item-subtitle {
+  color: #777;
+}
+
+html.light-mode .reverse-item {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .reverse-item-thumb {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+html.light-mode .reverse-item-thumb-empty {
+  color: #aaa;
+}
+
+html.light-mode .reverse-item-url {
+  color: #999;
+}
+
+html.light-mode .reverse-empty {
+  color: #888;
 }
 </style>
