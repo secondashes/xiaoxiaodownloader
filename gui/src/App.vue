@@ -319,6 +319,7 @@
             @ex-favorites="handleExFavorites"
             @ex-open-gallery="handleExOpenGallery"
             @ex-batch-download="handleExBatchDownload"
+            @clear-batch-tasks="handleClearBatchTasks"
             @ex-close-detail="handleExCloseDetail"
             @ex-save-torrent="handleExSaveTorrent"
             @pa-open-post="handlePaOpenPost"
@@ -2624,6 +2625,24 @@ function handleClearCache() {
   window.api.sendCommand({ cmd: 'clear_cache' })
 }
 
+// 清除批量任务：一键清空批量收集的文件列表 + 复位批量状态 + 解锁视图
+// （不影响已提交的下载任务和已下载的文件；批量解析进行中不可清除）
+function handleClearBatchTasks() {
+  if (exBatchDownloading.value || exBatchPending.value > 0) {
+    message.warning('批量解析进行中，请等待完成后再清除')
+    return
+  }
+  const n = fileList.value.length
+  fileList.value = []
+  batchFileCollected.value = false
+  cameFromSearch.value = false
+  exBatchPending.value = 0
+  exBatchDownloading.value = false
+  exGalleryDetail.value = null
+  message.success(`已清除批量任务（${n} 个文件）。下载任务不受影响，可在"下载状态"查看`)
+  addLog('系统', `清除批量任务：清空 ${n} 个已收集文件，解锁视图`)
+}
+
 function handleBackToSearch() {
   // 清空文件列表，返回搜索结果视图
   fileList.value = []
@@ -3003,8 +3022,16 @@ function handleExOpenGallery(galleryUrl) {
   // 1) 画廊详情（标题/标签/上传者/评分/封面 + 第1页缩略图）—— 立即返回
   exDetailLoading.value = true
   window.api.sendCommand({ cmd: 'exhentai_gallery_info', url: galleryUrl })
+  // 批量解析进行中：不再发单个 inspect（其 inspect_complete 会被误计入批量计数、
+  // 文件也会混入批量收集列表——"点画廊增加批量任务"的根因），详情仍可浏览
+  if (exBatchDownloading.value || exBatchPending.value > 0) {
+    message.info('批量解析进行中，画廊详情可浏览；单个画廊的图片解析请在批量结束后进行')
+    return
+  }
   // 2) 自动解析全部图片直链，进入文件列表视图（带批量下载）
   fileList.value = []
+  // 解锁批量视图锁定（批量已结束：单个画廊解析正常显示文件列表）
+  batchFileCollected.value = false
   const options = JSON.parse(JSON.stringify(settings))
   window.api.sendCommand({ cmd: 'inspect', url: galleryUrl, options })
 }

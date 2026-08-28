@@ -2527,6 +2527,21 @@
               title="批量解析选中画廊的全部图片并加入文件列表，可统一勾选下载"
               @click="$emit('ex-batch-download', exChecked)"
             >批量下载选中 ({{ exChecked.length }})</n-button>
+            <!-- 选中操作：全选 / 反选 / 取消全部 -->
+            <n-button-group v-if="searchResults.length" size="tiny">
+              <n-button size="tiny" quaternary title="选中当前页全部画廊" @click="exCheckAll">全选</n-button>
+              <n-button size="tiny" quaternary title="反转选择（未选的变为选中）" @click="exInvertCheck">反选</n-button>
+              <n-button size="tiny" quaternary title="取消全部选择" @click="exChecked = []">取消全部</n-button>
+            </n-button-group>
+            <!-- 清除批量任务：批量收集过文件后常驻，一键清空并解锁视图（不删除已下载文件） -->
+            <n-button
+              v-if="fileList.length > 0 && !exBatchRunning"
+              size="tiny"
+              type="error"
+              ghost
+              title="清空批量解析收集的文件列表并解锁视图（不影响已提交的下载任务和已下载的文件）"
+              @click="$emit('clear-batch-tasks')"
+            >清除批量任务 ({{ fileList.length }})</n-button>
             <span class="ex-result-count">
               {{ exFavMode ? '我的收藏' : `共约 ${formatCount(searchTotalResults)} 条结果` }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
             </span>
@@ -3513,6 +3528,7 @@ const emit = defineEmits([
   'ex-favorites',           // 打开我的收藏（参数：页码）
   'ex-open-gallery',        // 打开画廊详情（参数：画廊 URL）
   'ex-batch-download',      // 批量下载选中画廊（参数：URL 数组，解析全部图片加入文件列表）
+  'clear-batch-tasks',      // 清除批量任务（清空批量收集的文件列表并解锁视图）
   'ex-close-detail',        // 关闭画廊详情（返回搜索结果）
   'ex-save-torrent',        // 保存 .torrent 种子文件（参数：种子条目）
   'pa-open-post',           // 打开 PA 帖子详情（参数：帖子 URL）
@@ -3972,6 +3988,17 @@ function batchFavoriteEx() {
   const selected = props.searchResults.filter(i => exChecked.value.includes(i.album_url))
   selected.forEach(i => handleQuickFavorite(i))
   exChecked.value = []
+}
+
+// 全选当前页画廊
+function exCheckAll() {
+  exChecked.value = props.searchResults.map(i => i.album_url).filter(Boolean)
+}
+
+// 反选：未选中的变为选中，已选中的取消
+function exInvertCheck() {
+  const all = props.searchResults.map(i => i.album_url).filter(Boolean)
+  exChecked.value = all.filter(u => !exChecked.value.includes(u))
 }
 
 // 点击标签搜索（原版标签点击 = 按该命名空间搜索）
