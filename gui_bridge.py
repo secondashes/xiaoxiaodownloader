@@ -7069,6 +7069,75 @@ def oreno_set_proxy(proxy: str, site_key: str = "oreno3d") -> None:
     emit({"event": "oreno_proxy_set", "proxy": proxy, "site_key": site_key})
 
 
+def _oreno_apply_saved_cookies(site_key: str) -> None:
+    """把加密凭据库保存的登录 cookie 应用到站点请求会话（浏览/搜索自动带会话）。"""
+    cookie_str = _generic_cookie_str(site_key)
+    if not cookie_str:
+        return
+    sess = _oreno_session_of(site_key)
+    try:
+        sess.cookies.clear()
+    except Exception:
+        pass
+    for pair in cookie_str.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        name, _, value = pair.partition("=")
+        try:
+            sess.cookies.set(name.strip(), value.strip())
+        except Exception:
+            continue
+
+
+def _oreno_session_valid(site_key: str) -> bool:
+    """O3D / E站 登录会话验证：把保存的 cookie 应用到站点会话并请求首页。
+
+    HTTP 200 = 会话有效（Cloudflare 验证已过 / cookie 未过期）；
+    网络异常（超时/代理不可用）返回 True 降级处理，避免误报未登录。
+    """
+    try:
+        if not _generic_cookie_str(site_key):
+            return False
+        _oreno_apply_saved_cookies(site_key)
+        _oreno_throttle()
+        resp = _oreno_session_of(site_key).get(f"{_oreno_conf(site_key)['base']}/", timeout=12)
+        return resp.status_code == 200
+    except Exception:
+        # 网络问题无法验证：降级为"有效"（cookie 存在即认为已登录）
+        logging.exception("%s 登录会话网络验证失败（降级为 cookie 存在判定）", site_key)
+        return True
+
+
+def oreno_save_cred(site_key: str, email: str, password: str) -> None:
+    """保存 O3D / E站 账号密码（加密存储，供内置浏览器登录时自动预填）。"""
+    site_key = "erommdtube" if site_key == "erommdtube" else "oreno3d"
+    label = _oreno_conf(site_key)["label"]
+    email = (email or "").strip()
+    if not email:
+        emit({"event": "site_login_result", "site": site_key, "logged_in": False,
+              "message": f"请输入 {label} 账号（邮箱/用户名）"})
+        return
+    cred = _secure_store_read_cred(site_key)
+    cred["email"] = email
+    if password:
+        cred["password"] = password
+    cred["cred_saved_at"] = time.time()
+    _secure_store_write_cred(site_key, cred)
+    cookies = cred.get("cookies") or {}
+    logged_in = bool(cookies) and _oreno_session_valid(site_key)
+    emit({
+        "event": "site_login_result",
+        "site": site_key,
+        "logged_in": logged_in,
+        "username": email,
+        "cookie_count": len(cookies),
+        "message": f"{label} 账号密码已保存" + ("（会话 cookie 有效）" if logged_in else "（尚未登录，可打开内置浏览器登录）"),
+    })
+    logging.info("%s 凭据已保存: %s", label, email)
+    _emit_login_info()
+
+
 def _oreno_throttle(min_interval: float = 0.5) -> None:
     global _oreno_last_req
     wait = _oreno_last_req + min_interval - time.time()
@@ -10254,6 +10323,43 @@ class DownloadManager:
         self._runners[task_id] = asyncio.create_task(self._run(task_id))
         self.emit_snapshot(immediate=True)
 
+    def retry_file(self, task_id: str, item_page: str) -> None:
+        """重试单个文件：目标失败文件重置为待下载并重启任务。
+
+        其他失败文件保持 failed（_run 的 run_one 会跳过它们）；
+        已完成的文件不动。任务必须不在运行中（运行中无法插入新协程）。
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            return
+        if task_id in self._runners:
+            emit({
+                "event": "log",
+                "type": "下载",
+                "message": "任务正在下载中，请等任务结束后再重试单个文件",
+            })
+            return
+        item = next(
+            (f for f in task.get("files", []) if f.get("item_page") == item_page),
+            None,
+        )
+        if not item or item.get("status") != "failed":
+            return
+        item["status"] = "pending"
+        item["completed"] = 0
+        item.pop("error", None)
+        task["failed"] = max(0, task.get("failed", 0) - 1)
+        task["status"] = "running"
+        self._save(immediate=True)
+        self.emit_snapshot(immediate=True)
+        emit({
+            "event": "log",
+            "type": "下载",
+            "message": f"重试文件「{item.get('filename') or item_page}」（任务「{task.get('album') or ''}」）",
+        })
+        self._runners[task_id] = asyncio.create_task(self._run(task_id))
+        self.emit_snapshot(immediate=True)
+
     def cancel(self, task_id: str) -> None:
         task = self.tasks.get(task_id)
         if not task:
@@ -10379,6 +10485,10 @@ class DownloadManager:
 
             async def run_one(item: dict) -> None:
                 if task["status"] in ("paused", "cancelled"):
+                    return
+                if item.get("status") == "failed":
+                    # 失败文件跳过：只有任务级/文件级重试把它们重置为 pending 后才会再下载
+                    # （此前 failed 也重跑，导致单文件重试时其他失败文件被连带重下）
                     return
                 if item.get("status") == "completed":
                     # 本地校验：记录的最终路径文件已被删除 → 重置为待下载（本地没有的重新下载）
@@ -13227,7 +13337,7 @@ def is_javdb_url(url: str) -> bool:
 
 # 通用 webview OAuth 站点（xhamster/pornhub/xvideos）凭据存取（AP1 阶段）
 # cookie 字符串存 theme_cache.dat 的 creds[site]，具体 check_login/搜索/解析待 AP2/AP3/AP4 填充
-_GENERIC_OAUTH_SITES = ("xhamster", "pornhub", "xvideos", "google", "oreno3d")
+_GENERIC_OAUTH_SITES = ("xhamster", "pornhub", "xvideos", "google", "oreno3d", "erommdtube")
 
 
 def _generic_save_cookies(site: str, cookie_str: str) -> dict:
@@ -13262,12 +13372,20 @@ def _generic_cookie_str(site: str) -> str:
 
 
 def _generic_check_login(site: str, silent: bool = False) -> dict:
-    """通用登录态检查（AP1 阶段占位：仅检查 cookie 是否存在；具体验证待 AP2/AP4 填充）。"""
+    """通用登录态检查。
+
+    - google：会话 cookie 严格判定（SID/HSID/SSID + SAPISID）
+    - oreno3d/erommdtube：cookie 存在 + 网络验证（带保存的 cookie 请求站点首页，
+      HTTP 200 = 会话有效；网络异常时降级为 cookie 存在判定，避免误报未登录）
+    - 其余站：cookie 存在即视为已登录
+    """
     cred = _generic_load_cookies(site)
     cookies = cred.get("cookies") or {}
-    # google 用会话 cookie 严格判定（避免登录前的杂项 cookie 误判为已登录）
     if site == "google":
         has_auth = _google_has_auth(cookies)
+        username = cred.get("email") or ""
+    elif site in ("oreno3d", "erommdtube"):
+        has_auth = bool(cookies) and _oreno_session_valid(site)
         username = cred.get("email") or ""
     else:
         has_auth = bool(cookies)
@@ -13378,6 +13496,7 @@ def _emit_login_info() -> None:
         ("javdb", bool(_javdb_load_cred().get("cookies")), _javdb_load_cred().get("cookie_str") or ""),
         ("google", _google_has_auth(_generic_load_cookies("google").get("cookies") or {}), _generic_cookie_str("google")),
         ("oreno3d", bool(_generic_load_cookies("oreno3d").get("cookies")), _generic_cookie_str("oreno3d")),
+        ("erommdtube", bool(_generic_load_cookies("erommdtube").get("cookies")), _generic_cookie_str("erommdtube")),
     ):
         entry = accounts.get(site) or {}
         sites[site] = {
@@ -13387,6 +13506,15 @@ def _emit_login_info() -> None:
             "accounts": entry.get("profiles") or {},
             "active": entry.get("active") or "",
         }
+    # O3D / E站：用户名 = 保存的账号（凭据库），并回填账号密码供登录表单预填
+    for _o_site in ("oreno3d", "erommdtube"):
+        o_cred = _secure_store_read_cred(_o_site)
+        if o_cred.get("email"):
+            if sites.get(_o_site):
+                sites[_o_site]["username"] = o_cred["email"]
+                sites[_o_site]["email"] = o_cred["email"]
+            if o_cred.get("password") and sites.get(_o_site):
+                sites[_o_site]["password"] = o_cred["password"]
     # 谷歌邮箱：用户名 = 保存的邮箱（凭据库）
     g_cred = _secure_store_read_cred("google")
     if g_cred.get("email"):
@@ -13671,6 +13799,9 @@ async def command_loop() -> None:
     hanime_set_proxy(_settings.get("hanime_proxy") or HANIME_DEFAULT_PROXY)
     oreno_set_proxy(_settings.get("oreno_proxy") or "")
     oreno_set_proxy(_settings.get("erommd_proxy") or "", "erommdtube")
+    # O3D / E站：把保存的登录会话 cookie 应用到站点请求会话（浏览/搜索自动带会话，Cloudflare 免重复验证）
+    _oreno_apply_saved_cookies("oreno3d")
+    _oreno_apply_saved_cookies("erommdtube")
     # 恢复 ASMR 代理设置并静默检查登录（token 失效自动用保存的密码重登）
     asmr_set_proxy(_settings.get("asmr_proxy") or "")
     if _asmr_load_cred().get("token"):
@@ -13750,6 +13881,11 @@ async def command_loop() -> None:
 
             elif cmd == "retry_task":
                 download_manager.retry(command.get("task_id", ""))
+
+            elif cmd == "retry_file":
+                download_manager.retry_file(
+                    command.get("task_id", ""), command.get("item_page", ""),
+                )
 
             elif cmd == "cancel_task":
                 download_manager.cancel(command.get("task_id", ""))
@@ -14286,6 +14422,16 @@ async def command_loop() -> None:
             elif cmd == "google_check_login":
                 google_check_login(bool(command.get("silent", False)))
 
+            # ---------- Oreno3D / EroMMDTube 账号密码保存 ----------
+            elif cmd in ("oreno3d_save_cred", "erommdtube_save_cred"):
+                # 含首页会话网络验证（cookie 与账号密码互相验证），放线程池避免阻塞
+                await asyncio.to_thread(
+                    oreno_save_cred,
+                    cmd.rsplit("_save_cred", 1)[0],
+                    command.get("email", ""),
+                    command.get("password", ""),
+                )
+
             # ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/google/oreno3d）----------
             # AP1 阶段：通用 set_cookies/check_login/logout/set_proxy，具体搜索/解析待 AP2/AP3/AP4
             elif cmd.endswith("_set_cookies") and cmd.rsplit("_set_cookies", 1)[0] in _GENERIC_OAUTH_SITES:
@@ -14299,13 +14445,31 @@ async def command_loop() -> None:
                         if g_cred["email"]:
                             _secure_store_write_cred("google", g_cred)
                 result = _generic_save_cookies(site, cookie_str)
+                # O3D / E站：webview 登录时表单预填的账号密码一并保存（下次登录自动回填），
+                # 并把新 cookie 应用到站点请求会话（浏览/搜索自动带会话）
+                # （必须在 _generic_save_cookies 之后：它会整体重建凭据记录）
+                if site in ("oreno3d", "erommdtube") and result.get("ok"):
+                    o_cred = _secure_store_read_cred(site)
+                    if command.get("email"):
+                        o_cred["email"] = command.get("email", "")
+                    if command.get("password"):
+                        o_cred["password"] = command.get("password", "")
+                    _secure_store_write_cred(site, o_cred)
+                    _oreno_apply_saved_cookies(site)
                 if result.get("ok"):
-                    _generic_check_login(site)  # 立即推送登录态
+                    if site in ("oreno3d", "erommdtube"):
+                        await asyncio.to_thread(_generic_check_login, site)  # 含首页会话网络验证
+                    else:
+                        _generic_check_login(site)  # 立即推送登录态
                     _emit_login_info()          # 刷新左侧账号卡片（google/oreno3d 等）
 
             elif cmd.endswith("_check_login") and cmd.rsplit("_check_login", 1)[0] in _GENERIC_OAUTH_SITES:
                 site = cmd.rsplit("_check_login", 1)[0]
-                _generic_check_login(site)
+                # O3D / E站 的登录验证含网络请求（首页会话校验），放线程池避免阻塞命令循环
+                if site in ("oreno3d", "erommdtube"):
+                    await asyncio.to_thread(_generic_check_login, site)
+                else:
+                    _generic_check_login(site)
 
             elif cmd.endswith("_logout") and cmd.rsplit("_logout", 1)[0] in _GENERIC_OAUTH_SITES:
                 site = cmd.rsplit("_logout", 1)[0]

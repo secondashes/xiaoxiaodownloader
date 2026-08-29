@@ -1097,22 +1097,39 @@
             </div>
           </template>
 
-          <!-- Oreno3D 专属设置（登录会话 + 代理，默认直连） -->
+          <!-- Oreno3D 专属设置（登录会话 + 账号密码保存 + 代理，默认直连） -->
           <template v-if="site === 'oreno3d'">
             <div class="setting-item">
               <div class="setting-label">
                 Oreno3D 登录会话
                 <n-tag v-if="oreno3dUser" size="small" type="success" round style="margin-left: 6px">已登录</n-tag>
               </div>
+              <n-input
+                v-model:value="oreno3dEmailInput"
+                placeholder="账号（邮箱/用户名，加密保存在本机）"
+                size="small"
+                style="margin-bottom: 6px"
+              />
+              <n-input
+                v-model:value="oreno3dPasswordInput"
+                type="password"
+                show-password-on="click"
+                placeholder="密码（可选，加密保存在本机）"
+                size="small"
+                style="margin-bottom: 6px"
+              />
               <div style="display: flex; gap: 6px">
-                <n-button size="small" style="flex: 1" @click="$emit('site-oauth-login', 'oreno3d')">
+                <n-button size="small" type="primary" style="flex: 1" @click="handleOrenoSave('oreno3d')">
+                  保存账号密码
+                </n-button>
+                <n-button size="small" style="flex: 1" @click="emit('site-oauth-login', 'oreno3d', { email: oreno3dEmailInput, password: oreno3dPasswordInput })">
                   打开内置浏览器登录
                 </n-button>
                 <n-button v-if="oreno3dUser" size="small" quaternary type="error" @click="$emit('site-logout', 'oreno3d')">
                   退出
                 </n-button>
               </div>
-              <div class="switch-hint" style="margin-top: 4px">Oreno3D 不登录也可正常使用；登录仅保存站点会话 cookie（个人浏览状态），可在 Cloudflare 验证后免重复验证</div>
+              <div class="switch-hint" style="margin-top: 4px">Oreno3D 不登录也可正常使用；保存的账号密码与 cookie 会互相验证登录状态（会话有效即显示"已登录"），Cloudflare 验证后免重复验证</div>
             </div>
             <div class="setting-item">
               <div class="setting-label">Oreno3D (O3D) 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
@@ -1126,8 +1143,40 @@
             </div>
           </template>
 
-          <!-- EroMMDTube 专属设置（代理，默认直连） -->
+          <!-- EroMMDTube 专属设置（登录会话 + 账号密码保存 + 代理，默认直连） -->
           <template v-if="site === 'erommdtube'">
+            <div class="setting-item">
+              <div class="setting-label">
+                EroMMDTube 登录会话
+                <n-tag v-if="erommdtubeUser" size="small" type="success" round style="margin-left: 6px">已登录</n-tag>
+              </div>
+              <n-input
+                v-model:value="erommdtubeEmailInput"
+                placeholder="账号（邮箱/用户名，加密保存在本机）"
+                size="small"
+                style="margin-bottom: 6px"
+              />
+              <n-input
+                v-model:value="erommdtubePasswordInput"
+                type="password"
+                show-password-on="click"
+                placeholder="密码（可选，加密保存在本机）"
+                size="small"
+                style="margin-bottom: 6px"
+              />
+              <div style="display: flex; gap: 6px">
+                <n-button size="small" type="primary" style="flex: 1" @click="handleOrenoSave('erommdtube')">
+                  保存账号密码
+                </n-button>
+                <n-button size="small" style="flex: 1" @click="emit('site-oauth-login', 'erommdtube', { email: erommdtubeEmailInput, password: erommdtubePasswordInput })">
+                  打开内置浏览器登录
+                </n-button>
+                <n-button v-if="erommdtubeUser" size="small" quaternary type="error" @click="$emit('site-logout', 'erommdtube')">
+                  退出
+                </n-button>
+              </div>
+              <div class="switch-hint" style="margin-top: 4px">EroMMDTube 不登录也可正常使用；保存的账号密码与 cookie 会互相验证登录状态（会话有效即显示"已登录"），Cloudflare 验证后免重复验证</div>
+            </div>
             <div class="setting-item">
               <div class="setting-label">EroMMDTube (E站) 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
               <n-input
@@ -1649,9 +1698,13 @@ const props = defineProps({
   xvideosUser: { type: String, default: '' },
   // JavDB 登录用户名
   javdbUser: { type: String, default: '' },
-  // 谷歌邮箱登录邮箱（OAuth 授权共用凭据源）/ O3D 会话状态
+  // 谷歌邮箱登录邮箱（OAuth 授权共用凭据源）/ O3D / E站 会话状态
   googleUser: { type: String, default: '' },
   oreno3dUser: { type: String, default: '' },
+  erommdtubeUser: { type: String, default: '' },
+  // O3D / E站 表单初始值（来自加密凭据库的保存账号，密码一并回填）
+  oreno3dCred: { type: Object, default: () => ({ email: '', password: '' }) },
+  erommdtubeCred: { type: Object, default: () => ({ email: '', password: '' }) },
   // 谷歌邮箱表单初始值（来自加密凭据库的保存邮箱）
   googleEmail: { type: String, default: '' },
   // 全站点登录信息（后端 login_info 事件：用户名/Cookie/账号档案）
@@ -1721,6 +1774,7 @@ const emit = defineEmits([
   'site-set-proxy',       // 修改代理（参数：站点 key, 代理地址）
   // 谷歌邮箱（OAuth 授权共用凭据源）
   'google-save-cred',     // 保存账号密码（参数：邮箱, 密码）
+  'oreno-save-cred',      // O3D/E站 保存账号密码（参数：site_key, 账号, 密码）
   // 登录引导 / 账号档案
   'open-login-page',      // 打开登录页（参数：站点 key）
   'fetch-cookies',        // 一键抓取浏览器 Cookie 并自动登录（参数：站点 key）
@@ -2198,6 +2252,37 @@ watch(() => props.googleEmail, (v) => {
 
 function handleGoogleSave() {
   emit('google-save-cred', googleEmailInput.value, googlePasswordInput.value)
+}
+
+// Oreno3D / EroMMDTube 账号密码表单（保存后与 cookie 互相验证登录状态）
+const oreno3dEmailInput = ref('')
+const oreno3dPasswordInput = ref('')
+const erommdtubeEmailInput = ref('')
+const erommdtubePasswordInput = ref('')
+
+// 凭据回填：login_info 里带保存的账号密码时自动填入表单（仅空值时回填，不打断手动输入）
+watch(() => props.oreno3dCred, (cred) => {
+  if (cred && cred.email && !oreno3dEmailInput.value) {
+    oreno3dEmailInput.value = cred.email
+    if (cred.password && !oreno3dPasswordInput.value) {
+      oreno3dPasswordInput.value = cred.password
+    }
+  }
+}, { immediate: true })
+
+watch(() => props.erommdtubeCred, (cred) => {
+  if (cred && cred.email && !erommdtubeEmailInput.value) {
+    erommdtubeEmailInput.value = cred.email
+    if (cred.password && !erommdtubePasswordInput.value) {
+      erommdtubePasswordInput.value = cred.password
+    }
+  }
+}, { immediate: true })
+
+function handleOrenoSave(siteKey) {
+  const email = siteKey === 'erommdtube' ? erommdtubeEmailInput.value : oreno3dEmailInput.value
+  const password = siteKey === 'erommdtube' ? erommdtubePasswordInput.value : oreno3dPasswordInput.value
+  emit('oreno-save-cred', siteKey, email, password)
 }
 
 function handleJdbLogin() {

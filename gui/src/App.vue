@@ -34,11 +34,15 @@
             :javdb-user="javdbUser"
             :google-user="googleUser"
             :oreno3d-user="oreno3dUser"
+            :erommdtube-user="erommdtubeUser"
+            :oreno3d-cred="oreno3dCred"
+            :erommdtube-cred="erommdtubeCred"
             :google-email="googleEmail"
             @site-oauth-login="handleSiteOAuthLogin"
             @site-logout="handleSiteLogout"
             @site-set-proxy="handleSiteSetProxy"
             @google-save-cred="handleGoogleSaveCred"
+            @oreno-save-cred="handleOrenoSaveCred"
             :login-info="loginInfo"
             :login-loading="pawchiveLoginLoading"
             :search-history="searchHistory"
@@ -314,6 +318,7 @@
             @open-album="openSearchResult"
             @back-to-search="handleBackToSearch"
             @download="handleDownload"
+            @ctx-download-file="handleCtxDownloadFile"
             @delete-history="deleteHistoryRecord"
             @open-file="openFilePath"
             @show-folder="showFileInFolder"
@@ -352,6 +357,7 @@
             @pause="pauseTask"
             @resume="resumeTask"
             @retry="retryTask"
+            @retry-file="retryFile"
             @resume-all="resumeAllTasks"
             @cancel="cancelTask"
             @remove="removeTask"
@@ -838,7 +844,11 @@ const pornhubUser = ref('')
 const xvideosUser = ref('')
 const javdbUser = ref('')
 const googleUser = ref('')      // 谷歌邮箱（OAuth 授权共用凭据源）
-const oreno3dUser = ref('')    // Oreno3D 会话状态（无账号体系，仅记录登录与否）
+const oreno3dUser = ref('')    // Oreno3D 会话状态（账号密码 + cookie 互相验证）
+const erommdtubeUser = ref('') // EroMMDTube 会话状态（账号密码 + cookie 互相验证）
+// O3D / E站 凭据回填（login_info 提取的保存账号密码，传给 LeftPanel 表单）
+const oreno3dCred = ref({ email: '', password: '' })
+const erommdtubeCred = ref({ email: '', password: '' })
 // JavDB 视频详情（封面/预览图/磁力列表）+ 批量下载进度
 const javdbDetail = ref(null)
 const javdbDetailLoading = ref(false)
@@ -1037,9 +1047,10 @@ function handlePythonEvent(event) {
         window.api.sendCommand({ cmd: 'xvideos_check_login', silent: true })
         // 静默检查 JavDB 登录状态（cookie "记住装置"约 7 天，过期提示重新登录）
         window.api.sendCommand({ cmd: 'javdb_check_login', silent: true })
-        // 静默检查谷歌邮箱 / Oreno3D 登录状态（cookie 已持久化时自动恢复）
+        // 静默检查谷歌邮箱 / Oreno3D / EroMMDTube 登录状态（cookie 已持久化时自动恢复）
         window.api.sendCommand({ cmd: 'google_check_login', silent: true })
         window.api.sendCommand({ cmd: 'oreno3d_check_login', silent: true })
+        window.api.sendCommand({ cmd: 'erommdtube_check_login', silent: true })
         // 加载 X 关注分类标签（本地持久化）
         window.api.sendCommand({ cmd: 'twitter_get_follow_tags' })
         // 加载 EX 隐藏标签列表（长期保存）
@@ -2042,6 +2053,13 @@ function handlePythonEvent(event) {
       if (loginInfo.value.google && loginInfo.value.google.username) {
         googleEmail.value = loginInfo.value.google.username
       }
+      // O3D / E站：回填账号密码（LeftPanel 登录表单预填）
+      for (const _oKey of ['oreno3d', 'erommdtube']) {
+        const _oInfo = loginInfo.value[_oKey] || {}
+        const _cred = { email: _oInfo.email || _oInfo.username || '', password: _oInfo.password || '' }
+        if (_oKey === 'oreno3d') oreno3dCred.value = _cred
+        else erommdtubeCred.value = _cred
+      }
       break
 
     case 'account_saved':
@@ -2334,12 +2352,12 @@ function handlePythonEvent(event) {
       if (!renameModal.visible) showNextRenamePrompt()
       break
 
-    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/javdb/google/oreno3d）登录结果 ----------
+    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/javdb/google/oreno3d/erommdtube）登录结果 ----------
     case 'site_login_result': {
       const siteKey = event.site
       const userRefs = {
         xhamster: xhamsterUser, pornhub: pornhubUser, xvideos: xvideosUser,
-        javdb: javdbUser, google: googleUser, oreno3d: oreno3dUser,
+        javdb: javdbUser, google: googleUser, oreno3d: oreno3dUser, erommdtube: erommdtubeUser,
       }
       const userRef = userRefs[siteKey]
       if (event.logout) {
@@ -2696,6 +2714,25 @@ function findDuplicateItems(items) {
     }
   }
   return items.filter(it => it.item_page && existing.has(it.item_page))
+}
+
+// 右键菜单"下载此项"：静默添加单个文件到下载任务（不弹确认框、不切换视图）
+async function handleCtxDownloadFile(file) {
+  if (!file || !window.api) return
+  addLog('下载', `右键下载: ${file.filename || file.item_page || ''}`)
+  const plainItems = [JSON.parse(JSON.stringify(file))]
+  const options = JSON.parse(JSON.stringify(settings))
+  if (exBatchParentFolder.value) {
+    options.batch_parent_folder = exBatchParentFolder.value
+  }
+  window.api.sendCommand({
+    cmd: 'download',
+    url: url.value.trim(),
+    items: plainItems,
+    options,
+    album_name: albumInfo.album_name || '',
+    album_id: albumInfo.album_id || undefined,
+  })
 }
 
 function handleClearCache() {
@@ -4034,6 +4071,15 @@ function handleSiteOAuthLogin(siteKey, creds) {
       captchaPatterns: [/challenge|captcha|turnstile/i],
       manualConfirm: true,
     },
+    erommdtube: {
+      // EroMMDTube：与 Oreno3D 同架构，登录环节保存站点会话 cookie（Cloudflare 验证后免重复验证）
+      loginUrl: 'https://erommdtube.com/',
+      homeUrl: 'https://erommdtube.com/',
+      partition: 'persist:erommdtube',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|turnstile/i],
+      manualConfirm: true,
+    },
   }
   const cfg = configs[siteKey]
   if (!cfg) return
@@ -4044,8 +4090,8 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
   wvLogin.manualConfirm = !!cfg.manualConfirm
-  // javdb/google：邮箱密码登录，webview 登录页自动预填（用户只需完成验证并点登录）
-  wvLogin.credentials = ((siteKey === 'javdb' || siteKey === 'google') && creds && creds.email) ? {
+  // javdb/google/oreno3d/erommdtube：账号密码登录，webview 登录页自动预填（用户只需完成验证并点登录）
+  wvLogin.credentials = (['javdb', 'google', 'oreno3d', 'erommdtube'].includes(siteKey) && creds && creds.email) ? {
     email: creds.email,
     password: creds.password || '',
   } : null
@@ -4076,6 +4122,11 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
+  // O3D / E站：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
+  if (['oreno3d', 'erommdtube'].includes(wvLogin.site) && wvLogin.credentials) {
+    payload.email = wvLogin.credentials.email || ''
+    payload.password = wvLogin.credentials.password || ''
+  }
   // 谷歌邮箱：带上保存的邮箱（后端凭据库补记，展示用）
   if (wvLogin.site === 'google' && googleEmail.value) {
     payload.email = googleEmail.value
@@ -4103,6 +4154,22 @@ function handleGoogleSaveCred(email, password) {
 function handleSiteLogout(siteKey) {
   if (!window.api) return
   window.api.sendCommand({ cmd: `${siteKey}_logout` })
+}
+
+// O3D / E站 账号密码保存（加密存本机，登录会话与 cookie 互相验证）
+function handleOrenoSaveCred(siteKey, email, password) {
+  if (!window.api) return
+  if (!email || !email.trim()) {
+    const label = siteKey === 'erommdtube' ? 'EroMMDTube' : 'Oreno3D'
+    message.warning(`请输入 ${label} 账号`)
+    return
+  }
+  window.api.sendCommand({
+    cmd: `${siteKey}_save_cred`,
+    email: email.trim(),
+    password: password || '',
+  })
+  addLog('系统', `${siteKey} 账号密码已保存: ${email.trim()}`)
 }
 
 // 通用代理修改
@@ -4745,6 +4812,11 @@ function resumeTask(taskId) {
 // 重试任务：失败文件重置为待下载并重新开始
 function retryTask(taskId) {
   if (window.api) window.api.sendCommand({ cmd: 'retry_task', task_id: taskId })
+}
+
+// 重试单个文件：仅该文件重置为待下载，其他失败文件不动
+function retryFile({ taskId, itemPage }) {
+  if (window.api) window.api.sendCommand({ cmd: 'retry_file', task_id: taskId, item_page: itemPage })
 }
 
 function resumeAllTasks() {

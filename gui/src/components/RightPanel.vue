@@ -1,5 +1,17 @@
 <template>
   <div class="right-panel">
+    <!-- 全局右键菜单：单个文件/资源 → 下载此项（静默添加到下载任务） -->
+    <n-dropdown
+      trigger="manual"
+      placement="bottom-start"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      :show="ctxMenu.show"
+      :options="ctxMenuOptions"
+      @select="onCtxMenuSelect"
+      @clickoutside="ctxMenu.show = false"
+    />
+
     <!-- 顶部：站点切换 + 搜索/链接输入 + 按钮 -->
     <div class="url-bar">
       <!-- 站点切换：竖排三类（二次元 / 三次元 / 综合类） -->
@@ -824,6 +836,7 @@
           :columns="columns"
           :data="filteredFileList"
           :row-key="row => row.item_page"
+          :row-props="fileRowProps"
           v-model:checked-row-keys="checkedKeys"
           :max-height="tableHeight"
           :scroll-x="700"
@@ -841,6 +854,7 @@
               :class="{ 'grid-selected': checkedKeys.includes(f.item_page), 'grid-bad': f.status === 'error' }"
               :title="`${f.filename}\n${f.size_text || ''}`"
               @click="toggleGridSelect(f.item_page)"
+              @contextmenu.prevent="openFileCtxMenu($event, f)"
             >
               <div class="grid-thumb">
                 <img v-if="f.thumbnail" :src="f.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
@@ -3577,6 +3591,7 @@ const emit = defineEmits([
   'open-album',
   'back-to-search',
   'download',
+  'ctx-download-file',     // 右键菜单"下载此项"：静默添加单个文件到下载任务（参数：文件条目）
   'resolve-media',   // 在线播放：请求后端解析条目直链（参数：文件条目对象）
   'delete-history',
   'open-file',
@@ -3705,6 +3720,38 @@ function toggleGridSelect(itemPage) {
   const idx = checkedKeys.value.indexOf(itemPage)
   if (idx >= 0) checkedKeys.value.splice(idx, 1)
   else checkedKeys.value.push(itemPage)
+}
+
+// ============================
+// 全局右键菜单：单个文件"下载此项"（静默添加到下载任务，不切换视图）
+// ============================
+const ctxMenu = ref({ show: false, x: 0, y: 0, file: null })
+const ctxMenuOptions = [
+  { key: 'download', label: '⬇ 下载此项', props: { title: '静默添加到下载任务并立即开始下载' } },
+]
+
+// 方格模式：右键文件卡片弹出菜单
+function openFileCtxMenu(e, file) {
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, file }
+}
+
+// 列表模式：data-table 行右键（rowProps 回调）
+function fileRowProps(row) {
+  return {
+    onContextmenu: (e) => {
+      e.preventDefault()
+      openFileCtxMenu(e, row)
+    },
+  }
+}
+
+function onCtxMenuSelect(key) {
+  const file = ctxMenu.value.file
+  ctxMenu.value.show = false
+  if (!file) return
+  if (key === 'download') {
+    emit('ctx-download-file', file)
+  }
 }
 
 // 自动翻译：把原标题替换为译文（无译文回退原标题；空值返回 '未命名'）

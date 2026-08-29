@@ -3,6 +3,10 @@ const { spawn, spawnSync, execSync, execFileSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 
+// 应用版本号（package.json）：主窗口标题显示"小小下载器 vX.Y.Z"
+const APP_VERSION = require('../package.json').version || ''
+const APP_TITLE = APP_VERSION ? `小小下载器 v${APP_VERSION}` : '小小下载器'
+
 // 在 app ready 之前设置命令行参数
 app.commandLine.appendSwitch('no-sandbox')
 app.commandLine.appendSwitch('disable-gpu')
@@ -73,6 +77,8 @@ const SITE_SESSIONS = {
   google:   { partition: 'persist:google', domains: ['.google.com', '.accounts.google.com'], authNames: ['SID', 'SAPISID'] },
   // Oreno3D：无强制账号体系，登录环节仅保存站点会话 cookie（个人浏览状态）
   oreno3d:  { partition: 'persist:oreno3d', domains: ['.oreno3d.com'] },
+  // EroMMDTube：与 Oreno3D 同架构（无账号体系），保存站点会话 cookie（Cloudflare 验证后免重复验证）
+  erommdtube: { partition: 'persist:erommdtube', domains: ['.erommdtube.com'] },
   // ExHentai：与右侧浏览器视图共用 persist:exhentai 会话（cookie 互通）；
   // 登录走 e-hentai 论坛账号（forums.e-hentai.org），登录后自动下发 exhentai.org 的 ipb cookie
   exhentai: { partition: 'persist:exhentai', domains: ['.e-hentai.org', '.exhentai.org'], authNames: ['ipb_member_id', 'ipb_pass_hash'] },
@@ -492,7 +498,7 @@ function createWindow() {
       height: 800,
       minWidth: 900,
       minHeight: 600,
-      title: '小小下载器',
+      title: APP_TITLE,
       autoHideMenuBar: true,
       backgroundColor: '#18181c',
       webPreferences: {
@@ -522,6 +528,8 @@ function createWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     debugLog('页面加载完成')
+    // 页面 <title> 会覆盖窗口标题：加载完成后强制写回带版本号的标题
+    mainWindow.setTitle(APP_TITLE)
   })
 
   // 捕获渲染进程的 console 输出（定位前端错误）

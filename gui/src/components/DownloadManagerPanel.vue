@@ -108,6 +108,12 @@
                     <span v-if="f.speed" class="dl-file-speed">{{ formatSpeed(f.speed) }}</span>
                     <span class="dl-file-status" :class="'st-' + f.status">{{ fileStatusText(f.status) }}</span>
                     <button
+                      v-if="f.status === 'failed'"
+                      class="dl-file-retry"
+                      title="重试该文件（其他文件不受影响）"
+                      @click.stop="$emit('retry-file', { taskId: task.id, itemPage: f.item_page })"
+                    >↻</button>
+                    <button
                       class="dl-file-folder"
                       title="在文件管理器中定位该文件"
                       @click.stop="$emit('locate-file', f)"
@@ -144,7 +150,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'close', 'pause', 'resume', 'resume-all', 'cancel', 'remove', 'toggle-shutdown',
-  'open-folder', 'locate-file', 'retry',
+  'open-folder', 'locate-file', 'retry', 'retry-file',
 ])
 
 // 展开状态（母组 / 任务两级，点击头部切换）
@@ -591,6 +597,21 @@ function formatSize(bytes) {
 
 .dl-file-folder:hover {
   color: #63e2b7;
+}
+
+/* 单文件重试按钮（仅失败文件显示） */
+.dl-file-retry {
+  border: none;
+  background: transparent;
+  color: #d03050;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.dl-file-retry:hover {
+  color: #f0a020;
 }
 
 .st-downloading { color: #63e2b7; }
