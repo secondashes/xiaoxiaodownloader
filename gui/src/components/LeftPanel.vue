@@ -1412,6 +1412,19 @@
           <n-divider style="margin: 16px 0 8px" />
           <div class="section-title">系统功能</div>
 
+          <!-- 关闭按钮行为（与关闭时弹窗的"记住我的选择"共用同一设置） -->
+          <div class="setting-item">
+            <div class="setting-label">关闭按钮行为</div>
+            <n-select
+              :value="settings.close_action || 'ask'"
+              :options="closeActionOptions"
+              @update:value="v => update('close_action', v)"
+            />
+            <div class="setting-hint" style="font-size: 11px; color: #7f7f7f; margin-top: 4px">
+              最小化到托盘后下载任务会继续后台运行；关闭窗口时勾选"记住我的选择"也会修改此项
+            </div>
+          </div>
+
           <!-- 不息屏开关 -->
           <div class="setting-switch">
             <div>
@@ -2154,6 +2167,13 @@ function handleLogin() {
 function update(key, value) {
   emit('update:settings', { [key]: value })
 }
+
+// 关闭按钮行为选项（main.cjs 关闭拦截读取 settings.json 的 close_action 字段）
+const closeActionOptions = [
+  { label: '每次询问（默认）', value: 'ask' },
+  { label: '最小化到托盘（后台继续下载）', value: 'tray' },
+  { label: '直接退出程序', value: 'exit' },
+]
 
 // ============================
 // 有道翻译（文本翻译面板）

@@ -81,6 +81,7 @@ const isDev = !app.isPackaged
 
 // P3 设置功能状态：托盘 / 全局快捷键 / 不息屏 / 拟态窗口
 let appTray = null                  // Tray 实例（仅在最小化到托盘时创建）
+let isQuitting = false              // 正在退出（托盘"退出"/关闭对话框选"退出"时置真，跳过托盘拦截）
 let mimicWindow = null              // 拟态窗口（伪装面板）
 let preventSleepId = null           // powerSaveBlocker ID（null=未开启）
 const shortcutMap = new Map()       // action → accelerator 字符串
@@ -119,13 +120,29 @@ function getProjectRootSafe() {
 
 const logDir = path.join(getProjectRootSafe(), 'logs')
 const debugLogPath = path.join(logDir, 'electron_debug.log')
+// 日志上限：超过后轮转为 .old（最多保留一份旧档），防止日志无限膨胀
+// （曾出现 20 分钟 189MB：tasks_snapshot 全量任务表每 0.5s 一条全部落盘）
+const DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024
+let debugLogBytes = -1  // -1 = 尚未统计（首次写入时 stat）
 
 function debugLog(msg) {
   const ts = new Date().toISOString()
-  const line = `[${ts}] ${msg}\n`
+  // 单条截断：快照类事件一行可达数百 KB，只保留开头便于排查
+  let text = String(msg)
+  if (text.length > 600) text = text.slice(0, 600) + ` ...(截断, 原始 ${text.length} 字符)`
+  const line = `[${ts}] ${text}\n`
   try {
     fs.mkdirSync(logDir, { recursive: true })
+    if (debugLogBytes < 0) {
+      try { debugLogBytes = fs.existsSync(debugLogPath) ? fs.statSync(debugLogPath).size : 0 } catch (e) { debugLogBytes = 0 }
+    }
+    if (debugLogBytes > DEBUG_LOG_MAX_BYTES) {
+      try { fs.unlinkSync(debugLogPath + '.old') } catch (e) {}
+      try { fs.renameSync(debugLogPath, debugLogPath + '.old') } catch (e) {}
+      debugLogBytes = 0
+    }
     fs.appendFileSync(debugLogPath, line, 'utf-8')
+    debugLogBytes += line.length
   } catch (e) {
     // 忽略
   }
@@ -372,17 +389,19 @@ function startPythonBackend() {
   let backendReadyReceived = false
 
   let stdoutBuffer = ''
+  // 高频事件只记一行摘要（全量落盘曾把日志撑到 189MB/20分钟）
+  const NOISY_EVENTS = new Set(['tasks_snapshot', 'file_progress'])
   pythonProcess.stdout.on('data', (data) => {
-    const text = data.toString()
-    debugLog(`Python stdout: ${text.trim()}`)
-    stdoutBuffer += text
+    stdoutBuffer += data.toString()
     const lines = stdoutBuffer.split('\n')
     stdoutBuffer = lines.pop()
     for (const line of lines) {
       if (line.trim()) {
+        let evName = ''
         try {
           const event = JSON.parse(line)
-          if (event.event === 'ready') backendReadyReceived = true
+          evName = event.event || ''
+          if (evName === 'ready') backendReadyReceived = true
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('python-event', event)
           }
@@ -392,6 +411,15 @@ function startPythonBackend() {
           }
         } catch (e) {
           debugLog(`JSON 解析失败: ${line}`)
+        }
+        // 日志记录放在解析之后：正常事件截断记录，高频事件只记摘要
+        if (NOISY_EVENTS.has(evName)) {
+          debugLog(`Python stdout: [${evName}] ${line.length} 字节（摘要省略）`)
+        } else if (evName) {
+          debugLog(`Python stdout: ${line.trim()}`)
+        } else {
+          // 非 JSON 行（Python print 调试输出等）
+          debugLog(`Python stdout: ${line.trim()}`)
         }
       }
     }
@@ -500,6 +528,11 @@ function createWindow() {
 
   mainWindow.webContents.on('crashed', () => {
     debugLog('渲染进程崩溃!')
+  })
+
+  // 关闭按钮分流：托盘 / 退出 / 询问（选择可持久化到 settings.json）
+  mainWindow.on('close', (e) => {
+    handleCloseRequest(e)
   })
 
   mainWindow.on('closed', () => {
@@ -1076,6 +1109,77 @@ function quickMinimizeToTray() {
   createTray()
 }
 
+// ============================
+// 关闭按钮行为（持久化，与 Python 后端共用 settings.json）
+// close_action: 'ask'（每次询问，默认）| 'tray'（最小化到托盘）| 'exit'（直接退出）
+// ============================
+function readCloseActionFromSettings() {
+  try {
+    const settingsPath = path.join(getDataDir(), 'settings.json')
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+      const v = settings.close_action
+      if (v === 'tray' || v === 'exit' || v === 'ask') return v
+    }
+  } catch (e) {
+    debugLog(`读取关闭行为设置失败: ${e.message}`)
+  }
+  return 'ask'
+}
+
+function writeCloseActionToSettings(action) {
+  try {
+    const settingsPath = path.join(getDataDir(), 'settings.json')
+    let settings = {}
+    try {
+      if (fs.existsSync(settingsPath)) settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    } catch (e) { settings = {} }
+    settings.close_action = action
+    // 与后端一致的原子写入：临时文件 + rename
+    const tmpPath = settingsPath + '.tmp'
+    fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2), 'utf-8')
+    fs.renameSync(tmpPath, settingsPath)
+    debugLog(`关闭行为已保存: ${action}`)
+  } catch (e) {
+    debugLog(`保存关闭行为设置失败: ${e.message}`)
+  }
+}
+
+// 关闭按钮被点击：按设置分流（托盘 / 退出 / 询问）
+function handleCloseRequest(e) {
+  if (isQuitting) return            // 正在退出（托盘退出/对话框退出/关机），放行
+  const action = readCloseActionFromSettings()
+  if (action === 'exit') return     // 直接退出，放行默认关闭流程
+  if (action === 'tray') {
+    e.preventDefault()
+    quickMinimizeToTray()
+    return
+  }
+  // ask：弹选择框（勾选"记住我的选择"后不再询问，可在设置中改回）
+  e.preventDefault()
+  dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: '关闭小小下载器',
+    message: '要关闭小小下载器吗？',
+    detail: '选择「最小化到托盘」可以隐藏到后台，下载任务会继续进行。',
+    buttons: ['最小化到托盘', '退出程序'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    checkboxLabel: '记住我的选择（以后不再询问，可在设置中修改）',
+    checkboxChecked: false,
+  }).then(({ response, checkboxChecked }) => {
+    if (response === 0) {
+      if (checkboxChecked) writeCloseActionToSettings('tray')
+      quickMinimizeToTray()
+    } else {
+      if (checkboxChecked) writeCloseActionToSettings('exit')
+      isQuitting = true
+      app.quit()
+    }
+  }).catch(() => { /* 对话框异常时保持窗口打开 */ })
+}
+
 // 不息屏：开启 prevent-display-sleep
 ipcMain.handle('prevent-sleep-start', () => {
   if (preventSleepId === null) {
@@ -1362,6 +1466,11 @@ app.whenReady().then(async () => {
       createWindow()
     }
   })
+})
+
+app.on('before-quit', () => {
+  // 任何主动退出路径（托盘退出/对话框退出/系统关机）都放行关闭事件
+  isQuitting = true
 })
 
 app.on('window-all-closed', () => {

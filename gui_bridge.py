@@ -128,6 +128,19 @@ def setup_logging() -> None:
 _stdout_lock = threading.Lock()
 
 
+def _atomic_write_json(file_path: str, data) -> None:
+    """原子写入 JSON 文件（先写临时文件再 os.replace）。
+
+    任务表/设置/历史等关键状态文件在高频写盘时若被强杀（用户关进程、断电），
+    直接 open("w") 会留下半截 JSON → 下次启动解析失败 → 下载记录全部丢失。
+    os.replace 在同一卷上是原子的，保证文件要么是旧内容要么是完整新内容。
+    """
+    tmp_path = f"{file_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, file_path)
+
+
 def emit(event: dict) -> None:
     """向 stdout 输出一行 JSON 事件（线程安全）。
 
@@ -6056,18 +6069,20 @@ def _save_download_state(state: dict) -> None:
     """保存下载进度状态。"""
     try:
         Path("cache").mkdir(parents=True, exist_ok=True)
-        with open(DOWNLOAD_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(DOWNLOAD_STATE_FILE, state)
     except OSError as exc:
         logging.warning("保存下载状态失败: %s", exc)
 
 
 def _mark_items_new(album_id: str | None, items: list[dict]) -> None:
-    """给解析出的文件列表标记 is_new（上次下载之后新增的文件）。
+    """给解析出的文件列表标记 is_new / is_downloaded（历史查重）。
 
-    判定规则（满足任一即为新）：
+    is_new 判定规则（满足任一即为新）：
     - 该文件的 item_page 不在上次已下载集合中
     - 文件带 post_date 且晚于上次下载时间
+
+    is_downloaded：item_page 在已下载集合中（前端状态栏显示"已下载"，
+    默认不勾选，避免重复下载）。
     """
     if not album_id or not items:
         return
@@ -6077,6 +6092,7 @@ def _mark_items_new(album_id: str | None, items: list[dict]) -> None:
     last_date = album_state.get("last_downloaded", "")
 
     new_count = 0
+    dup_count = 0
     for item in items:
         key = item.get("item_page", "")
         is_new = key not in downloaded
@@ -6084,10 +6100,16 @@ def _mark_items_new(album_id: str | None, items: list[dict]) -> None:
         if not is_new and post_date and last_date and post_date > last_date:
             is_new = True
         item["is_new"] = is_new
+        # 历史查重：下载记录里有这个文件（key 非空才算，避免空 key 全部误标）
+        item["is_downloaded"] = bool(key) and key in downloaded
         if is_new:
             new_count += 1
+        if item["is_downloaded"]:
+            dup_count += 1
     if new_count:
         logging.info("增量标记: %s 有 %d 个新文件", album_id, new_count)
+    if dup_count:
+        logging.info("查重标记: %s 有 %d 个文件已下载过", album_id, dup_count)
 
 
 def _update_download_state(album_id: str | None, items: list[dict]) -> None:
@@ -9927,8 +9949,7 @@ class DownloadManager:
         """把任务表写入磁盘（调用方持有 _dirty 语义，本函数只做 IO）。"""
         try:
             payload = {"tasks": [self._json_safe_task(t) for t in self.tasks.values()]}
-            with Path(DOWNLOAD_TASKS_FILE).open("w", encoding="utf-8") as file:
-                json.dump(payload, file, ensure_ascii=False, indent=2)
+            _atomic_write_json(DOWNLOAD_TASKS_FILE, payload)
         except OSError as exc:
             logging.warning("保存下载任务失败: %s", exc)
 
@@ -10224,6 +10245,35 @@ class DownloadManager:
 
             # 失败清单：任务内剩余文件全部结束后，把失败项（文件名 + 网页链接）写入 txt 供手动下载
             self._write_failure_report(task, files, album_path, task_id)
+
+            # 全部失败自动清理：任务没有任何文件下载成功时，下载目录里只有失败清单/空目录，
+            # 直接删除整个空文件夹并移除下载记录（用户要求：不留垃圾目录和无效任务）
+            if files and not any(f.get("status") == "completed" for f in files):
+                try:
+                    album_dir = Path(album_path)
+                    # 目录里除"下载失败清单"外还有真实文件 → 说明是历史内容，不清理
+                    remaining = [
+                        p for p in album_dir.rglob("*")
+                        if p.is_file() and not p.name.startswith("下载失败清单_")
+                    ]
+                    if not remaining:
+                        shutil.rmtree(album_dir, ignore_errors=True)
+                        logging.info("任务全部失败，已自动清理空文件夹: %s", album_dir)
+                        with self._lock:
+                            self.tasks.pop(task_id, None)
+                        self._save(immediate=True)
+                        self.emit_snapshot(immediate=True)
+                        emit({
+                            "event": "log",
+                            "type": "下载",
+                            "message": f"任务「{task.get('album') or ''}」全部文件下载失败，已自动清理空文件夹并移除下载记录",
+                        })
+                        # 关机计划不因清理而跳过（与其他收尾路径一致）
+                        if self._shutdown_after_done:
+                            self._do_shutdown()
+                        return
+                except Exception:
+                    logging.exception("清理全失败空文件夹出错: %s", task_id)
 
             # 收尾状态
             if task["status"] not in ("paused", "cancelled", "failed"):
@@ -11522,9 +11572,7 @@ def _load_history() -> list[dict]:
 def _save_history(history: list[dict]) -> None:
     """保存历史记录文件。"""
     try:
-        with Path(HISTORY_FILE).open("w", encoding="utf-8") as file:
-            json.dump(history, file, ensure_ascii=False, indent=2)
-
+        _atomic_write_json(HISTORY_FILE, history)
     except OSError as exc:
         logging.warning("保存历史记录失败: %s", exc)
 
@@ -11989,8 +12037,7 @@ def _load_settings() -> dict:
 def _save_settings(settings: dict) -> None:
     """保存用户设置到 settings.json。"""
     try:
-        with Path(SETTINGS_FILE).open("w", encoding="utf-8") as file:
-            json.dump(settings, file, ensure_ascii=False, indent=2)
+        _atomic_write_json(SETTINGS_FILE, settings)
     except OSError as exc:
         logging.warning("保存设置失败: %s", exc)
 
@@ -13435,8 +13482,12 @@ async def command_loop() -> None:
                 emit({"event": "settings", "settings": _load_settings()})
 
             elif cmd == "save_settings":
-                _save_settings(command.get("settings", {}))
-                _reverse_settings.update(command.get("settings", {}))
+                # 合并保存：磁盘上可能有主进程写入的键（如 close_action 关闭行为），
+                # 直接用前端载荷整表覆盖会把这些键丢掉
+                merged = _load_settings()
+                merged.update(command.get("settings", {}))
+                _save_settings(merged)
+                _reverse_settings.update(merged)
 
             elif cmd == "get_history":
                 emit({"event": "history", "items": _load_history()})

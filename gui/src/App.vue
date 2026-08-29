@@ -1064,7 +1064,7 @@ function handlePythonEvent(event) {
         const newItems = (event.items || []).map((item) => ({
           ...item,
           gallery_title: galleryTitle,
-          selected: item.status === 'ok',
+          selected: item.status === 'ok' && !item.is_downloaded,
           size_text: formatSize(item.size),
           file_type: getFileType(item.filename),
         }))
@@ -1094,7 +1094,7 @@ function handlePythonEvent(event) {
       } else {
         fileList.value = (event.items || []).map((item) => ({
           ...item,
-          selected: item.status === 'ok',
+          selected: item.status === 'ok' && !item.is_downloaded,
           size_text: formatSize(item.size),
           file_type: getFileType(item.filename),
         }))

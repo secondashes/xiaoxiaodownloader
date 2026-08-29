@@ -847,6 +847,7 @@
                 <img v-else-if="f.file_icon" :src="f.file_icon" class="grid-icon" alt="" />
                 <span v-else class="grid-type">{{ f.file_type || '文件' }}</span>
                 <span v-if="f.is_new" class="grid-new">新</span>
+                <span v-if="f.is_downloaded" class="grid-downloaded" title="历史任务已下载过（默认不勾选，可手动勾选重下）">已下载</span>
                 <span v-if="checkedKeys.includes(f.item_page)" class="grid-check">✓</span>
                 <!-- 在线预览/播放按钮（点击弹窗，不与勾选冲突） -->
                 <span
@@ -4977,6 +4978,10 @@ const columns = [
     key: 'status',
     width: 120,
     render(row) {
+      // 历史查重：下载记录里已有该文件 → 显示"已下载"（下载按钮仍可手动勾选重下）
+      if (row.is_downloaded) {
+        return h(NTag, { size: 'small', type: 'warning', round: true, bordered: false }, { default: () => '已下载' })
+      }
       const map = {
         ok: { text: '可下载', type: 'success' },
         unresolved: { text: '无法解析', type: 'error' },
@@ -5014,10 +5019,10 @@ const selectedSizeText = computed(() => {
   return formatSize(total)
 })
 
-// 监听文件列表变化，默认选中可下载的
+// 监听文件列表变化，默认选中可下载的（已下载过的文件默认不勾选，避免重复下载）
 watch(() => props.fileList, (newList) => {
   checkedKeys.value = newList
-    .filter(f => f.status === 'ok')
+    .filter(f => f.status === 'ok' && !f.is_downloaded)
     .map(f => f.item_page)
   localFilter.value = ''
   activeTab.value = newList.length > 0 ? 'progress' : 'logs'
@@ -7253,6 +7258,18 @@ html.light-mode .or-group-chip:hover {
   padding: 1px 5px;
   border-radius: 3px;
   background: #e0503c;
+  color: #fff;
+}
+
+/* 历史查重角标（左下角，与"新"错开） */
+.grid-downloaded {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(240, 160, 32, 0.92);
   color: #fff;
 }
 
