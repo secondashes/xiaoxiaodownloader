@@ -101,11 +101,8 @@ contextBridge.exposeInMainWorld('api', {
   // 获取应用版本号（package.json version，用于更新检查对比）
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
 
-  // P3 设置功能：托盘 / 全局快捷键 / 不息屏 / 拟态模式
-  // 不息屏：开启/关闭 prevent-display-sleep
-  preventSleepStart: () => ipcRenderer.invoke('prevent-sleep-start'),
-  preventSleepStop: () => ipcRenderer.invoke('prevent-sleep-stop'),
-  // 全局快捷键注册：action ∈ toggle_prevent_sleep | quick_minimize | toggle_mimic | toggle_float
+  // P3 设置功能：托盘 / 全局快捷键 / 拟态模式
+  // 全局快捷键注册：action ∈ quick_minimize | toggle_mimic | toggle_float
   registerShortcut: (action, accelerator) => ipcRenderer.invoke('register-shortcut', action, accelerator),
   // 快速缩小到托盘（按钮触发）
   quickMinimize: () => ipcRenderer.invoke('quick-minimize'),

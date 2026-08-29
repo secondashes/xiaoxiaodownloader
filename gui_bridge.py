@@ -6506,6 +6506,41 @@ def hanime_login(email: str, password: str) -> None:
         emit({"event": "hanime_login_result", "success": False, "message": f"登录失败: {exc}"})
 
 
+def hanime_set_cookies(cookie_str: str, email: str = "", password: str = "") -> None:
+    """内置浏览器登录 Hanime1 后保存会话 cookie（真人验证/Cloudflare 在弹窗内完成后抓取）。
+
+    webview 里完成登录（含真人验证）→ 点"确认"抓取 cookie → 应用到后端会话并加密保存；
+    表单里输入的邮箱密码一并保存（会话失效时自动重登）。
+    """
+    global _hanime_username
+    try:
+        _hanime_session.cookies.clear()
+        for pair in (cookie_str or "").split(";"):
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            name, _, value = pair.partition("=")
+            try:
+                _hanime_session.cookies.set(name.strip(), value.strip(), domain=".hanime1.me")
+            except Exception:
+                continue
+        cred = _hanime_load_cred()
+        if (email or "").strip():
+            cred["email"] = email.strip()
+        if password:
+            cred["password"] = password
+        _hanime_save_cred(_hanime_sync_cookies(cred))
+        _emit_login_info()
+        emit({"event": "hanime_login_result", "success": True,
+              "message": "Hanime1 会话已保存（真人验证完成）"})
+        # 立即校验会话是否有效（无效时会用保存的密码自动重登）
+        hanime_check_login(False)
+    except Exception as exc:
+        logging.exception("Hanime1 cookie 保存失败")
+        emit({"event": "hanime_login_result", "success": False,
+              "message": f"保存会话失败: {exc}"})
+
+
 def hanime_logout() -> None:
     global _hanime_username
     _secure_store_clear_cred("hanime")
@@ -12426,9 +12461,7 @@ DEFAULT_SETTINGS = {
     "translate_proxy": "http://127.0.0.1:10809",
     # 全局自动翻译目标语言（右侧 🌐 按钮开关；左侧翻译面板可修改）
     "auto_translate_to": "zh-CN",
-    # P3 设置功能：不息屏 / 快捷键 / 拟态模式
-    "prevent_display_sleep": False,       # 不息屏开关（True=阻止系统休眠）
-    "shortcut_toggle_prevent_sleep": "",  # 切换不息屏（Electron accelerator 格式，如 "Ctrl+Shift+S"）
+    # P3 设置功能：快捷键 / 拟态模式
     "shortcut_quick_minimize": "",        # 快速缩小到托盘（如 "Ctrl+Shift+M"）
     "shortcut_toggle_mimic": "",          # 切换拟态模式（如 "Ctrl+Shift+P"）
     "shortcut_toggle_float": "",         # 切换悬浮窗显示（如 "Ctrl+Shift+F"）
@@ -13638,6 +13671,77 @@ def _generic_logout(site: str) -> None:
     })
 
 
+# 通用账号密码保存（全站登录套件：加密存本机，供登录表单回填与内置浏览器预填）
+_SITE_SAVE_CRED_SITES = (
+    "pawchive", "twitter", "exhentai", "iwara", "hanime", "asmr",
+    "xhamster", "pornhub", "xvideos", "javdb", "google",
+    "oreno3d", "erommdtube",
+)
+# 各站账号字段名（asmr 用 username，其余用 email）
+_SITE_CRED_USER_FIELD = {s: "email" for s in _SITE_SAVE_CRED_SITES}
+_SITE_CRED_USER_FIELD["asmr"] = "username"
+
+
+def site_save_cred(site: str, email: str, password: str) -> None:
+    """通用账号密码保存（加密存本机；不发起登录，仅凭据入库 + 登录表单回填）。
+
+    - iwara / asmr / hanime：保存的密码供 token 失效时自动重登
+    - twitter / exhentai / xhamster / pornhub / xvideos：供内置浏览器登录页自动预填
+    - 保存后各站登录状态不变（cookie/token 独立判定）
+    """
+    site = (site or "").strip()
+    if site not in _SITE_SAVE_CRED_SITES:
+        emit({"event": "site_login_result", "site": site, "logged_in": False,
+              "message": f"未知站点: {site}"})
+        return
+    email = (email or "").strip()
+    if not email:
+        emit({"event": "site_login_result", "site": site, "logged_in": False,
+              "message": "请输入账号（邮箱/用户名）"})
+        return
+    cred = _secure_store_read_cred(site)
+    user_field = _SITE_CRED_USER_FIELD.get(site, "email")
+    cred[user_field] = email
+    if password:
+        cred["password"] = password
+    cred["cred_saved_at"] = time.time()
+    _secure_store_write_cred(site, cred)
+    logged_in = _site_logged_in_quick(site, cred)
+    emit({
+        "event": "site_login_result",
+        "site": site,
+        "logged_in": logged_in,
+        "username": email,
+        "message": "账号密码已保存（加密存本机）",
+    })
+    logging.info("%s 凭据已保存: %s", site, email)
+    _emit_login_info()
+
+
+def _site_logged_in_quick(site: str, cred: dict) -> bool:
+    """保存凭据后快速判定当前登录状态（不发网络请求，按已有会话/token/cookie 判断）。"""
+    try:
+        if site == "iwara":
+            return bool(cred.get("user_token"))
+        if site == "asmr":
+            return bool(cred.get("token"))
+        if site == "hanime":
+            return bool(cred.get("cookies"))
+        if site in ("oreno3d", "erommdtube", "xhamster", "pornhub", "xvideos", "google"):
+            return bool(cred.get("cookies"))
+        if site == "twitter":
+            return bool(_twitter_load_cookies().get("auth_token"))
+        if site == "exhentai":
+            return bool(_exhentai_load_cookies().get("ipb_member_id"))
+        if site == "pawchive":
+            return bool({c.name: c.value for c in _pawchive_session.cookies}.get("session"))
+        if site == "javdb":
+            return bool(cred.get("cookies"))
+    except Exception:
+        pass
+    return False
+
+
 # ============================
 # 谷歌邮箱（OAuth 授权共用凭据源）
 # ============================
@@ -13739,6 +13843,15 @@ def _emit_login_info() -> None:
                 sites[_o_site]["email"] = o_cred["email"]
             if o_cred.get("password") and sites.get(_o_site):
                 sites[_o_site]["password"] = o_cred["password"]
+    # 全站登录套件：回填保存的账号密码（登录表单预填 + 内置浏览器登录页自动预填）
+    for _s_site in ("pawchive", "twitter", "exhentai", "iwara", "hanime", "asmr",
+                    "xhamster", "pornhub", "xvideos"):
+        _s_cred = _secure_store_read_cred(_s_site)
+        _s_user = _s_cred.get(_SITE_CRED_USER_FIELD.get(_s_site, "email")) or ""
+        if _s_user and sites.get(_s_site):
+            sites[_s_site]["email"] = _s_user
+            if _s_cred.get("password"):
+                sites[_s_site]["password"] = _s_cred["password"]
     # 谷歌邮箱：用户名 = 保存的邮箱（凭据库）
     g_cred = _secure_store_read_cred("google")
     if g_cred.get("email"):
@@ -14664,6 +14777,24 @@ async def command_loop() -> None:
                 await asyncio.to_thread(
                     oreno_save_cred,
                     cmd.rsplit("_save_cred", 1)[0],
+                    command.get("email", ""),
+                    command.get("password", ""),
+                )
+
+            # ---------- 通用账号密码保存（全站登录套件：加密入库 + 表单回填） ----------
+            elif cmd == "site_save_cred":
+                await asyncio.to_thread(
+                    site_save_cred,
+                    command.get("site", ""),
+                    command.get("email", ""),
+                    command.get("password", ""),
+                )
+
+            # ---------- Hanime1 内置浏览器登录（真人验证完成后保存会话 cookie） ----------
+            elif cmd == "hanime_set_cookies":
+                await asyncio.to_thread(
+                    hanime_set_cookies,
+                    command.get("cookie_str", ""),
                     command.get("email", ""),
                     command.get("password", ""),
                 )

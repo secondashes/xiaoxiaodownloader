@@ -43,6 +43,8 @@
             @site-set-proxy="handleSiteSetProxy"
             @google-save-cred="handleGoogleSaveCred"
             @oreno-save-cred="handleOrenoSaveCred"
+            @site-save-cred="handleSiteSaveCred"
+            :site-creds="siteCreds"
             :login-info="loginInfo"
             :login-loading="pawchiveLoginLoading"
             :search-history="searchHistory"
@@ -70,7 +72,7 @@
             @tw-delete-follow-tag="handleTwDeleteFollowTag"
             @tw-clear-cache="handleTwClearCache"
             @exhentai-set-cookies="handleExSyncCookies"
-            @exhentai-webview-login="handleSiteOAuthLogin('exhentai')"
+            @exhentai-webview-login="creds => handleSiteOAuthLogin('exhentai', creds)"
             @exhentai-logout="handleExLogout"
             @open-login-page="handleOpenLoginPage"
             @refresh-login="handleRefreshLogin"
@@ -93,7 +95,6 @@
             @download-update="handleDownloadUpdate"
             @install-update="handleInstallUpdate"
             @shortcut-change="handleShortcutChange"
-            @prevent-sleep-change="handlePreventSleepChange"
           />
           <RightPanel
             v-show="!detailVisible"
@@ -856,6 +857,8 @@ const erommdtubeUser = ref('') // EroMMDTube 会话状态（账号密码 + cooki
 // O3D / E站 凭据回填（login_info 提取的保存账号密码，传给 LeftPanel 表单）
 const oreno3dCred = ref({ email: '', password: '' })
 const erommdtubeCred = ref({ email: '', password: '' })
+// 全站登录套件凭据回填（login_info 提取各站保存的账号密码，传给 LeftPanel 表单预填）
+const siteCreds = ref({})
 // JavDB 视频详情（封面/预览图/磁力列表）+ 批量下载进度
 const javdbDetail = ref(null)
 const javdbDetailLoading = ref(false)
@@ -2072,6 +2075,16 @@ function handlePythonEvent(event) {
         if (_oKey === 'oreno3d') oreno3dCred.value = _cred
         else erommdtubeCred.value = _cred
       }
+      // 全站登录套件：回填各站保存的账号密码（LeftPanel 登录表单预填）
+      const _savedCreds = {}
+      for (const _sKey of ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr',
+                           'xhamster', 'pornhub', 'xvideos', 'javdb']) {
+        const _sInfo = loginInfo.value[_sKey] || {}
+        if (_sInfo.email || _sInfo.password) {
+          _savedCreds[_sKey] = { email: _sInfo.email || '', password: _sInfo.password || '' }
+        }
+      }
+      siteCreds.value = _savedCreds
       break
 
     case 'account_saved':
@@ -3088,7 +3101,7 @@ function maybeAutoTranslateAfterSearch() {
 
 
 // ============================
-// P3 设置功能：快捷键 / 不息屏 / 拟态模式
+// P3 设置功能：快捷键 / 拟态模式
 // ============================
 // 快捷键变更：保存 settings + 通知主进程注册/注销
 function handleShortcutChange(action, accelerator) {
@@ -3102,30 +3115,11 @@ function handleShortcutChange(action, accelerator) {
   }
 }
 
-// 不息屏开关变更
-async function handlePreventSleepChange(enabled) {
-  if (!window.api) return
-  if (enabled) {
-    if (window.api.preventSleepStart) {
-      const r = await window.api.preventSleepStart()
-      if (!r || !r.ok) {
-        window.api.sendCommand({ cmd: 'set_setting', key: 'prevent_display_sleep', value: false })
-        message?.error?.('不息屏开启失败') || console.warn('preventSleepStart failed')
-      }
-    }
-  } else {
-    if (window.api.preventSleepStop) {
-      await window.api.preventSleepStop()
-    }
-  }
-}
-
-// 启动时同步设置到主进程（注册全部快捷键 + 不息屏状态）
+// 启动时同步设置到主进程（注册全部快捷键）
 function syncP3SettingsToMain() {
   if (!window.api || !settings.value) return
   const s = settings.value
   const actions = [
-    'toggle_prevent_sleep',
     'quick_minimize',
     'toggle_mimic',
     'toggle_float',
@@ -3136,9 +3130,6 @@ function syncP3SettingsToMain() {
       window.api.registerShortcut(a, acc).catch(() => {})
     }
   }
-  if (s.prevent_display_sleep && window.api.preventSleepStart) {
-    window.api.preventSleepStart().catch(() => {})
-  }
 }
 
 // 监听主进程触发的快捷键事件（部分动作需要前端处理）
@@ -3146,12 +3137,7 @@ function setupShortcutTriggeredListener() {
   if (!window.api || !window.api.onShortcutTriggered) return
   window.api.onShortcutTriggered((data) => {
     const action = data?.action
-    if (action === 'toggle_prevent_sleep') {
-      // 切换不息屏开关
-      const next = !settings.value.prevent_display_sleep
-      updateSettings({ prevent_display_sleep: next })
-      handlePreventSleepChange(next)
-    } else if (action === 'toggle_float') {
+    if (action === 'toggle_float') {
       // 切换悬浮窗（复用现有 float_visible 设置）
       const next = !settings.value.float_visible
       updateSettings({ float_visible: next })
@@ -4063,6 +4049,42 @@ function handleSiteOAuthLogin(siteKey, creds) {
       captchaPatterns: [/challenge|captcha|login_challenge/i],
       manualConfirm: true,
     },
+    // Pawchive：弹窗内登录 pawchive.pw，确认后抓取会话 cookie
+    pawchive: {
+      loginUrl: 'https://pawchive.pw/login',
+      homeUrl: 'https://pawchive.pw/',
+      partition: 'persist:pawchive',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|turnstile/i],
+      manualConfirm: true,
+    },
+    // Iwara：弹窗内登录 iwara.tv（真人验证在弹窗内完成），确认后保存表单账号密码供自动重登
+    iwara: {
+      loginUrl: 'https://www.iwara.tv/login',
+      homeUrl: 'https://www.iwara.tv/',
+      partition: 'persist:iwara',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|turnstile/i],
+      manualConfirm: true,
+    },
+    // Hanime1：弹窗内登录 hanime1.me（真人验证在弹窗内完成），确认后保存会话 cookie + 账号密码
+    hanime: {
+      loginUrl: 'https://hanime1.me/login',
+      homeUrl: 'https://hanime1.me/',
+      partition: 'persist:hanime',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|recaptcha|hcaptcha|turnstile/i],
+      manualConfirm: true,
+    },
+    // ASMR-100：弹窗内登录 asmr-100.com，确认后保存表单账号密码供 token 失效自动重登
+    asmr: {
+      loginUrl: 'https://asmr-100.com/login',
+      homeUrl: 'https://asmr-100.com/',
+      partition: 'persist:asmr',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|turnstile/i],
+      manualConfirm: true,
+    },
     xhamster: {
       loginUrl: 'https://jp.xhamster.com/login',
       homeUrl: 'https://jp.xhamster.com/',
@@ -4144,8 +4166,8 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
   wvLogin.manualConfirm = !!cfg.manualConfirm
-  // javdb/google/oreno3d/erommdtube：账号密码登录，webview 登录页自动预填（用户只需完成验证并点登录）
-  wvLogin.credentials = (['javdb', 'google', 'oreno3d', 'erommdtube'].includes(siteKey) && creds && creds.email) ? {
+  // 账号密码登录站：webview 登录页自动预填（用户只需完成真人验证并点登录）
+  wvLogin.credentials = (creds && creds.email) ? {
     email: creds.email,
     password: creds.password || '',
   } : null
@@ -4169,6 +4191,22 @@ function handleSiteOAuthLogin(siteKey, creds) {
 // （javdb 同时回传登录表单的账号密码，长期保存供下次预填）
 function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   if (!window.api || !wvLogin.site) return
+  // iwara / asmr：token 型登录，webview 里完成真人验证后保存表单账号密码
+  //（后端用保存的密码走 API 登录 / token 失效自动重登）
+  if (wvLogin.site === 'iwara' || wvLogin.site === 'asmr') {
+    if (wvLogin.credentials && wvLogin.credentials.email) {
+      window.api.sendCommand({
+        cmd: 'site_save_cred',
+        site: wvLogin.site,
+        email: wvLogin.credentials.email,
+        password: wvLogin.credentials.password || '',
+      })
+      addLog('系统', `${wvLogin.site} 内置浏览器登录完成，账号密码已保存（token 失效自动重登）`)
+    } else {
+      message.warning('未检测到表单账号密码：请在左侧登录表单输入账号密码后再用内置浏览器登录')
+    }
+    return
+  }
   const payload = { cmd: `${wvLogin.site}_set_cookies`, cookie_str: cookieStr }
   if (wvLogin.site === 'exhentai' || wvLogin.site === 'twitter') payload.cookies = cookieStr
   if (wvLogin.site === 'javdb' && userAgent) payload.user_agent = userAgent
@@ -4176,8 +4214,8 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
-  // O3D / E站：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
-  if (['oreno3d', 'erommdtube'].includes(wvLogin.site) && wvLogin.credentials) {
+  // O3D / E站 / Hanime1：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
+  if (['oreno3d', 'erommdtube', 'hanime'].includes(wvLogin.site) && wvLogin.credentials) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
@@ -4220,6 +4258,22 @@ function handleOrenoSaveCred(siteKey, email, password) {
   }
   window.api.sendCommand({
     cmd: `${siteKey}_save_cred`,
+    email: email.trim(),
+    password: password || '',
+  })
+  addLog('系统', `${siteKey} 账号密码已保存: ${email.trim()}`)
+}
+
+// 通用账号密码保存（全站登录套件：加密存本机，供表单回填与内置浏览器预填）
+function handleSiteSaveCred(siteKey, email, password) {
+  if (!window.api) return
+  if (!email || !email.trim()) {
+    message.warning('请输入账号（邮箱/用户名）')
+    return
+  }
+  window.api.sendCommand({
+    cmd: 'site_save_cred',
+    site: siteKey,
     email: email.trim(),
     password: password || '',
   })
@@ -4456,6 +4510,9 @@ function handleAsmrBatchDownload(workIds) {
 }
 
 // 进入 Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR 站点（或启动时停留在该站）自动加载主页
+// 真人验证站点提示（每次会话只提示一次；解决方案 = 内置浏览器登录弹窗内完成验证）
+const humanVerifyPrompted = new Set()
+
 watch(() => settings.site, (s) => {
   if (s === 'iwara' && !iwHomeItems.value.length) {
     handleIwHome(1)
@@ -4465,6 +4522,13 @@ watch(() => settings.site, (s) => {
     handleOrHome(1)
   } else if (s === 'asmr' && !asmrItems.value.length) {
     handleAsmrPopular(1)
+  }
+  // Hanime1 真人验证提示：使用前告知用户（未登录时弹提示，推荐内置浏览器登录完成验证）
+  if (s === 'hanime' && !humanVerifyPrompted.has('hanime')) {
+    humanVerifyPrompted.add('hanime')
+    if (!hanimeUser.value) {
+      message.warning('Hanime1 (H站) 需要真人验证（hCaptcha）：浏览/搜索偶发验证拦截，建议先点左侧"打开内置浏览器登录"，在弹窗内完成验证后再使用', { duration: 6000 })
+    }
   }
 }, { immediate: true })
 

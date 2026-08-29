@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, shell, Menu, session, Tray, globalShortcut, powerSaveBlocker, nativeImage, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, shell, Menu, session, Tray, globalShortcut, nativeImage, dialog } = require('electron')
 const { spawn, spawnSync, execSync, execFileSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -97,26 +97,32 @@ let floatWindow = null
 let downloadsWindow = null
 const isDev = !app.isPackaged
 
-// P3 设置功能状态：托盘 / 全局快捷键 / 不息屏 / 拟态窗口
+// P3 设置功能状态：托盘 / 全局快捷键 / 拟态窗口
 let appTray = null                  // Tray 实例（仅在最小化到托盘时创建）
 let isQuitting = false              // 正在退出（托盘"退出"/关闭对话框选"退出"时置真，跳过托盘拦截）
 let mimicWindow = null              // 拟态窗口（伪装面板）
-let preventSleepId = null           // powerSaveBlocker ID（null=未开启）
 const shortcutMap = new Map()       // action → accelerator 字符串
+// 快捷键防抖：同 action 300ms 内的重复触发只执行一次（系统/驱动偶尔一次按键派发两次事件）
+const shortcutLastFired = new Map()
+function fireShortcutOnce(action, fn) {
+  const now = Date.now()
+  const last = shortcutLastFired.get(action) || 0
+  if (now - last < 300) return
+  shortcutLastFired.set(action, now)
+  try { fn() } catch (err) {
+    debugLog(`快捷键动作执行失败 ${action}: ${err && err.message}`)
+  }
+}
 const shortcutCallbacks = {
-  toggle_prevent_sleep: () => {
-    // 切换不息屏：发 IPC 给前端，让前端改 settings 并同步状态
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('shortcut-triggered', { action: 'toggle_prevent_sleep' })
-    }
-  },
-  quick_minimize: () => quickMinimizeToTray(),
-  toggle_mimic: () => toggleMimicMode(),
+  quick_minimize: () => fireShortcutOnce('quick_minimize', quickMinimizeToTray),
+  toggle_mimic: () => fireShortcutOnce('toggle_mimic', toggleMimicMode),
   toggle_float: () => {
     // 切换悬浮窗显示
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('shortcut-triggered', { action: 'toggle_float' })
-    }
+    fireShortcutOnce('toggle_float', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shortcut-triggered', { action: 'toggle_float' })
+      }
+    })
   },
 }
 
@@ -1214,25 +1220,7 @@ function handleCloseRequest(e) {
   }).catch(() => { /* 对话框异常时保持窗口打开 */ })
 }
 
-// 不息屏：开启 prevent-display-sleep
-ipcMain.handle('prevent-sleep-start', () => {
-  if (preventSleepId === null) {
-    preventSleepId = powerSaveBlocker.start('prevent-display-sleep')
-    debugLog(`不息屏已开启，blocker id=${preventSleepId}`)
-  }
-  return { ok: true, id: preventSleepId }
-})
-
-ipcMain.handle('prevent-sleep-stop', () => {
-  if (preventSleepId !== null) {
-    try { powerSaveBlocker.stop(preventSleepId) } catch {}
-    preventSleepId = null
-    debugLog('不息屏已关闭')
-  }
-  return { ok: true }
-})
-
-// 全局快捷键注册：action ∈ toggle_prevent_sleep | quick_minimize | toggle_mimic | toggle_float
+// 全局快捷键注册：action ∈ quick_minimize | toggle_mimic | toggle_float
 // accelerator 为 Electron 标准格式：'Ctrl+Shift+M' / 'CommandOrControl+Alt+P' 等
 ipcMain.handle('register-shortcut', (event, action, accelerator) => {
   if (!shortcutCallbacks[action]) {
@@ -1271,10 +1259,24 @@ function unregisterAllShortcuts() {
 }
 
 // 拟态模式：创建/显示伪装面板窗口
+// 拟态窗口标题：有上传文件时用文件名（含扩展名），否则用内置占位页名
+function mimicTitleFor(filePath) {
+  if (!filePath) return 'mimic'
+  try {
+    return path.basename(filePath)
+  } catch {
+    return '工作面板'
+  }
+}
+
 function showMimicWindow(filePath) {
   // 已存在则显示
   if (mimicWindow && !mimicWindow.isDestroyed()) {
-    if (filePath) mimicWindow.loadFile(filePath).catch(() => {})
+    if (filePath) {
+      mimicWindow.loadFile(filePath).catch(() => {})
+      // 抬头跟随上传的文件名
+      try { mimicWindow.setTitle(mimicTitleFor(filePath)) } catch {}
+    }
     mimicWindow.show()
     mimicWindow.focus()
     return
@@ -1284,7 +1286,7 @@ function showMimicWindow(filePath) {
   mimicWindow = new BrowserWindow({
     width: 900,
     height: 640,
-    title: '工作面板',
+    title: mimicTitleFor(filePath),
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -1297,6 +1299,11 @@ function showMimicWindow(filePath) {
   } catch (err) {
     debugLog(`拟态窗口加载失败: ${err.message}`)
   }
+  // 文档自带 <title> 时保持抬头为上传文件名，不被覆盖
+  mimicWindow.on('page-title-updated', (e) => {
+    e.preventDefault()
+    try { mimicWindow.setTitle(mimicTitleFor(filePath)) } catch {}
+  })
   mimicWindow.on('closed', () => { mimicWindow = null })
   debugLog(`拟态窗口已创建: ${htmlPath}`)
 }
@@ -1348,10 +1355,6 @@ ipcMain.handle('select-mimic-file', async () => {
 // 退出时清理
 app.on('before-quit', () => {
   unregisterAllShortcuts()
-  if (preventSleepId !== null) {
-    try { powerSaveBlocker.stop(preventSleepId) } catch {}
-    preventSleepId = null
-  }
   destroyTray()
   if (mimicWindow && !mimicWindow.isDestroyed()) {
     try { mimicWindow.close() } catch {}

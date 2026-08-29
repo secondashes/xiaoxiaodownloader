@@ -152,7 +152,7 @@
 
       <!-- 未登录：登录表单 + 登录引导（打开登录页 / 一键抓取浏览器 Cookie） -->
       <template v-else>
-        <!-- Pawchive 用户名密码登录 -->
+        <!-- Pawchive 用户名密码登录（完整登录套件） -->
         <div v-if="site === 'pawchive'" class="pawchive-login-form">
           <n-input
             v-model:value="loginUsername"
@@ -180,18 +180,49 @@
           >
             {{ loginLoading ? '登录中...' : '登录' }}
           </n-button>
-          <div class="login-hint">登录后可使用"我的收藏"功能</div>
+          <n-button
+            size="small"
+            block
+            secondary
+            @click="emit('site-oauth-login', 'pawchive', { email: loginUsername.trim(), password: loginPassword })"
+          >
+            打开内置浏览器登录（推荐）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('pawchive', loginUsername, loginPassword)">
+            仅保存账号密码（加密存本机）
+          </n-button>
+          <div class="login-hint">
+            推荐直接用账号密码登录；"内置浏览器登录"在弹窗内完成后自动抓取会话；
+            账号密码加密保存在本机，下次打开自动回填。登录后可使用"我的收藏"功能
+          </div>
         </div>
 
-        <!-- Twitter/X webview 浏览器登录（推荐）+ 可选粘贴 Cookie -->
+        <!-- Twitter/X webview 浏览器登录（推荐）+ 账号密码保存 + 可选粘贴 Cookie -->
         <div v-if="site === 'twitter'" class="pawchive-login-form">
+          <n-input
+            v-model:value="twEmailInput"
+            size="small"
+            placeholder="X 登录账号（邮箱/手机号/用户名，可选）"
+            @keyup.enter="emit('site-oauth-login', 'twitter', { email: twEmailInput.trim(), password: twPasswordInput })"
+          />
+          <n-input
+            v-model:value="twPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码（可选，用于弹窗自动预填）"
+            @keyup.enter="emit('site-oauth-login', 'twitter', { email: twEmailInput.trim(), password: twPasswordInput })"
+          />
           <n-button
             size="small"
             type="primary"
             block
-            @click="emit('site-oauth-login', 'twitter')"
+            @click="emit('site-oauth-login', 'twitter', { email: twEmailInput.trim(), password: twPasswordInput })"
           >
             打开内置浏览器登录（推荐）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('twitter', twEmailInput, twPasswordInput)">
+            仅保存账号密码（加密存本机）
           </n-button>
           <n-input
             v-model:value="twCookieInput"
@@ -212,19 +243,37 @@
           </n-button>
           <div class="login-hint">
             推荐点上方按钮：弹出浏览器登录 x.com（邮箱/手机号/Google 皆可），
-            登录后点弹窗下方"确认"自动抓取 Cookie；国内网络需先在下方设置 X 站代理
+            已保存的账号密码会自动预填；登录后点弹窗下方"确认"自动抓取 Cookie；
+            国内网络需先在下方设置 X 站代理
           </div>
         </div>
 
-        <!-- ExHentai cookie 登录（推荐 webview 论坛登录，也可粘贴 cookie） -->
+        <!-- ExHentai cookie 登录（推荐 webview 论坛登录 + 账号密码保存 + 可粘贴 cookie） -->
         <div v-if="site === 'exhentai'" class="pawchive-login-form">
+          <n-input
+            v-model:value="exEmailInput"
+            size="small"
+            placeholder="E-Hentai 论坛用户名（可选）"
+            @keyup.enter="$emit('exhentai-webview-login', { email: exEmailInput.trim(), password: exPasswordInput })"
+          />
+          <n-input
+            v-model:value="exPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码（可选，用于弹窗自动预填）"
+            @keyup.enter="$emit('exhentai-webview-login', { email: exEmailInput.trim(), password: exPasswordInput })"
+          />
           <n-button
             size="small"
             type="primary"
             block
-            @click="$emit('exhentai-webview-login')"
+            @click="$emit('exhentai-webview-login', { email: exEmailInput.trim(), password: exPasswordInput })"
           >
             打开内置浏览器登录（推荐）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('exhentai', exEmailInput, exPasswordInput)">
+            仅保存账号密码（加密存本机）
           </n-button>
           <n-input
             v-model:value="exCookieInput"
@@ -244,12 +293,12 @@
             保存并验证登录
           </n-button>
           <div class="login-hint">
-            推荐点上方按钮：弹出浏览器登录 e-hentai 论坛账号（EX 账号即论坛账号），
+            推荐点上方按钮：弹出浏览器登录 e-hentai 论坛账号（EX 账号即论坛账号，已保存的账号密码自动预填），
             登录后点下方"确认"自动抓取 Cookie；也可在右侧"浏览器"视图登录后点"同步Cookie"
           </div>
         </div>
 
-        <!-- Iwara 邮箱密码登录（token 长期保存，自动续期） -->
+        <!-- Iwara 邮箱密码登录（token 长期保存，自动续期；完整登录套件） -->
         <div v-if="site === 'iwara'" class="pawchive-login-form">
           <n-input
             v-model:value="iwaraEmailInput"
@@ -277,8 +326,20 @@
           >
             {{ iwaraLoginLoading ? '登录中...' : '登录' }}
           </n-button>
+          <n-button
+            size="small"
+            block
+            secondary
+            @click="emit('site-oauth-login', 'iwara', { email: iwaraEmailInput.trim(), password: iwaraPasswordInput })"
+          >
+            打开内置浏览器登录（真人验证）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('iwara', iwaraEmailInput, iwaraPasswordInput)">
+            仅保存账号密码（加密存本机）
+          </n-button>
           <div class="login-hint">
-            Iwara 账号密码登录；不登录也可搜索与下载公开视频，登录可看私密/好友限定
+            Iwara 账号密码登录（token 失效自动用保存的密码续期）；遇到真人验证时点"内置浏览器登录"在弹窗内完成；
+            不登录也可搜索与下载公开视频，登录可看私密/好友限定
           </div>
           <!-- 未登录也可切换 IW站/AI站 内容（账号通用） -->
           <n-button-group size="tiny" class="iw-site-switch iw-site-switch-form">
@@ -297,8 +358,12 @@
           </n-button-group>
         </div>
 
-        <!-- Hanime1 邮箱密码登录（H站；登录后可用收藏/评论/用户中心） -->
+        <!-- Hanime1 邮箱密码登录（H站；真人验证站点；完整登录套件） -->
         <div v-if="site === 'hanime'" class="pawchive-login-form">
+          <div class="login-hint login-hint-warn">
+            ⚠ Hanime1 需要真人验证（hCaptcha）：登录被拦截或验证失败时，
+            点下方"打开内置浏览器登录"在弹窗内完成验证，会话自动保存
+          </div>
           <n-input
             v-model:value="hanimeEmailInput"
             size="small"
@@ -325,12 +390,24 @@
           >
             {{ hanimeLoginLoading ? '登录中...' : '登录' }}
           </n-button>
+          <n-button
+            size="small"
+            block
+            secondary
+            @click="emit('site-oauth-login', 'hanime', { email: hanimeEmailInput.trim(), password: hanimePasswordInput })"
+          >
+            打开内置浏览器登录（真人验证）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('hanime', hanimeEmailInput, hanimePasswordInput)">
+            仅保存账号密码（加密存本机）
+          </n-button>
           <div class="login-hint">
-            H站账号密码登录；不登录也可浏览/搜索/下载视频，登录可收藏（稍後觀看）、发表评论、查看觀看紀錄
+            H站账号密码登录（会话失效自动用保存的密码重登）；遇到真人验证时点"内置浏览器登录"在弹窗内完成；
+            不登录也可浏览/搜索/下载视频，登录可收藏（稍後觀看）、发表评论、查看觀看紀錄
           </div>
         </div>
 
-        <!-- ASMR-100 用户名密码登录（音声站；登录后可同步收藏） -->
+        <!-- ASMR-100 用户名密码登录（音声站；登录后可同步收藏；完整登录套件） -->
         <div v-if="site === 'asmr'" class="pawchive-login-form">
           <n-input
             v-model:value="asmrNameInput"
@@ -358,8 +435,20 @@
           >
             {{ asmrLoginLoading ? '登录中...' : '登录' }}
           </n-button>
+          <n-button
+            size="small"
+            block
+            secondary
+            @click="emit('site-oauth-login', 'asmr', { email: asmrNameInput.trim(), password: asmrPasswordInput })"
+          >
+            打开内置浏览器登录（真人验证）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('asmr', asmrNameInput, asmrPasswordInput)">
+            仅保存账号密码（加密存本机）
+          </n-button>
           <div class="login-hint">
-            ASMR-100 账号密码登录；不登录也可浏览/搜索/下载音声，登录可同步网站收藏夹
+            ASMR-100 账号密码登录（token 失效自动用保存的密码重登）；遇到真人验证时点"内置浏览器登录"在弹窗内完成；
+            不登录也可浏览/搜索/下载音声，登录可同步网站收藏夹
           </div>
         </div>
 
@@ -421,6 +510,9 @@
             @click="handleJdbLogin"
           >
             登录（弹窗内完成人机验证）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('javdb', jdbEmailInput, jdbPasswordInput)">
+            仅保存账号密码（加密存本机）
           </n-button>
           <div class="login-hint">
             JavDB 有 Cloudflare 验证，点登录后请在弹窗内完成验证并点击网站登录按钮；cookie 加密保存，约 7 天有效。
@@ -1547,27 +1639,6 @@
             </div>
           </div>
 
-          <!-- 不息屏开关 -->
-          <div class="setting-switch">
-            <div>
-              <div class="switch-label">不息屏模式</div>
-              <div class="switch-hint">开启后阻止系统进入休眠状态（下载时不息屏）</div>
-            </div>
-            <n-switch
-              :value="!!settings.prevent_display_sleep"
-              @update:value="v => handlePreventSleepToggle(v)"
-            />
-          </div>
-
-          <!-- 快捷键：切换不息屏 -->
-          <div class="shortcut-row">
-            <div class="shortcut-label">切换不息屏</div>
-            <div class="shortcut-current">{{ formatShortcut(settings.shortcut_toggle_prevent_sleep) }}</div>
-            <n-button size="tiny" quaternary @click="openShortcutRecorder('toggle_prevent_sleep')">
-              ⚙
-            </n-button>
-          </div>
-
           <!-- 快捷键：快速缩小到托盘 -->
           <div class="shortcut-row">
             <div class="shortcut-label">快速缩小到托盘</div>
@@ -1726,6 +1797,8 @@ const props = defineProps({
   // O3D / E站 表单初始值（来自加密凭据库的保存账号，密码一并回填）
   oreno3dCred: { type: Object, default: () => ({ email: '', password: '' }) },
   erommdtubeCred: { type: Object, default: () => ({ email: '', password: '' }) },
+  // 全站登录套件凭据回填（各站保存的账号密码：{站点: {email, password}}，登录表单预填）
+  siteCreds: { type: Object, default: () => ({}) },
   // 谷歌邮箱表单初始值（来自加密凭据库的保存邮箱）
   googleEmail: { type: String, default: '' },
   // 全站点登录信息（后端 login_info 事件：用户名/Cookie/账号档案）
@@ -1800,6 +1873,7 @@ const emit = defineEmits([
   // 谷歌邮箱（OAuth 授权共用凭据源）
   'google-save-cred',     // 保存账号密码（参数：邮箱, 密码）
   'oreno-save-cred',      // O3D/E站 保存账号密码（参数：site_key, 账号, 密码）
+  'site-save-cred',       // 通用保存账号密码（参数：站点 key, 账号, 密码）
   // 登录引导 / 账号档案
   'open-login-page',      // 打开登录页（参数：站点 key）
   'refresh-login',        // 重新检查登录状态（参数：站点 key）
@@ -1822,7 +1896,6 @@ const emit = defineEmits([
   'install-update',        // 运行已下载的更新安装包（覆盖安装即更新）
   // P3 设置功能
   'shortcut-change',        // 快捷键录入变更（参数：action, accelerator）
-  'prevent-sleep-change',   // 不息屏开关变更（参数：boolean）
 ])
 
 const message = useMessage()
@@ -2229,10 +2302,14 @@ function handleTwClearCache() {
 const loginUsername = ref('')
 const loginPassword = ref('')
 
-// X 登录：可选粘贴整段 Cookie（含 auth_token / ct0）
+// X 登录：账号密码（弹窗自动预填）+ 可选粘贴整段 Cookie（含 auth_token / ct0）
+const twEmailInput = ref('')
+const twPasswordInput = ref('')
 const twCookieInput = ref('')
 
-// ExHentai cookie 登录表单
+// ExHentai 登录表单：账号密码（弹窗自动预填）+ 可选粘贴 Cookie
+const exEmailInput = ref('')
+const exPasswordInput = ref('')
 const exCookieInput = ref('')
 
 // Iwara 邮箱密码登录表单
@@ -2276,6 +2353,32 @@ watch(() => props.loginInfo.javdb, (jdb) => {
     }
   }
 }, { immediate: true })
+
+// 全站登录套件凭据回填：siteCreds 里带保存的账号密码时自动填入各站登录表单
+//（仅空值时回填，不打断手动输入；表单状态自持，切换站点不丢）
+watch(() => props.siteCreds, (creds) => {
+  if (!creds) return
+  const fill = (emailRef, passRef, c) => {
+    if (c && c.email && !emailRef.value) emailRef.value = c.email
+    if (c && c.password && !passRef.value) passRef.value = c.password
+  }
+  fill(loginUsername, loginPassword, creds.pawchive)
+  fill(twEmailInput, twPasswordInput, creds.twitter)
+  fill(exEmailInput, exPasswordInput, creds.exhentai)
+  fill(iwaraEmailInput, iwaraPasswordInput, creds.iwara)
+  fill(hanimeEmailInput, hanimePasswordInput, creds.hanime)
+  fill(asmrNameInput, asmrPasswordInput, creds.asmr)
+  fill(jdbEmailInput, jdbPasswordInput, creds.javdb)
+}, { immediate: true })
+
+// 通用账号密码保存（全站登录套件：后端 site_save_cred 加密入库，下次启动回填）
+function handleSiteSaveCred(siteKey, email, password) {
+  if (!email || !email.trim()) {
+    message.warning('请输入账号（邮箱/用户名）')
+    return
+  }
+  emit('site-save-cred', siteKey, email.trim(), password || '')
+}
 
 // 谷歌邮箱凭据表单（设置区"登录谷歌邮箱"）
 const googleEmailInput = ref('')
@@ -2524,12 +2627,12 @@ function handleClearCache() {
 }
 
 // ============================
-// P3 设置功能：快捷键录入 / 不息屏 / 拟态模式
+// P3 设置功能：快捷键录入 / 拟态模式
 // ============================
 // 快捷键录入弹窗状态
 const shortcutRecorder = reactive({
   show: false,
-  action: '',                          // toggle_prevent_sleep | quick_minimize | toggle_mimic | toggle_float
+  action: '',                          // quick_minimize | toggle_mimic | toggle_float
   label: '',                           // 显示名
   current: '',                         // 当前已保存的 accelerator（Electron "+" 格式）
   candidate: '',                       // 本次录入捕获的 candidate
@@ -2537,7 +2640,6 @@ const shortcutRecorder = reactive({
   keydownHandler: null,
 })
 const shortcutLabels = {
-  toggle_prevent_sleep: '切换不息屏',
   quick_minimize: '快速缩小到托盘',
   toggle_mimic: '切换拟态模式',
   toggle_float: '切换悬浮窗',
@@ -2554,9 +2656,10 @@ function keyEventToAccelerator(e) {
   if (e.shiftKey) parts.push('Shift')
   if (e.altKey) parts.push('Alt')
   if (e.metaKey) parts.push('Super')
-  // 不让单独的修饰键作为快捷键
+  // 不让单独的修饰键作为快捷键（单按 Ctrl/Shift/Alt/Win 时忽略，等用户按出完整组合）
   const code = e.code || ''
   if (!code) return ''
+  if (/^(Control|Shift|Alt|Meta|OS)(Left|Right)?$/.test(code)) return ''
   let key = ''
   if (/^Digit\dd?$/.test(code) || /^Digit[0-9]$/.test(code)) {
     key = code.replace('Digit', '')
@@ -2611,6 +2714,8 @@ function startRecording() {
     document.removeEventListener('keydown', shortcutRecorder.keydownHandler, true)
   }
   shortcutRecorder.keydownHandler = (e) => {
+    // 忽略系统按键自动重复（长按/键盘重复率导致的重复 keydown）
+    if (e.repeat) return
     // 不阻止修饰键的默认行为，避免影响输入
     e.preventDefault()
     e.stopPropagation()
@@ -2635,24 +2740,23 @@ function clearShortcut() {
   shortcutRecorder.candidate = ''
   // 通知父组件清空
   emit('shortcut-change', shortcutRecorder.action, '')
+  shortcutRecorder.current = ''
+  message.success('快捷键已清空')
   shortcutRecorder.show = false
 }
 function confirmShortcut() {
   const acc = shortcutRecorder.candidate
   if (!acc) return
   emit('shortcut-change', shortcutRecorder.action, acc)
+  // 立即更新弹窗内显示（设置行显示由父组件 settings 流回）
+  shortcutRecorder.current = acc
+  message.success(`快捷键已保存：${formatShortcut(acc)}`)
   shortcutRecorder.show = false
 }
 // 关闭弹窗时停止录入
 watch(() => shortcutRecorder.show, (v) => {
   if (!v) stopRecording()
 })
-
-// 不息屏开关：保存设置 + 通知主进程
-function handlePreventSleepToggle(enabled) {
-  update('prevent_display_sleep', enabled)
-  emit('prevent-sleep-change', enabled)
-}
 
 // 拟态模式：选择文件
 async function selectMimicFile() {
@@ -2987,6 +3091,16 @@ html.light-mode .site-help-modal .site-help-pre {
 .login-hint {
   font-size: 11px;
   color: #5f5f5f;
+  text-align: center;
+}
+
+.login-hint-warn {
+  font-size: 11px;
+  color: #d4a017;
+  background: rgba(212, 160, 23, 0.08);
+  border: 1px solid rgba(212, 160, 23, 0.25);
+  border-radius: 4px;
+  padding: 5px 8px;
   text-align: center;
 }
 
