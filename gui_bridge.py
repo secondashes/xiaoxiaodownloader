@@ -11974,6 +11974,9 @@ DEFAULT_SETTINGS = {
     "pornhub_proxy": "http://127.0.0.1:10809",
     "xvideos_proxy": "",
     "javdb_proxy": "http://127.0.0.1:10809",
+    # 谷歌邮箱（OAuth 授权共用凭据源，国内必须代理）与 Oreno3D 登录会话
+    "google_proxy": "http://127.0.0.1:10809",
+    "oreno3d_proxy": "",
     # 每站点自定义子文件夹模板（留空=使用上方的组织规则；变量 {date}/{date_full}/{title}/{id}）
     "pawchive_folder_template": "",
     "exhentai_folder_template": "",
@@ -12622,8 +12625,13 @@ def _javdb_restore_session() -> None:
     _javdb_username = cred.get("username") or ""
 
 
-def javdb_set_cookies(cookie_str: str, user_agent: str = "", username: str = "") -> dict:
-    """保存 webview 抓取的 cookie（+ 登录时的 UA，cf_clearance 校验用）。"""
+def javdb_set_cookies(cookie_str: str, user_agent: str = "", username: str = "",
+                      email: str = "", password: str = "") -> dict:
+    """保存 webview 抓取的 cookie（+ 登录时的 UA，cf_clearance 校验用）。
+
+    email/password：webview 登录表单预填的账号密码，随 cookie 一起长期保存，
+    下次打开登录页自动回填（用户只需过 Cloudflare + 点登录）。
+    """
     cookies = {}
     for pair in (cookie_str or "").split(";"):
         pair = pair.strip()
@@ -12636,6 +12644,11 @@ def javdb_set_cookies(cookie_str: str, user_agent: str = "", username: str = "")
     cred = {"cookies": cookies, "cookie_str": cookie_str or "",
             "user_agent": user_agent or "", "username": username or "",
             "saved_at": time.time()}
+    # 账号密码长期记录（有新值就更新，没有就沿用旧值）
+    if email:
+        cred["email"] = email
+    if password:
+        cred["password"] = password
     _javdb_save_cred(cred)
     _javdb_restore_session()
     # 立即验证登录态（推送 site_login_result）
@@ -13028,7 +13041,7 @@ def is_javdb_url(url: str) -> bool:
 
 # 通用 webview OAuth 站点（xhamster/pornhub/xvideos）凭据存取（AP1 阶段）
 # cookie 字符串存 theme_cache.dat 的 creds[site]，具体 check_login/搜索/解析待 AP2/AP3/AP4 填充
-_GENERIC_OAUTH_SITES = ("xhamster", "pornhub", "xvideos")
+_GENERIC_OAUTH_SITES = ("xhamster", "pornhub", "xvideos", "google", "oreno3d")
 
 
 def _generic_save_cookies(site: str, cookie_str: str) -> dict:
@@ -13066,8 +13079,13 @@ def _generic_check_login(site: str, silent: bool = False) -> dict:
     """通用登录态检查（AP1 阶段占位：仅检查 cookie 是否存在；具体验证待 AP2/AP4 填充）。"""
     cred = _generic_load_cookies(site)
     cookies = cred.get("cookies") or {}
-    has_auth = bool(cookies)
-    username = cred.get("username") or ""  # AP2/AP4 时填充实际用户名提取
+    # google 用会话 cookie 严格判定（避免登录前的杂项 cookie 误判为已登录）
+    if site == "google":
+        has_auth = _google_has_auth(cookies)
+        username = cred.get("email") or ""
+    else:
+        has_auth = bool(cookies)
+        username = cred.get("username") or ""  # AP2/AP4 时填充实际用户名提取
     if not silent:
         emit({
             "event": "site_login_result",
@@ -13092,6 +13110,69 @@ def _generic_logout(site: str) -> None:
     })
 
 
+# ============================
+# 谷歌邮箱（OAuth 授权共用凭据源）
+# ============================
+# 登录判定 cookie：Google 会话核心（SID/HSID/SSID 任一 + SAPISID 即视为已登录）
+_GOOGLE_AUTH_COOKIES = ("SID", "HSID", "SSID")
+
+
+def google_save_cred(email: str, password: str) -> None:
+    """保存谷歌邮箱账号密码（cookie 保留不动；供内置浏览器登录时自动预填凭据）。"""
+    email = (email or "").strip()
+    if not email:
+        emit({"event": "site_login_result", "site": "google", "logged_in": False,
+              "message": "请输入谷歌邮箱地址"})
+        return
+    cred = _secure_store_read_cred("google")
+    cred["email"] = email
+    if password:
+        cred["password"] = password
+    cred["cred_saved_at"] = time.time()
+    _secure_store_write_cred("google", cred)
+    cookies = cred.get("cookies") or {}
+    logged_in = _google_has_auth(cookies)
+    emit({
+        "event": "site_login_result",
+        "site": "google",
+        "logged_in": logged_in,
+        "username": email,
+        "cookie_count": len(cookies),
+        "message": "谷歌邮箱账号密码已保存" + ("（cookie 已就绪，可给其他网站授权）" if logged_in else ""),
+    })
+    logging.info("谷歌邮箱凭据已保存: %s", email)
+    _emit_login_info()
+
+
+def google_check_login(silent: bool = False) -> dict:
+    """检查谷歌邮箱登录态（基于 cookie 判定，不做网络请求避免 Google 反爬误判）。"""
+    cred = _secure_store_read_cred("google")
+    cookies = cred.get("cookies") or {}
+    logged_in = _google_has_auth(cookies)
+    username = cred.get("email") or ""
+    if not silent:
+        emit({
+            "event": "site_login_result",
+            "site": "google",
+            "logged_in": logged_in,
+            "username": username,
+            "cookie_count": len(cookies),
+            "message": "谷歌邮箱已登录: " + username if logged_in else "谷歌邮箱未登录（请使用内置浏览器登录）",
+        })
+    return {"logged_in": logged_in, "username": username, "cookie_count": len(cookies)}
+
+
+def _google_has_auth(cookies: dict) -> bool:
+    """Google 登录判定：会话 cookie（SID/HSID/SSID）+ SAPISID 同时存在。"""
+    has_session = any(name in cookies for name in _GOOGLE_AUTH_COOKIES)
+    return has_session and "SAPISID" in cookies
+
+
+def google_get_cred() -> dict:
+    """读取谷歌邮箱凭据（email/password/cookies），给前端预填和 webview 注入用。"""
+    return _secure_store_read_cred("google")
+
+
 def _emit_login_info() -> None:
     accounts = _load_accounts()
     pa_cookies = {c.name: c.value for c in _pawchive_session.cookies}
@@ -13109,6 +13190,8 @@ def _emit_login_info() -> None:
         ("pornhub", bool(_generic_load_cookies("pornhub").get("cookies")), _generic_cookie_str("pornhub")),
         ("xvideos", bool(_generic_load_cookies("xvideos").get("cookies")), _generic_cookie_str("xvideos")),
         ("javdb", bool(_javdb_load_cred().get("cookies")), _javdb_load_cred().get("cookie_str") or ""),
+        ("google", _google_has_auth(_generic_load_cookies("google").get("cookies") or {}), _generic_cookie_str("google")),
+        ("oreno3d", bool(_generic_load_cookies("oreno3d").get("cookies")), _generic_cookie_str("oreno3d")),
     ):
         entry = accounts.get(site) or {}
         sites[site] = {
@@ -13118,6 +13201,16 @@ def _emit_login_info() -> None:
             "accounts": entry.get("profiles") or {},
             "active": entry.get("active") or "",
         }
+    # 谷歌邮箱：用户名 = 保存的邮箱（凭据库）
+    g_cred = _secure_store_read_cred("google")
+    if g_cred.get("email"):
+        sites["google"]["username"] = g_cred["email"]
+    # JavDB：回填保存的账号密码（前端登录表单预填）
+    j_cred = _javdb_load_cred()
+    if j_cred.get("email"):
+        sites["javdb"]["email"] = j_cred["email"]
+        if j_cred.get("password"):
+            sites["javdb"]["password"] = j_cred["password"]
     emit({"event": "login_info", "sites": sites})
 
 
@@ -13993,14 +14086,30 @@ async def command_loop() -> None:
             elif cmd == "delete_favorite":
                 delete_local_favorite(command.get("id", ""))
 
-            # ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos）----------
+            # ---------- 谷歌邮箱（OAuth 授权共用凭据源）----------
+            elif cmd == "google_save_cred":
+                # 设置区"登录谷歌邮箱"表单：保存账号密码（cookie 登录后自动补充）
+                google_save_cred(command.get("email", ""), command.get("password", ""))
+
+            elif cmd == "google_check_login":
+                google_check_login(bool(command.get("silent", False)))
+
+            # ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/google/oreno3d）----------
             # AP1 阶段：通用 set_cookies/check_login/logout/set_proxy，具体搜索/解析待 AP2/AP3/AP4
             elif cmd.endswith("_set_cookies") and cmd.rsplit("_set_cookies", 1)[0] in _GENERIC_OAUTH_SITES:
                 site = cmd.rsplit("_set_cookies", 1)[0]
                 cookie_str = command.get("cookie_str", "")
+                # google 登录成功后补记邮箱（凭据里保存的账号），便于展示与授权提示
+                if site == "google":
+                    g_cred = _secure_store_read_cred("google")
+                    if not g_cred.get("email"):
+                        g_cred["email"] = command.get("email", "") or ""
+                        if g_cred["email"]:
+                            _secure_store_write_cred("google", g_cred)
                 result = _generic_save_cookies(site, cookie_str)
                 if result.get("ok"):
                     _generic_check_login(site)  # 立即推送登录态
+                    _emit_login_info()          # 刷新左侧账号卡片（google/oreno3d 等）
 
             elif cmd.endswith("_check_login") and cmd.rsplit("_check_login", 1)[0] in _GENERIC_OAUTH_SITES:
                 site = cmd.rsplit("_check_login", 1)[0]
@@ -14021,10 +14130,13 @@ async def command_loop() -> None:
             # ---------- JavDB（javdb.com）----------
             elif cmd == "javdb_set_cookies":
                 # webview 登录成功后抓取的 cookie（+ UA，cf_clearance 校验绑定 UA）
+                # email/password：登录表单预填的账号密码，随 cookie 长期保存供下次回填
                 javdb_set_cookies(
                     command.get("cookie_str", ""),
                     command.get("user_agent", ""),
                     command.get("username", ""),
+                    command.get("email", ""),
+                    command.get("password", ""),
                 )
 
             elif cmd == "javdb_check_login":

@@ -87,6 +87,9 @@ contextBridge.exposeInMainWorld('api', {
   // 设置目标站 webview 会话代理
   siteSetProxy: (site, proxyRules) => ipcRenderer.invoke('site-set-proxy', site, proxyRules),
 
+  // 跨站凭据注入：把谷歌邮箱/X 的 cookie 复制进目标站会话（OAuth 授权跳转自动带凭据）
+  syncSharedCookies: (site) => ipcRenderer.invoke('sync-shared-cookies', site),
+
   // 向目标站 webview 会话注入 cookie（切换账号/恢复登录态时把后端存的 cookie 灌进 webview）
   siteSetCookies: (site, cookieStr) => ipcRenderer.invoke('site-set-cookies', site, cookieStr),
 

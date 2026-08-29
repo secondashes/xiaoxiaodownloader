@@ -68,10 +68,22 @@ const SITE_SESSIONS = {
   xvideos:  { partition: 'persist:xvideos', domains: ['.xvideos.com', '.xvideos-cdn.com'] },
   // JavDB：独立会话（webview 内完成邮箱密码登录 + Cloudflare 人机验证，"记住装置"后 cookie 约 7 天有效）
   javdb:    { partition: 'persist:javdb', domains: ['.javdb.com', '.jdbstatic.com'] },
+  // 谷歌邮箱：独立会话，登录后 cookie 是其他站 Google OAuth 授权的凭据源
+  // （authNames：SID/HSID/SSID + SAPISID 同时存在才算已登录）
+  google:   { partition: 'persist:google', domains: ['.google.com', '.accounts.google.com'], authNames: ['SID', 'SAPISID'] },
+  // Oreno3D：无强制账号体系，登录环节仅保存站点会话 cookie（个人浏览状态）
+  oreno3d:  { partition: 'persist:oreno3d', domains: ['.oreno3d.com'] },
   // ExHentai：与右侧浏览器视图共用 persist:exhentai 会话（cookie 互通）；
   // 登录走 e-hentai 论坛账号（forums.e-hentai.org），登录后自动下发 exhentai.org 的 ipb cookie
   exhentai: { partition: 'persist:exhentai', domains: ['.e-hentai.org', '.exhentai.org'], authNames: ['ipb_member_id', 'ipb_pass_hash'] },
 }
+
+// 跨站共享凭据源（OAuth 授权注入用）：打开某站登录弹窗前，把这些域的 cookie
+// 复制进目标站 partition，弹窗内点"使用 Google/X 登录"时自动带凭据跳转
+const SHARED_COOKIE_SOURCES = [
+  { partition: 'persist:google',  domains: ['.google.com', '.accounts.google.com'] },   // Google 授权
+  { partition: 'persist:twitter', domains: ['.x.com', '.twitter.com'] },                // X 授权
+]
 
 let pythonProcess = null
 let mainWindow = null
@@ -932,6 +944,47 @@ ipcMain.handle('site-get-cookies', async (event, site) => {
 ipcMain.handle('site-set-proxy', async (event, site, proxyRules) => {
   await setupSiteSession(site, proxyRules || null)
   return { ok: true }
+})
+
+// 跨站凭据注入（OAuth 授权链路）：打开目标站登录弹窗前调用。
+// 把谷歌邮箱（persist:google 的 .google.com cookie）和 X（persist:twitter 的
+// .x.com cookie）复制进目标站 partition —— 弹窗内点"使用 Google/X 登录"时
+// OAuth 跳转自动带凭据，无需在目标站重新输 Google/X 的账号密码。
+ipcMain.handle('sync-shared-cookies', async (event, site) => {
+  try {
+    const cfg = SITE_SESSIONS[site]
+    if (!cfg) return { ok: false, error: `未知站点: ${site}` }
+    const target = session.fromPartition(cfg.partition)
+    let injected = 0
+    for (const src of SHARED_COOKIE_SOURCES) {
+      // 源和目标同一 partition 时无需复制（xhamster/pornhub 本身就在 persist:twitter）
+      if (src.partition === cfg.partition) continue
+      const srcSes = session.fromPartition(src.partition)
+      for (const d of src.domains) {
+        const cs = await srcSes.cookies.get({ domain: d })
+        for (const c of cs) {
+          try {
+            await target.cookies.set({
+              url: `https://${d.replace(/^\./, '')}/`,
+              name: c.name,
+              value: c.value,
+              domain: c.domain || d,
+              path: c.path || '/',
+              secure: c.secure !== false,
+              httpOnly: !!c.httpOnly,
+              expirationDate: c.expirationDate,
+            })
+            injected++
+          } catch (e) { /* 个别 cookie（如 hostOnly 域不匹配）跳过 */ }
+        }
+      }
+    }
+    if (injected) debugLog(`已为 ${site} 注入 ${injected} 个共享凭据 cookie（Google/X 授权用）`)
+    return { ok: true, injected }
+  } catch (err) {
+    debugLog(`注入共享凭据失败(${site}): ${err.message}`)
+    return { ok: false, error: err.message }
+  }
 })
 
 // 向目标站 webview 会话注入 cookie 字符串（用于切换账号/恢复登录态时把后端存的 cookie 灌进 webview）

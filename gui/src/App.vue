@@ -32,9 +32,13 @@
             :pornhub-user="pornhubUser"
             :xvideos-user="xvideosUser"
             :javdb-user="javdbUser"
+            :google-user="googleUser"
+            :oreno3d-user="oreno3dUser"
+            :google-email="googleEmail"
             @site-oauth-login="handleSiteOAuthLogin"
             @site-logout="handleSiteLogout"
             @site-set-proxy="handleSiteSetProxy"
+            @google-save-cred="handleGoogleSaveCred"
             :login-info="loginInfo"
             :login-loading="pawchiveLoginLoading"
             :search-history="searchHistory"
@@ -831,6 +835,8 @@ const xhamsterUser = ref('')
 const pornhubUser = ref('')
 const xvideosUser = ref('')
 const javdbUser = ref('')
+const googleUser = ref('')      // 谷歌邮箱（OAuth 授权共用凭据源）
+const oreno3dUser = ref('')    // Oreno3D 会话状态（无账号体系，仅记录登录与否）
 // JavDB 视频详情（封面/预览图/磁力列表）+ 批量下载进度
 const javdbDetail = ref(null)
 const javdbDetailLoading = ref(false)
@@ -839,7 +845,7 @@ const javdbBatchProgress = reactive({ done: 0, total: 0 })
 // webview 登录弹窗（共用 WebviewLoginModal 组件）
 const wvLogin = reactive({
   visible: false,
-  site: '',                   // xhamster / pornhub / xvideos / javdb / exhentai
+  site: '',                   // xhamster / pornhub / xvideos / javdb / exhentai / google / oreno3d
   loginUrl: '',
   homeUrl: '',
   partition: 'persist:twitter',
@@ -848,6 +854,10 @@ const wvLogin = reactive({
   credentials: null,          // 登录页自动预填账号（javdb 邮箱密码登录）
   manualConfirm: false,       // 手动确认模式（EX：底部提示+确认按钮，用户点确认才抓 cookie）
 })
+
+// 谷歌邮箱凭据表单（设置区"登录谷歌邮箱"：保存账号密码 + 内置浏览器登录）
+const googleEmail = ref('')
+const googlePassword = ref('')
 
 
 // 当前站点对应的后端 site_key（oreno3d → 'oreno3d'，erommdtube → 'erommdtube'）
@@ -1025,6 +1035,9 @@ function handlePythonEvent(event) {
         window.api.sendCommand({ cmd: 'xvideos_check_login', silent: true })
         // 静默检查 JavDB 登录状态（cookie "记住装置"约 7 天，过期提示重新登录）
         window.api.sendCommand({ cmd: 'javdb_check_login', silent: true })
+        // 静默检查谷歌邮箱 / Oreno3D 登录状态（cookie 已持久化时自动恢复）
+        window.api.sendCommand({ cmd: 'google_check_login', silent: true })
+        window.api.sendCommand({ cmd: 'oreno3d_check_login', silent: true })
         // 加载 X 关注分类标签（本地持久化）
         window.api.sendCommand({ cmd: 'twitter_get_follow_tags' })
         // 加载 EX 隐藏标签列表（长期保存）
@@ -2023,6 +2036,10 @@ function handlePythonEvent(event) {
 
     case 'login_info':
       loginInfo.value = event.sites || {}
+      // 谷歌邮箱：回填设置区表单邮箱（来自加密凭据库；表单在 LeftPanel 内部自持状态）
+      if (loginInfo.value.google && loginInfo.value.google.username) {
+        googleEmail.value = loginInfo.value.google.username
+      }
       break
 
     case 'account_saved':
@@ -2315,10 +2332,13 @@ function handlePythonEvent(event) {
       if (!renameModal.visible) showNextRenamePrompt()
       break
 
-    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/javdb）登录结果 ----------
+    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/javdb/google/oreno3d）登录结果 ----------
     case 'site_login_result': {
       const siteKey = event.site
-      const userRefs = { xhamster: xhamsterUser, pornhub: pornhubUser, xvideos: xvideosUser, javdb: javdbUser }
+      const userRefs = {
+        xhamster: xhamsterUser, pornhub: pornhubUser, xvideos: xvideosUser,
+        javdb: javdbUser, google: googleUser, oreno3d: oreno3dUser,
+      }
       const userRef = userRefs[siteKey]
       if (event.logout) {
         if (userRef) userRef.value = ''
@@ -3278,7 +3298,7 @@ function handleOpenLoginPage(site) {
   const url = LOGIN_PAGE_URLS[site]
   if (url && window.api) {
     window.api.openExternal(url)
-    message.info('已打开登录页（推荐直接使用左侧"打开浏览器登录"按钮，登录后点"确认"自动抓取）')
+    message.info('已打开登录页（推荐直接使用左侧"打开内置浏览器登录"按钮，登录后点"确认"自动抓取）')
   }
 }
 
@@ -3972,6 +3992,25 @@ function handleSiteOAuthLogin(siteKey, creds) {
       captchaPatterns: [/challenge|captcha|turnstile|hcaptcha/i],
       manualConfirm: true,
     },
+    google: {
+      // 谷歌邮箱：登录后的 cookie 是其他站 Google OAuth 授权的凭据源；
+      // 登录判定不依赖 URL（Google 登录流程多跳转），用手动确认模式
+      loginUrl: 'https://accounts.google.com/',
+      homeUrl: 'https://myaccount.google.com/',
+      partition: 'persist:google',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha/i],
+      manualConfirm: true,
+    },
+    oreno3d: {
+      // Oreno3D：无强制账号体系，登录环节仅保存站点会话 cookie（个人浏览状态）
+      loginUrl: 'https://oreno3d.com/',
+      homeUrl: 'https://oreno3d.com/',
+      partition: 'persist:oreno3d',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|turnstile/i],
+      manualConfirm: true,
+    },
   }
   const cfg = configs[siteKey]
   if (!cfg) return
@@ -3982,8 +4021,8 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
   wvLogin.manualConfirm = !!cfg.manualConfirm
-  // javdb：邮箱密码登录，webview 登录页自动预填（用户只需完成人机验证并点登录）
-  wvLogin.credentials = (siteKey === 'javdb' && creds && creds.email) ? {
+  // javdb/google：邮箱密码登录，webview 登录页自动预填（用户只需完成验证并点登录）
+  wvLogin.credentials = ((siteKey === 'javdb' || siteKey === 'google') && creds && creds.email) ? {
     email: creds.email,
     password: creds.password || '',
   } : null
@@ -3994,18 +4033,47 @@ function handleSiteOAuthLogin(siteKey, creds) {
   if (window.api && proxyUrl) {
     window.api.siteSetProxy(siteKey, proxyUrl)
   }
+  // 跨站凭据注入：把谷歌邮箱/X 的 cookie 复制进目标站会话（OAuth 授权跳转自动带凭据）
+  // 场景：xhamster/pornhub/xvideos 用 Google/X 授权登录时无需重新输账号
+  if (window.api && window.api.syncSharedCookies) {
+    window.api.syncSharedCookies(siteKey).catch(() => { /* 注入失败不阻塞登录流程 */ })
+  }
 }
 
 // WebviewLoginModal 抓取 cookie 成功 → 发后端持久化 + 验证
 // （javdb 附带 webview UA：cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需同 UA）
 // （exhentai/twitter 后端命令读 cookies 字段，其他站读 cookie_str）
+// （javdb 同时回传登录表单的账号密码，长期保存供下次预填）
 function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   if (!window.api || !wvLogin.site) return
   const payload = { cmd: `${wvLogin.site}_set_cookies`, cookie_str: cookieStr }
   if (wvLogin.site === 'exhentai' || wvLogin.site === 'twitter') payload.cookies = cookieStr
   if (wvLogin.site === 'javdb' && userAgent) payload.user_agent = userAgent
+  if (wvLogin.site === 'javdb' && wvLogin.credentials) {
+    payload.email = wvLogin.credentials.email || ''
+    payload.password = wvLogin.credentials.password || ''
+  }
+  // 谷歌邮箱：带上保存的邮箱（后端凭据库补记，展示用）
+  if (wvLogin.site === 'google' && googleEmail.value) {
+    payload.email = googleEmail.value
+  }
   window.api.sendCommand(payload)
   addLog('系统', `${wvLogin.site} 抓取到 ${count} 个 cookie，已发给后端保存`)
+}
+
+// 谷歌邮箱账号密码保存（设置区"登录谷歌邮箱"表单）
+function handleGoogleSaveCred(email, password) {
+  if (!window.api) return
+  if (!email || !email.trim()) {
+    message.warning('请输入谷歌邮箱地址')
+    return
+  }
+  window.api.sendCommand({
+    cmd: 'google_save_cred',
+    email: email.trim(),
+    password: password || '',
+  })
+  addLog('系统', `谷歌邮箱账号密码已保存: ${email.trim()}`)
 }
 
 // 通用退出登录

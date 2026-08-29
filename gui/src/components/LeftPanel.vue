@@ -190,7 +190,7 @@
             block
             @click="emit('site-oauth-login', 'twitter')"
           >
-            打开浏览器登录（推荐）
+            打开内置浏览器登录（推荐）
           </n-button>
           <n-input
             v-model:value="twCookieInput"
@@ -223,7 +223,7 @@
             block
             @click="$emit('exhentai-webview-login')"
           >
-            打开浏览器登录（推荐）
+            打开内置浏览器登录（推荐）
           </n-button>
           <n-input
             v-model:value="exCookieInput"
@@ -370,11 +370,12 @@
             block
             @click="emit('site-oauth-login', site)"
           >
-            打开浏览器登录（推荐）
+            打开内置浏览器登录（推荐）
           </n-button>
           <div class="login-hint">
             {{ site === 'xhamster' ? 'xHamster' : 'Pornhub' }} 点上方按钮在弹出的浏览器内登录
-            （邮箱密码或 Twitter/X 授权皆可），登录后点弹窗下方"确认"自动抓取 Cookie
+            （邮箱密码 / Google / Twitter-X 授权皆可），登录后点弹窗下方"确认"自动抓取 Cookie。
+            已在设置中登录谷歌邮箱或 X 站时，选"使用 Google/X 登录"会自动带入凭据，无需重复输入
           </div>
         </div>
 
@@ -386,11 +387,12 @@
             block
             @click="emit('site-oauth-login', 'xvideos')"
           >
-            打开浏览器登录（推荐）
+            打开内置浏览器登录（推荐）
           </n-button>
           <div class="login-hint">
-            XVideos 点上方按钮在弹出的浏览器内登录（邮箱密码皆可，首次可能有人机验证，按提示完成），
-            登录后点弹窗下方"确认"自动抓取 Cookie；cookie 加密长期保存
+            XVideos 点上方按钮在弹出的浏览器内登录（邮箱密码 / Google 授权皆可，首次可能有人机验证，按提示完成），
+            登录后点弹窗下方"确认"自动抓取 Cookie；cookie 加密长期保存。
+            已在设置中登录谷歌邮箱时，选"使用 Google 登录"会自动带入凭据
           </div>
         </div>
 
@@ -420,7 +422,8 @@
             登录（弹窗内完成人机验证）
           </n-button>
           <div class="login-hint">
-            JavDB 有 Cloudflare 验证，点登录后请在弹窗内完成验证并点击网站登录按钮；cookie 加密保存，约 7 天有效
+            JavDB 有 Cloudflare 验证，点登录后请在弹窗内完成验证并点击网站登录按钮；cookie 加密保存，约 7 天有效。
+            邮箱密码也会加密记录在本机，下次打开自动回填（登录成功时自动保存，无需重复输入）
           </div>
         </div>
 
@@ -442,15 +445,15 @@
             {{ site === 'pawchive'
               ? '推荐直接用上方账号密码登录；一键抓取会自动读取浏览器登录信息'
               : site === 'twitter'
-                ? '推荐点上方"打开浏览器登录"在弹窗内登录 x.com，登录后点"确认"自动抓取'
+                ? '推荐点上方"打开内置浏览器登录"在弹窗内登录 x.com，登录后点"确认"自动抓取'
                 : site === 'iwara'
                   ? 'Iwara 使用邮箱密码登录（cookie 会过期，密码登录自动续期）；国内网络建议在设置里配置 Iwara 代理'
                   : site === 'hanime'
                     ? 'Hanime1 (H站) 使用邮箱密码登录；国内网络必须在设置里配置 H站代理'
                     : site === 'xhamster' || site === 'pornhub'
-                      ? '点上方"打开浏览器登录"在弹窗内登录（邮箱或 X 授权皆可），登录后点"确认"自动抓取 Cookie'
+                      ? '点上方"打开内置浏览器登录"在弹窗内登录（邮箱或 X 授权皆可），登录后点"确认"自动抓取 Cookie'
                       : site === 'xvideos'
-                        ? '点上方"打开浏览器登录"在弹窗内登录（首次可能有人机验证），登录后点"确认"自动抓取 Cookie'
+                        ? '点上方"打开内置浏览器登录"在弹窗内登录（首次可能有人机验证），登录后点"确认"自动抓取 Cookie'
                         : site === 'javdb'
                           ? '推荐用上方邮箱密码登录（自动预填 + 弹窗内完成 Cloudflare 验证）；国内必须配置下方 JavDB 代理'
                           : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
@@ -1094,8 +1097,23 @@
             </div>
           </template>
 
-          <!-- Oreno3D 专属设置（代理，默认直连） -->
+          <!-- Oreno3D 专属设置（登录会话 + 代理，默认直连） -->
           <template v-if="site === 'oreno3d'">
+            <div class="setting-item">
+              <div class="setting-label">
+                Oreno3D 登录会话
+                <n-tag v-if="oreno3dUser" size="small" type="success" round style="margin-left: 6px">已登录</n-tag>
+              </div>
+              <div style="display: flex; gap: 6px">
+                <n-button size="small" style="flex: 1" @click="$emit('site-oauth-login', 'oreno3d')">
+                  打开内置浏览器登录
+                </n-button>
+                <n-button v-if="oreno3dUser" size="small" quaternary type="error" @click="$emit('site-logout', 'oreno3d')">
+                  退出
+                </n-button>
+              </div>
+              <div class="switch-hint" style="margin-top: 4px">Oreno3D 不登录也可正常使用；登录仅保存站点会话 cookie（个人浏览状态），可在 Cloudflare 验证后免重复验证</div>
+            </div>
             <div class="setting-item">
               <div class="setting-label">Oreno3D (O3D) 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
               <n-input
@@ -1412,6 +1430,40 @@
           <n-divider style="margin: 16px 0 8px" />
           <div class="section-title">系统功能</div>
 
+          <!-- 登录谷歌邮箱（OAuth 授权共用凭据源：cookie 保存后可供 Xh/Por/Xv 等站授权调用） -->
+          <div class="setting-item">
+            <div class="setting-label">
+              登录谷歌邮箱
+              <n-tag v-if="googleUser" size="small" type="success" round style="margin-left: 6px">已登录</n-tag>
+            </div>
+            <n-input
+              v-model:value="googleEmailInput"
+              placeholder="谷歌邮箱地址（例：example@gmail.com）"
+              size="small"
+              style="margin-bottom: 6px"
+            />
+            <n-input
+              v-model:value="googlePasswordInput"
+              type="password"
+              show-password-on="click"
+              placeholder="密码（可选，加密保存在本机）"
+              size="small"
+              style="margin-bottom: 6px"
+            />
+            <div style="display: flex; gap: 6px">
+              <n-button size="small" type="primary" style="flex: 1" @click="handleGoogleSave">
+                保存账号密码
+              </n-button>
+              <n-button size="small" style="flex: 1" @click="emit('site-oauth-login', 'google', { email: googleEmailInput, password: googlePasswordInput })">
+                打开内置浏览器登录
+              </n-button>
+            </div>
+            <div class="setting-hint" style="font-size: 11px; color: #7f7f7f; margin-top: 4px">
+              登录后的谷歌 cookie 会加密保存，在其他网站选择"使用 Google 登录"时自动带入凭据；
+              Xh/Por/Xv 等站登录弹窗已支持此链路
+            </div>
+          </div>
+
           <!-- 关闭按钮行为（与关闭时弹窗的"记住我的选择"共用同一设置） -->
           <div class="setting-item">
             <div class="setting-label">关闭按钮行为</div>
@@ -1597,6 +1649,11 @@ const props = defineProps({
   xvideosUser: { type: String, default: '' },
   // JavDB 登录用户名
   javdbUser: { type: String, default: '' },
+  // 谷歌邮箱登录邮箱（OAuth 授权共用凭据源）/ O3D 会话状态
+  googleUser: { type: String, default: '' },
+  oreno3dUser: { type: String, default: '' },
+  // 谷歌邮箱表单初始值（来自加密凭据库的保存邮箱）
+  googleEmail: { type: String, default: '' },
   // 全站点登录信息（后端 login_info 事件：用户名/Cookie/账号档案）
   loginInfo: { type: Object, default: () => ({}) },
   loginLoading: { type: Boolean, default: false },
@@ -1662,6 +1719,8 @@ const emit = defineEmits([
   'site-oauth-login',     // 触发 webview OAuth 登录弹窗（参数：站点 key）
   'site-logout',          // 退出登录（参数：站点 key）
   'site-set-proxy',       // 修改代理（参数：站点 key, 代理地址）
+  // 谷歌邮箱（OAuth 授权共用凭据源）
+  'google-save-cred',     // 保存账号密码（参数：邮箱, 密码）
   // 登录引导 / 账号档案
   'open-login-page',      // 打开登录页（参数：站点 key）
   'fetch-cookies',        // 一键抓取浏览器 Cookie 并自动登录（参数：站点 key）
@@ -2118,6 +2177,28 @@ function handleAsmrLogin() {
 const jdbEmailInput = ref('')
 const jdbPasswordInput = ref('')
 const jdbRemember = ref(true)
+
+// JavDB 账号密码长期回填：login_info 里带保存的凭据时自动填入表单（仅空值时回填，不打断手动输入）
+watch(() => props.loginInfo.javdb, (jdb) => {
+  if (jdb && jdb.email && !jdbEmailInput.value) {
+    jdbEmailInput.value = jdb.email
+    if (jdb.password && !jdbPasswordInput.value) {
+      jdbPasswordInput.value = jdb.password
+    }
+  }
+}, { immediate: true })
+
+// 谷歌邮箱凭据表单（设置区"登录谷歌邮箱"）
+const googleEmailInput = ref('')
+const googlePasswordInput = ref('')
+// 初始邮箱来自加密凭据库（App.vue 从 login_info 提取传入）
+watch(() => props.googleEmail, (v) => {
+  if (v && !googleEmailInput.value) googleEmailInput.value = v
+}, { immediate: true })
+
+function handleGoogleSave() {
+  emit('google-save-cred', googleEmailInput.value, googlePasswordInput.value)
+}
 
 function handleJdbLogin() {
   if (!jdbEmailInput.value.trim() || !jdbPasswordInput.value) return

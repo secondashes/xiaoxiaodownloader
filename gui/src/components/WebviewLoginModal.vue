@@ -153,8 +153,11 @@ async function onNav(e) {
     // 等页面渲染稳定后抓 cookie（避免 cookie 还没 set 就抓）
     setTimeout(() => grabCookies(true), 800)
   }
-  // 3. 检测 OAuth 跳转到 x.com（X 站 cookie 自动授权中；twitter 自身登录时不提示）
+  // 3. 检测 OAuth 跳转到 x.com / accounts.google.com（共享凭据自动授权中；目标站自身登录时不提示）
   if (props.site !== 'twitter' && /twitter\.com|x\.com/i.test(url)) {
+    status.value = 'oauth'
+  }
+  if (props.site !== 'google' && /accounts\.google\.com/i.test(url)) {
     status.value = 'oauth'
   }
 }
@@ -182,8 +185,8 @@ async function prefillCredentials() {
           return true
         }
         const candidates = {
-          email: ['input#session_email', 'input[name="session[email]"]', 'input[type="email"]', 'input[name="email"]', 'input[name="user[email]"]', 'input[name="username"]'],
-          password: ['input#session_password', 'input[name="session[password]"]', 'input[type="password"]', 'input[name="password"]', 'input[name="user[password]"]'],
+          email: ['input#identifierId', 'input#session_email', 'input[name="session[email]"]', 'input[type="email"]', 'input[name="email"]', 'input[name="user[email]"]', 'input[name="username"]'],
+          password: ['input[name="Passwd"]', 'input#session_password', 'input[name="session[password]"]', 'input[type="password"]', 'input[name="password"]', 'input[name="user[password]"]'],
         }
         let filled = 0
         for (const sel of candidates.email) { if (setVal(document.querySelector(sel), ${JSON.stringify(creds.email)})) { filled++; break } }
