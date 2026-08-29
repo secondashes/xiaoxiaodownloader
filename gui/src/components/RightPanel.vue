@@ -2687,6 +2687,7 @@
               :key="item.album_url"
               class="search-card"
               @click="handlePaCardClick(item)"
+              @contextmenu.prevent="openPaContextMenu($event, item)"
             >
               <div class="thumb-wrapper">
                 <img
@@ -3364,6 +3365,25 @@
         </div>
       </div>
     </n-modal>
+
+    <!-- PA 右键属性菜单：下载画师所有内容 -->
+    <template v-if="paCtx.show">
+      <div class="pa-ctx-backdrop" @click="paCtx.show = false" @contextmenu.prevent="paCtx.show = false"></div>
+      <div
+        class="pa-ctx-menu"
+        :style="{ left: paCtx.x + 'px', top: paCtx.y + 'px' }"
+      >
+        <div class="pa-ctx-header" :title="paCtx.name">{{ paCtx.name || '画师' }}</div>
+        <div class="pa-ctx-item" @click="paCtxDownloadArtist">
+          <span class="pa-ctx-icon">⬇</span>
+          <span>下载画师所有内容</span>
+        </div>
+        <div class="pa-ctx-item" @click="paCtxCopyLink">
+          <span class="pa-ctx-icon">📋</span>
+          <span>复制画师链接</span>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -3563,6 +3583,7 @@ const emit = defineEmits([
   'pa-favorites',           // PA 我的收藏（服务器收藏，需登录）
   'pa-open-artist',         // 打开 PA 画师子项目列表（参数：画师 URL）
   'pa-close-artist',        // 关闭画师子项目视图（返回搜索结果）
+  'pa-download-artist',     // 右键下载画师所有内容（参数：{url, name}，后台解析并提交下载任务）
   'ex-add-hidden-tag',      // EX 添加隐藏标签（参数：标签名）
   'ex-delete-hidden-tag',  // EX 删除隐藏标签（参数：标签名）
   // X (Twitter) 关注事件（由 App.vue 转发给 Python 后端）
@@ -4046,6 +4067,46 @@ function handlePaCardClick(item) {
     emit('pa-open-post', item.album_url)
   } else {
     emit('pa-open-artist', item.album_url)
+  }
+}
+
+// ============================
+// PA 右键属性菜单（下载画师所有内容）
+// ============================
+const paCtx = ref({ show: false, x: 0, y: 0, url: '', name: '' })
+
+// 右键打开菜单：帖子卡片截断 /post/ 部分得到画师主页；画师卡片直接使用
+function openPaContextMenu(e, item) {
+  if (!item || !item.album_url) return
+  const url = item.album_url
+  const artistUrl = url.includes('/post/') ? url.split('/post/')[0] : url
+  const vw = window.innerWidth || 1200
+  const vh = window.innerHeight || 800
+  paCtx.value = {
+    show: true,
+    // 菜单尺寸约 200x110，防溢出屏幕
+    x: Math.max(8, Math.min(e.clientX, vw - 210)),
+    y: Math.max(8, Math.min(e.clientY, vh - 120)),
+    url: artistUrl,
+    name: item.album_name || '',
+  }
+}
+
+function paCtxDownloadArtist() {
+  const ctx = paCtx.value
+  ctx.show = false
+  if (!ctx.url) return
+  emit('pa-download-artist', { url: ctx.url, name: ctx.name })
+}
+
+async function paCtxCopyLink() {
+  const ctx = paCtx.value
+  ctx.show = false
+  if (!ctx.url) return
+  try {
+    await navigator.clipboard.writeText(ctx.url)
+  } catch {
+    /* 剪贴板不可用时静默失败（点击内容自动复制的场景已有提示） */
   }
 }
 
@@ -8581,5 +8642,76 @@ html.light-mode .reverse-item-url {
 
 html.light-mode .reverse-empty {
   color: #888;
+}
+
+/* ==================== PA 右键属性菜单 ==================== */
+.pa-ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.pa-ctx-menu {
+  position: fixed;
+  z-index: 1201;
+  min-width: 190px;
+  background: #26262b;
+  border: 1px solid #3a3a44;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+  user-select: none;
+}
+
+.pa-ctx-header {
+  font-size: 12px;
+  color: #7f7f7f;
+  padding: 6px 10px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid #2d2d33;
+  margin-bottom: 4px;
+}
+
+.pa-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: #d8d8de;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pa-ctx-item:hover {
+  background: #33333c;
+  color: #63e2b7;
+}
+
+.pa-ctx-icon {
+  font-size: 13px;
+  width: 16px;
+  text-align: center;
+}
+
+html.light-mode .pa-ctx-menu {
+  background: #fff;
+  border-color: #ddd;
+}
+
+html.light-mode .pa-ctx-header {
+  color: #999;
+  border-bottom-color: #eee;
+}
+
+html.light-mode .pa-ctx-item {
+  color: #333;
+}
+
+html.light-mode .pa-ctx-item:hover {
+  background: #f0f7f4;
+  color: #18a058;
 }
 </style>

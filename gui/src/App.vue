@@ -85,6 +85,7 @@
             @prevent-sleep-change="handlePreventSleepChange"
           />
           <RightPanel
+            v-show="!detailVisible"
             ref="rightPanelRef"
             :settings="settings"
             :site="settings.site || 'bunkr'"
@@ -331,23 +332,28 @@
             @ex-add-hidden-tag="handleExAddHiddenTag"
             @ex-delete-hidden-tag="handleExDeleteHiddenTag"
             @add-favorite="handleAddFavorite"
+            @pa-download-artist="handlePaDownloadArtist"
+          />
+
+          <!-- 迅雷式下载管理视图（左侧"下载状态"按钮切换，占据主内容区） -->
+          <DownloadManagerPanel
+            v-if="detailVisible"
+            :visible="detailVisible"
+            :tasks="downloadTasks"
+            :shutdown-on="shutdownOn"
+            :focus-task-id="detailTaskId"
+            :translated-titles="translatedTitles"
+            @close="detailVisible = false"
+            @pause="pauseTask"
+            @resume="resumeTask"
+            @resume-all="resumeAllTasks"
+            @cancel="cancelTask"
+            @remove="removeTask"
+            @toggle-shutdown="toggleShutdown"
+            @open-folder="handleOpenTaskFolder"
+            @locate-file="handleLocateTaskFile"
           />
         </div>
-
-        <!-- 主窗口内的详细下载内容面板（从下载管理窗口双击/右键跳转） -->
-        <DownloadManagerPanel
-          :visible="detailVisible"
-          :tasks="downloadTasks"
-          :shutdown-on="shutdownOn"
-          :focus-task-id="detailTaskId"
-          @close="detailVisible = false"
-          @pause="pauseTask"
-          @resume="resumeTask"
-          @resume-all="resumeAllTasks"
-          @cancel="cancelTask"
-          @remove="removeTask"
-          @toggle-shutdown="toggleShutdown"
-        />
 
         <!-- 下载重名手动改名弹窗（skip_duplicates + manual_rename 开启时触发） -->
         <n-modal v-model:show="renameModal.visible" preset="dialog" title="重名文件改名" style="width: 520px">
@@ -1222,6 +1228,21 @@ function handlePythonEvent(event) {
     case 'tasks_snapshot':
       downloadTasks.value = event.tasks || []
       updateFloatData()
+      break
+
+    case 'pa_artist_dl_progress':
+      addLog('PA', `画师「${event.artist || ''}」后台解析中: ${event.current || 0}/${event.total || 0} 个帖子`)
+      break
+
+    case 'pa_artist_dl_done':
+      message.success(`画师「${event.artist || ''}」解析完成，${event.files || 0} 个文件已加入后台下载`)
+      addLog('PA', `画师「${event.artist || ''}」下载任务已提交（${event.files || 0} 个文件）`)
+      requestTasks()
+      break
+
+    case 'pa_artist_dl_error':
+      message.error(event.message || '解析画师内容失败')
+      addLog('PA', `画师下载失败: ${event.message || '未知错误'}`)
       break
 
     case 'media_proxy_ready':
@@ -3186,6 +3207,20 @@ function handlePaCloseArtist() {
   paArtistPosts.value = null
 }
 
+// PA 右键"下载画师所有内容"：后台解析画师全部帖子并直接提交下载任务
+function handlePaDownloadArtist(payload) {
+  const artistUrl = payload?.url || payload
+  if (!window.api || !artistUrl) return
+  const options = JSON.parse(JSON.stringify(settings))
+  window.api.sendCommand({
+    cmd: 'pawchive_download_artist',
+    url: artistUrl,
+    options,
+  })
+  message.info('正在后台解析画师全部内容，完成后自动开始下载...')
+  addLog('PA', `右键下载画师所有内容: ${payload?.name || artistUrl}`)
+}
+
 // EX 隐藏标签：添加 / 删除（后端长期保存并回推最新列表）
 function handleExAddHiddenTag(tag) {
   if (!window.api || !tag) return
@@ -4569,10 +4604,35 @@ function requestTasks() {
   window.api.sendCommand({ cmd: 'get_tasks' })
 }
 
-// 打开独立下载管理器窗口（不再使用应用内覆盖层）
+// 切换迅雷式下载管理视图（占据主内容区，隐藏搜索面板）
 function toggleDownloadManager() {
-  if (window.api && window.api.showDownloadsWindow) {
-    window.api.showDownloadsWindow()
+  detailVisible.value = !detailVisible.value
+  if (detailVisible.value) {
+    requestTasks()
+  }
+}
+
+// 打开任务保存文件夹（后端在任务启动时记录 save_dir）
+function handleOpenTaskFolder(task) {
+  const dir = task && task.save_dir
+  if (!dir) {
+    message.warning('任务尚未开始下载，暂无保存文件夹')
+    return
+  }
+  if (window.api && window.api.openPath) {
+    window.api.openPath(dir)
+  }
+}
+
+// 在文件管理器中定位任务里的某个文件（文件下载后记录 _final_path）
+function handleLocateTaskFile(f) {
+  const fp = f && f._final_path
+  if (!fp) {
+    message.warning('文件尚未下载完成，暂无法定位')
+    return
+  }
+  if (window.api && window.api.showInFolder) {
+    window.api.showInFolder(fp)
   }
 }
 

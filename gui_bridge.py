@@ -2138,6 +2138,128 @@ async def pawchive_artist_posts(url: str) -> None:
         logging.exception("Pawchive 画师帖子列表获取失败")
 
 
+async def pawchive_download_artist(url: str, options: dict) -> None:
+    """右键「下载画师所有内容」：后台解析画师全部帖子的文件并提交一个下载任务。
+
+    与 pawchive_inspect 的画师分支共用抓取逻辑（缓存优先），但不进入前端
+    文件列表，直接把全部条目交给下载管理器后台执行。
+    """
+    info = _pawchive_parse_url(url)
+    if info is None:
+        emit({"event": "pa_artist_dl_error", "message": "无法识别的 Pawchive 画师链接"})
+        return
+    if info.get("kind") != "artist":
+        emit({"event": "pa_artist_dl_error", "message": "请提供画师主页链接"})
+        return
+
+    service = info["service"]
+    user_id = info["user_id"]
+    identifier = f"pawchive_{service}_{user_id}"
+
+    try:
+        # 缓存优先：之前解析过的画师直接复用（右键下载通常发生在浏览过的画师上）
+        cached = _load_album_cache(identifier)
+        if cached and cached.get("items"):
+            artist_name = cached.get("album_name") or user_id
+            items = cached.get("items", [])
+            logging.info(
+                "Pawchive 画师下载（缓存）: %s (%d 个文件)", artist_name, len(items),
+            )
+        else:
+            profile = await asyncio.to_thread(_pawchive_fetch_profile, service, user_id)
+            artist_name = (profile or {}).get("name") or user_id
+
+            # 分页拉取全部帖子（与 pawchive_inspect 相同）
+            posts: list[dict] = []
+            offset = 0
+            while True:
+                page_data = await asyncio.to_thread(
+                    _pawchive_fetch_json,
+                    f"/api/v1/{service}/user/{user_id}/posts",
+                    {"o": offset},
+                )
+                if not isinstance(page_data, list) or not page_data:
+                    break
+                posts.extend(page_data)
+                if len(page_data) < PAWCHIVE_PAGE_SIZE:
+                    break
+                offset += PAWCHIVE_PAGE_SIZE
+
+            if not posts:
+                emit({"event": "pa_artist_dl_error", "message": "没有找到任何帖子，请确认链接是否正确"})
+                return
+
+            total = len(posts)
+            emit({
+                "event": "pa_artist_dl_progress",
+                "current": 0,
+                "total": total,
+                "artist": artist_name,
+            })
+            logging.info("Pawchive 画师 '%s' 后台解析: %d 个帖子", artist_name, total)
+
+            semaphore = asyncio.Semaphore(INSPECT_CONCURRENCY)
+            results: list[dict] = []
+            completed_count = 0
+            count_lock = asyncio.Lock()
+
+            async def resolve_one(post: dict) -> None:
+                nonlocal completed_count
+                async with semaphore:
+                    if _pawchive_post_has_attachments(post) or (post.get("file") or {}).get("path"):
+                        post_items = _pawchive_post_items(post, artist_name, service, user_id)
+                    else:
+                        detail = await asyncio.to_thread(
+                            _pawchive_fetch_json,
+                            f"/api/v1/{service}/user/{user_id}/post/{post.get('id')}",
+                        )
+                        post_items = (
+                            _pawchive_post_items(detail, artist_name, service, user_id)
+                            if isinstance(detail, dict) else []
+                        )
+                    if post_items:
+                        results.extend(post_items)
+                    async with count_lock:
+                        completed_count += 1
+                        if completed_count % 10 == 0 or completed_count == total:
+                            emit({
+                                "event": "pa_artist_dl_progress",
+                                "current": completed_count,
+                                "total": total,
+                                "artist": artist_name,
+                            })
+
+            await asyncio.gather(*(resolve_one(p) for p in posts))
+            items = results
+            _save_album_cache(identifier, {
+                "album_name": artist_name,
+                "album_id": identifier,
+                "is_album": True,
+                "items": items,
+            })
+
+        if not items:
+            emit({"event": "pa_artist_dl_error", "message": "画师没有可下载的文件"})
+            return
+
+        # 后台提交下载任务（目录按画师名组织，文件按帖子标题分 子文件夹）
+        task_id = download_manager.submit(
+            url, items, options, artist_name, identifier,
+        )
+        download_manager.start(task_id)
+        emit({
+            "event": "pa_artist_dl_done",
+            "artist": artist_name,
+            "files": len(items),
+            "task_id": task_id,
+        })
+        logging.info("Pawchive 画师下载任务已提交: %s (%d 个文件)", artist_name, len(items))
+
+    except Exception as exc:
+        emit({"event": "pa_artist_dl_error", "message": f"解析画师内容失败: {exc}"})
+        logging.exception("Pawchive 画师下载解析失败")
+
+
 # ============================
 # Pawchive 下载目录规则
 # ============================
@@ -10061,6 +10183,8 @@ class DownloadManager:
                 album_path = build_album_directory(batch_parent, None, options)
             else:
                 album_path = build_album_directory(album_name, album_id, options)
+            # 记录任务实际保存目录（前端"打开对应文件夹"按钮使用）
+            task["save_dir"] = str(album_path)
 
             rate_limiter = RateLimiter(args.rate_limit * KB if args.rate_limit else None)
             session_info = SessionInfo(
@@ -13380,6 +13504,11 @@ async def command_loop() -> None:
 
             elif cmd == "pawchive_artist_posts":
                 await pawchive_artist_posts(command.get("url", ""))
+
+            elif cmd == "pawchive_download_artist":
+                await pawchive_download_artist(
+                    command.get("url", ""), command.get("options", {}),
+                )
 
             elif cmd == "exhentai_get_hidden_tags":
                 exhentai_get_hidden_tags()

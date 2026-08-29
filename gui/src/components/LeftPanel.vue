@@ -910,7 +910,7 @@
               :value="settings.concurrent_files"
               @update:value="v => update('concurrent_files', v)"
               :min="1"
-              :max="5"
+              :max="8"
               style="width: 100%"
             />
           </div>
