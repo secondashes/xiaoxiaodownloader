@@ -3402,7 +3402,7 @@ function handleRefreshLogin(site) {
   else if (site === 'iwara') window.api.sendCommand({ cmd: 'iwara_check_login' })
   else if (site === 'hanime') window.api.sendCommand({ cmd: 'hanime_check_login' })
   else if (site === 'asmr') window.api.sendCommand({ cmd: 'asmr_check_login', notify: true })
-  else if (['xhamster', 'pornhub', 'xvideos'].includes(site)) window.api.sendCommand({ cmd: `${site}_check_login`, notify: true })
+  else if (['xhamster', 'pornhub', 'xvideos', 'oreno3d', 'erommdtube'].includes(site)) window.api.sendCommand({ cmd: `${site}_check_login`, notify: true })
 }
 
 // 退出 ExHentai 登录（清除已保存 cookie）

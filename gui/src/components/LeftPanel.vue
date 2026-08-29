@@ -108,7 +108,7 @@
           <span class="account-line-label">Cookie</span>
           <span class="account-line-value account-cookie-value">{{ siteCookieStr ? (siteCookieStr.slice(0, 26) + '…') : '（空）' }}（点击复制）</span>
         </div>
-        <div class="account-profiles">
+        <div v-if="!isOrenoSite" class="account-profiles">
           <n-select
             size="tiny"
             :value="siteActiveAccount || null"
@@ -119,8 +119,9 @@
           />
         </div>
         <div class="account-actions">
-          <n-button size="tiny" @click="emit('save-account', site)">保存当前</n-button>
+          <n-button v-if="!isOrenoSite" size="tiny" @click="emit('save-account', site)">保存当前</n-button>
           <n-button
+            v-if="!isOrenoSite"
             size="tiny"
             tertiary
             type="error"
@@ -427,8 +428,74 @@
           </div>
         </div>
 
+        <!-- Oreno3D 登录会话（账号密码保存 + webview 会话登录） -->
+        <div v-if="site === 'oreno3d'" class="pawchive-login-form">
+          <n-input
+            v-model:value="oreno3dEmailInput"
+            size="small"
+            placeholder="Oreno3D 账号（邮箱/用户名）"
+            @keyup.enter="handleOrenoLogin('oreno3d')"
+          />
+          <n-input
+            v-model:value="oreno3dPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+            @keyup.enter="handleOrenoLogin('oreno3d')"
+          />
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="handleOrenoLogin('oreno3d')"
+          >
+            登录（弹窗内完成 Cloudflare 验证）
+          </n-button>
+          <n-button size="small" block @click="handleOrenoSave('oreno3d')">
+            仅保存账号密码（加密存本机）
+          </n-button>
+          <div class="login-hint">
+            Oreno3D 无强制账号体系，登录主要保存站点会话（Cloudflare 验证后免重复验证）；
+            账号密码加密保存在本机，下次打开自动回填。不登录也可正常浏览/搜索/下载
+          </div>
+        </div>
+
+        <!-- EroMMDTube 登录会话（账号密码保存 + webview 会话登录） -->
+        <div v-if="site === 'erommdtube'" class="pawchive-login-form">
+          <n-input
+            v-model:value="erommdtubeEmailInput"
+            size="small"
+            placeholder="EroMMDTube 账号（邮箱/用户名）"
+            @keyup.enter="handleOrenoLogin('erommdtube')"
+          />
+          <n-input
+            v-model:value="erommdtubePasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+            @keyup.enter="handleOrenoLogin('erommdtube')"
+          />
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="handleOrenoLogin('erommdtube')"
+          >
+            登录（弹窗内完成 Cloudflare 验证）
+          </n-button>
+          <n-button size="small" block @click="handleOrenoSave('erommdtube')">
+            仅保存账号密码（加密存本机）
+          </n-button>
+          <div class="login-hint">
+            EroMMDTube 无强制账号体系，登录主要保存站点会话（Cloudflare 验证后免重复验证）；
+            账号密码加密保存在本机，下次打开自动回填。不登录也可正常浏览/搜索/下载
+          </div>
+        </div>
+
         <!-- 登录引导：打开登录页 / 一键抓取 -->
-        <div class="login-guide">
+        <div v-if="site !== 'oreno3d' && site !== 'erommdtube'" class="login-guide">
           <n-button size="small" block secondary @click="emit('open-login-page', site)">
             打开登录页（浏览器）
           </n-button>
@@ -1098,40 +1165,8 @@
             </div>
           </template>
 
-          <!-- Oreno3D 专属设置（登录会话 + 账号密码保存 + 代理，默认直连） -->
+          <!-- Oreno3D 专属设置（代理，默认直连；登录会话卡在左侧顶部登录区） -->
           <template v-if="site === 'oreno3d'">
-            <div class="setting-item">
-              <div class="setting-label">
-                Oreno3D 登录会话
-                <n-tag v-if="oreno3dUser" size="small" type="success" round style="margin-left: 6px">已登录</n-tag>
-              </div>
-              <n-input
-                v-model:value="oreno3dEmailInput"
-                placeholder="账号（邮箱/用户名，加密保存在本机）"
-                size="small"
-                style="margin-bottom: 6px"
-              />
-              <n-input
-                v-model:value="oreno3dPasswordInput"
-                type="password"
-                show-password-on="click"
-                placeholder="密码（可选，加密保存在本机）"
-                size="small"
-                style="margin-bottom: 6px"
-              />
-              <div style="display: flex; gap: 6px">
-                <n-button size="small" type="primary" style="flex: 1" @click="handleOrenoSave('oreno3d')">
-                  保存账号密码
-                </n-button>
-                <n-button size="small" style="flex: 1" @click="emit('site-oauth-login', 'oreno3d', { email: oreno3dEmailInput, password: oreno3dPasswordInput })">
-                  打开内置浏览器登录
-                </n-button>
-                <n-button v-if="oreno3dUser" size="small" quaternary type="error" @click="$emit('site-logout', 'oreno3d')">
-                  退出
-                </n-button>
-              </div>
-              <div class="switch-hint" style="margin-top: 4px">Oreno3D 不登录也可正常使用；保存的账号密码与 cookie 会互相验证登录状态（会话有效即显示"已登录"），Cloudflare 验证后免重复验证</div>
-            </div>
             <div class="setting-item">
               <div class="setting-label">Oreno3D (O3D) 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
               <n-input
@@ -1144,40 +1179,8 @@
             </div>
           </template>
 
-          <!-- EroMMDTube 专属设置（登录会话 + 账号密码保存 + 代理，默认直连） -->
+          <!-- EroMMDTube 专属设置（代理，默认直连；登录会话卡在左侧顶部登录区） -->
           <template v-if="site === 'erommdtube'">
-            <div class="setting-item">
-              <div class="setting-label">
-                EroMMDTube 登录会话
-                <n-tag v-if="erommdtubeUser" size="small" type="success" round style="margin-left: 6px">已登录</n-tag>
-              </div>
-              <n-input
-                v-model:value="erommdtubeEmailInput"
-                placeholder="账号（邮箱/用户名，加密保存在本机）"
-                size="small"
-                style="margin-bottom: 6px"
-              />
-              <n-input
-                v-model:value="erommdtubePasswordInput"
-                type="password"
-                show-password-on="click"
-                placeholder="密码（可选，加密保存在本机）"
-                size="small"
-                style="margin-bottom: 6px"
-              />
-              <div style="display: flex; gap: 6px">
-                <n-button size="small" type="primary" style="flex: 1" @click="handleOrenoSave('erommdtube')">
-                  保存账号密码
-                </n-button>
-                <n-button size="small" style="flex: 1" @click="emit('site-oauth-login', 'erommdtube', { email: erommdtubeEmailInput, password: erommdtubePasswordInput })">
-                  打开内置浏览器登录
-                </n-button>
-                <n-button v-if="erommdtubeUser" size="small" quaternary type="error" @click="$emit('site-logout', 'erommdtube')">
-                  退出
-                </n-button>
-              </div>
-              <div class="switch-hint" style="margin-top: 4px">EroMMDTube 不登录也可正常使用；保存的账号密码与 cookie 会互相验证登录状态（会话有效即显示"已登录"），Cloudflare 验证后免重复验证</div>
-            </div>
             <div class="setting-item">
               <div class="setting-label">EroMMDTube (E站) 代理地址（浏览/搜索/下载都走此代理，留空 = 直连）</div>
               <n-input
@@ -1819,7 +1822,10 @@ watch(() => props.reversePaste, (v) => {
 // ============================
 // 登录状态（账号卡片）
 // ============================
-const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb'].includes(props.site))
+const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube'].includes(props.site))
+
+// O3D / E站（Oreno3D / EroMMDTube）：无账号体系，登录 = 保存站点会话（Cloudflare 免重复验证）
+const isOrenoSite = computed(() => props.site === 'oreno3d' || props.site === 'erommdtube')
 
 const siteLoggedIn = computed(() => {
   if (props.site === 'pawchive') return !!props.pawchiveUser
@@ -1832,6 +1838,8 @@ const siteLoggedIn = computed(() => {
   if (props.site === 'pornhub') return !!props.pornhubUser
   if (props.site === 'xvideos') return !!props.xvideosUser
   if (props.site === 'javdb') return !!props.javdbUser
+  if (props.site === 'oreno3d') return !!props.oreno3dUser
+  if (props.site === 'erommdtube') return !!props.erommdtubeUser
   return false
 })
 
@@ -1847,6 +1855,8 @@ const loginSubtitle = computed(() => {
   if (props.site === 'pornhub') return props.pornhubUser ? `Pornhub 已登录: ${props.pornhubUser}` : 'Pornhub 未登录'
   if (props.site === 'xvideos') return props.xvideosUser ? `XVideos 已登录: ${props.xvideosUser}` : 'XVideos 未登录'
   if (props.site === 'javdb') return props.javdbUser ? `JavDB 已登录: ${props.javdbUser}` : 'JavDB 未登录'
+  if (props.site === 'oreno3d') return props.oreno3dUser ? `O3D 已登录: ${props.oreno3dUser}` : 'Oreno3D 未登录'
+  if (props.site === 'erommdtube') return props.erommdtubeUser ? `E站已登录: ${props.erommdtubeUser}` : 'EroMMDTube 未登录'
   return ''
 })
 
@@ -1860,6 +1870,8 @@ const siteUsername = computed(() => {
   if (props.site === 'pornhub' && props.pornhubUser) return props.pornhubUser
   if (props.site === 'xvideos' && props.xvideosUser) return props.xvideosUser
   if (props.site === 'javdb' && props.javdbUser) return props.javdbUser
+  if (props.site === 'oreno3d' && props.oreno3dUser) return props.oreno3dUser
+  if (props.site === 'erommdtube' && props.erommdtubeUser) return props.erommdtubeUser
   return siteLoginInfo.value.username || ''
 })
 const siteCookieStr = computed(() => siteLoginInfo.value.cookie_str || '')
@@ -2179,7 +2191,7 @@ function handleSiteLogout() {
   else if (props.site === 'iwara') emit('iwara-logout')
   else if (props.site === 'hanime') emit('hanime-logout')
   else if (props.site === 'asmr') emit('asmr-logout')
-  else if (['xhamster', 'pornhub', 'xvideos', 'javdb'].includes(props.site)) emit('site-logout', props.site)
+  else if (['xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube'].includes(props.site)) emit('site-logout', props.site)
 }
 
 // 清除 Twitter 专属缓存（确认后执行，保留登录与关注分类）
@@ -2284,6 +2296,14 @@ function handleOrenoSave(siteKey) {
   const email = siteKey === 'erommdtube' ? erommdtubeEmailInput.value : oreno3dEmailInput.value
   const password = siteKey === 'erommdtube' ? erommdtubePasswordInput.value : oreno3dPasswordInput.value
   emit('oreno-save-cred', siteKey, email, password)
+}
+
+// O3D / E站 登录：打开 webview 弹窗（站点首页），完成 Cloudflare 验证后点"确认"保存会话；
+// 表单账号密码随 cookie 一起保存（下次自动回填）
+function handleOrenoLogin(siteKey) {
+  const email = (siteKey === 'erommdtube' ? erommdtubeEmailInput.value : oreno3dEmailInput.value).trim()
+  const password = siteKey === 'erommdtube' ? erommdtubePasswordInput.value : oreno3dPasswordInput.value
+  emit('site-oauth-login', siteKey, { email, password })
 }
 
 function handleJdbLogin() {
