@@ -6,6 +6,9 @@ gui/.cache/
 bunkr_bridge/
 dist/
 build/
+# 例外：gui/build/ 是 NSIS 安装包定制脚本（installer.nsh / xxd.app），必须入库
+!gui/build/
+!gui/build/**
 
 # 运行时数据与缓存
 cache/
