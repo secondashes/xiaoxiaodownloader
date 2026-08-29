@@ -3168,7 +3168,7 @@
       </div>
     </div>
 
-    <!-- 底部：下载进度 + 日志 -->
+    <!-- 底部：下载进度 + 日志 + 右侧实时下载滚动栏 -->
     <div class="bottom-area">
       <n-tabs type="line" size="small" :value="activeTab" @update:value="activeTab = $event">
         <n-tab-pane name="progress" tab="下载进度">
@@ -3229,6 +3229,24 @@
           </div>
         </n-tab-pane>
       </n-tabs>
+
+      <!-- 右侧：实时下载滚动信息（文件名 + 进度 + 速度，自动向上滚动） -->
+      <div class="dl-ticker">
+        <div class="dl-ticker-header">
+          <span class="dl-ticker-title">实时下载</span>
+          <span v-if="tickerTotalSpeedText" class="dl-ticker-total">{{ tickerTotalSpeedText }}</span>
+        </div>
+        <div class="dl-ticker-viewport">
+          <div v-if="tickerItems.length === 0" class="dl-ticker-empty">暂无下载任务</div>
+          <div v-else class="dl-ticker-track">
+            <div v-for="(item, i) in tickerLoopItems" :key="i" class="dl-ticker-item">
+              <span class="dl-ticker-name" :title="item.name">{{ item.name }}</span>
+              <span class="dl-ticker-pct">{{ item.percent }}%</span>
+              <span class="dl-ticker-speed">{{ item.speedText }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 磁力链接弹窗：选择种子 -> 获取磁力 -> 复制/打开 -->
@@ -5160,6 +5178,35 @@ function formatSpeed(bytesPerSecond) {
   if (!bytesPerSecond || bytesPerSecond <= 0) return ''
   return `${formatSize(bytesPerSecond)}/s`
 }
+
+// ============================
+// 右侧实时下载滚动栏（下载中的文件：文件名 + 进度 + 速度）
+// ============================
+const tickerItems = computed(() => {
+  const items = []
+  for (const [name, p] of Object.entries(props.downloadProgress || {})) {
+    if (p && p.status === 'downloading') {
+      items.push({
+        name,
+        percent: Math.round(p.completed || 0),
+        speedText: p.speed > 0 ? formatSpeed(p.speed) : '',
+      })
+    }
+  }
+  return items
+})
+
+// 内容复制一份拼接实现无缝循环滚动
+const tickerLoopItems = computed(() => tickerItems.value.concat(tickerItems.value))
+
+// 所有下载中文件的合计速度
+const tickerTotalSpeedText = computed(() => {
+  let total = 0
+  for (const p of Object.values(props.downloadProgress || {})) {
+    if (p && p.status === 'downloading') total += p.speed || 0
+  }
+  return total > 0 ? formatSpeed(total) : ''
+})
 
 function handleDeleteHistory(item, deleteFile) {
   const msg = deleteFile
@@ -7283,6 +7330,124 @@ html.light-mode .or-group-chip:hover {
   background: #1e1e22;
   padding: 0 16px;
   overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* 底部 tabs 限宽，右侧让位给实时下载滚动栏 */
+.bottom-area > .n-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ============ 右侧实时下载滚动栏 ============ */
+.dl-ticker {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #2d2d33;
+  padding: 6px 0 6px 12px;
+  overflow: hidden;
+}
+
+.dl-ticker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+.dl-ticker-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e0e0e6;
+}
+
+.dl-ticker-total {
+  font-size: 11px;
+  color: #63e2b7;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.dl-ticker-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.dl-ticker-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #6c6c75;
+}
+
+.dl-ticker-track {
+  display: flex;
+  flex-direction: column;
+  animation: dl-ticker-scroll 14s linear infinite;
+}
+
+.dl-ticker-viewport:hover .dl-ticker-track {
+  animation-play-state: paused; /* 悬停暂停方便看清 */
+}
+
+@keyframes dl-ticker-scroll {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+
+.dl-ticker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.dl-ticker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #c9c9d1;
+}
+
+.dl-ticker-pct {
+  color: #63e2b7;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  min-width: 34px;
+  text-align: right;
+}
+
+.dl-ticker-speed {
+  color: #63e2b7;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  min-width: 62px;
+  text-align: right;
+}
+
+html.light-mode .dl-ticker {
+  border-left-color: #e5e6eb;
+}
+
+html.light-mode .dl-ticker-title {
+  color: #1f2329;
+}
+
+html.light-mode .dl-ticker-name {
+  color: #5a5c66;
+}
+
+html.light-mode .dl-ticker-empty {
+  color: #8a8d99;
 }
 
 /* ============ 文件小方格视图 ============ */

@@ -98,8 +98,8 @@ contextBridge.exposeInMainWorld('api', {
   // 用指定浏览器打开网站（'chrome' | 'edge' | 'firefox' | ''=系统默认）
   openWithBrowser: (url, browser) => ipcRenderer.invoke('open-with-browser', url, browser),
 
-  // 一键抓取本机浏览器的登录 Cookie（参数：站点 key：twitter/exhentai/pawchive）
-  fetchCookies: (siteKey) => ipcRenderer.invoke('fetch-cookies', siteKey),
+  // 获取应用版本号（package.json version，用于更新检查对比）
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
 
   // P3 设置功能：托盘 / 全局快捷键 / 不息屏 / 拟态模式
   // 不息屏：开启/关闭 prevent-display-sleep

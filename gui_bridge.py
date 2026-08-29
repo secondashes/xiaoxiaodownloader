@@ -12830,10 +12830,18 @@ def _github_save_last_sha(sha: str) -> None:
         logging.warning("保存 GitHub last_sha 失败: %s", exc)
 
 
-def check_github_update() -> None:
-    """检查 GitHub 仓库 secondashes/xiaoxiaodownloader 的 main 分支最新 commit。
+def _version_tuple(v: str) -> tuple:
+    """把版本字符串（如 v1.2.21 / 1.2.21 / 1.2）解析为可比较的数字元组。"""
+    nums = re.findall(r"\d+", v or "")
+    return tuple(int(n) for n in nums[:3]) if nums else (0, 0, 0)
+
+
+def check_github_update(current_version: str = "") -> None:
+    """检查 GitHub 仓库 secondashes/xiaoxiaodownloader 的 main 分支最新 commit 与最新 release。
 
     国内访问 api.github.com 需走代理（github_proxy 设置）。成功 emit 'github_update_info'。
+    current_version：当前程序版本号（前端从 Electron app.getVersion() 取来），
+    与最新 release tag 比较生成 has_new_release（有新版安装包可下载）。
     """
     s = _load_settings()
     proxy = (s.get("github_proxy") or "").strip()
@@ -12884,9 +12892,26 @@ def check_github_update() -> None:
     local_sha = _github_last_sha()
     has_update = bool(sha) and (sha != local_sha)
 
+    # 4. release 安装包更新判定：最新 release tag 版本 > 当前程序版本
+    release_tag = latest_release.get("tag_name") or ""
+    # 找到 release 里的安装包附件（.exe），供前端直接下载
+    release_assets = []
+    for asset in (latest_release.get("assets") or []):
+        a_name = asset.get("name") or ""
+        if a_name.lower().endswith(".exe"):
+            release_assets.append({
+                "name": a_name,
+                "url": asset.get("browser_download_url") or "",
+                "size": asset.get("size") or 0,
+            })
+    has_new_release = bool(release_tag and release_assets) and (
+        _version_tuple(release_tag) > _version_tuple(current_version)
+    )
+
     emit({
         "event": "github_update_info",
         "ok": True,
+        "current_version": current_version or "",
         "latest_sha": sha,
         "latest_message": message,
         "latest_date": date,
@@ -12894,17 +12919,97 @@ def check_github_update() -> None:
         "latest_url": html_url,
         "local_sha": local_sha,
         "has_update": has_update,
+        "has_new_release": has_new_release,
         "is_first_check": not local_sha,
         "release": {
-            "tag": latest_release.get("tag_name") or "",
+            "tag": release_tag,
             "name": latest_release.get("name") or "",
             "url": latest_release.get("html_url") or "",
             "published_at": latest_release.get("published_at") or "",
             "body": (latest_release.get("body") or "")[:800],
+            "assets": release_assets,
         } if latest_release else None,
         "repo_url": f"https://github.com/{GITHUB_REPO}",
         "commits_url": f"https://github.com/{GITHUB_REPO}/commits/main",
     })
+
+
+# 更新包下载进行中标志（防止重复点击重复下载）
+_update_downloading = False
+
+
+def download_update(url: str, file_name: str = "") -> None:
+    """下载 GitHub Release 更新安装包到系统「下载」文件夹（流式 + 进度事件）。
+
+    emit 事件：
+    - update_download_progress { received, total, percent, speed, file_name }
+    - update_download_done { path, file_name, size }
+    - update_download_error { error }
+    """
+    global _update_downloading
+    url = (url or "").strip()
+    if not url:
+        emit({"event": "update_download_error", "error": "下载地址为空"})
+        return
+    if _update_downloading:
+        emit({"event": "update_download_error", "error": "已有更新包正在下载，请稍候"})
+        return
+    _update_downloading = True
+    try:
+        s = _load_settings()
+        proxy = (s.get("github_proxy") or "").strip()
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        # 保存目录：系统「下载」文件夹，不可用时退回当前目录
+        downloads_dir = Path.home() / "Downloads"
+        if not downloads_dir.is_dir():
+            downloads_dir = Path.cwd()
+        name = (file_name or "").strip() or os.path.basename(urlparse(url).path) or "小小下载器安装包.exe"
+        dest = downloads_dir / name
+        emit({"event": "update_download_progress", "received": 0, "total": 0,
+              "percent": 0, "speed": 0, "file_name": name, "path": str(dest), "started": True})
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"}
+        with requests.get(url, stream=True, proxies=proxies, timeout=(15, 60), headers=headers) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("Content-Length") or 0)
+            received = 0
+            start = time.time()
+            last_emit = 0.0
+            with open(dest, "wb") as f:
+                for chunk in r.iter_content(chunk_size=512 * 1024):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    received += len(chunk)
+                    now = time.time()
+                    if now - last_emit >= 0.5:  # 限频推送进度，避免刷爆事件通道
+                        speed = received / max(now - start, 0.001)
+                        percent = round(received * 100 / total, 1) if total else 0
+                        emit({"event": "update_download_progress", "received": received,
+                              "total": total, "percent": percent, "speed": round(speed, 1),
+                              "file_name": name, "path": str(dest)})
+                        last_emit = now
+        emit({"event": "update_download_done", "path": str(dest), "file_name": name,
+              "size": received, "total": total})
+        logging.info("更新安装包已下载: %s（%.1f MB）", dest, received / 1048576)
+    except Exception as exc:
+        logging.exception("更新安装包下载失败")
+        emit({"event": "update_download_error", "error": f"下载失败：{exc}"})
+    finally:
+        _update_downloading = False
+
+
+def open_update_installer(path: str) -> None:
+    """运行已下载的更新安装包（NSIS 覆盖安装即更新）。"""
+    path = (path or "").strip()
+    if not path or not Path(path).is_file():
+        emit({"event": "update_download_error", "error": "安装包文件不存在，请重新下载"})
+        return
+    try:
+        os.startfile(path)  # noqa: S606 Windows 默认关联运行 exe
+        emit({"event": "update_installer_launched", "path": path})
+    except Exception as exc:
+        logging.exception("运行更新安装包失败")
+        emit({"event": "update_download_error", "error": f"运行安装包失败：{exc}"})
 
 
 def github_mark_update_done(sha: str) -> None:
@@ -14501,7 +14606,19 @@ async def command_loop() -> None:
                 )
 
             elif cmd == "check_github_update":
-                await asyncio.to_thread(check_github_update)
+                await asyncio.to_thread(check_github_update, command.get("current_version", ""))
+
+            elif cmd == "download_update":
+                # 下载 GitHub Release 更新安装包（流式 + 进度事件），放线程池避免阻塞命令循环
+                await asyncio.to_thread(
+                    download_update,
+                    command.get("url", ""),
+                    command.get("file_name", ""),
+                )
+
+            elif cmd == "open_update_installer":
+                # 运行已下载的更新安装包（NSIS 覆盖安装即更新）
+                await asyncio.to_thread(open_update_installer, command.get("path", ""))
 
             elif cmd == "github_mark_update_done":
                 await asyncio.to_thread(github_mark_update_done, command.get("sha", ""))

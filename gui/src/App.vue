@@ -73,7 +73,6 @@
             @exhentai-webview-login="handleSiteOAuthLogin('exhentai')"
             @exhentai-logout="handleExLogout"
             @open-login-page="handleOpenLoginPage"
-            @fetch-cookies="handleFetchCookies"
             @refresh-login="handleRefreshLogin"
             @save-account="handleSaveAccount"
             @switch-account="handleSwitchAccount"
@@ -89,6 +88,10 @@
             @check-github-update="handleCheckGithubUpdate"
             :github-update-info="githubUpdateInfo"
             :github-checking="githubChecking"
+            :app-version="appVersion"
+            :update-download="updateDownload"
+            @download-update="handleDownloadUpdate"
+            @install-update="handleInstallUpdate"
             @shortcut-change="handleShortcutChange"
             @prevent-sleep-change="handlePreventSleepChange"
           />
@@ -654,10 +657,14 @@ watch(() => settings.auto_translate_to, v => {
 
 
 // GitHub 仓库更新检查结果（左侧设置区）
-// {ok, latest_sha, latest_message, latest_date, latest_author, latest_url, local_sha, has_update, is_first_check, release, repo_url, commits_url, error}
+// {ok, latest_sha, latest_message, latest_date, latest_author, latest_url, local_sha, has_update, has_new_release, current_version, release:{tag,assets}, repo_url, commits_url, error}
 const githubUpdateInfo = ref(null)
 // 检查进行中标志（仅手动点击"检查更新"时为 true；启动后不发任何 GitHub 请求）
 const githubChecking = ref(false)
+// 当前程序版本号（Electron app.getVersion()，与 release tag 对比）
+const appVersion = ref('')
+// 更新安装包下载状态：{ downloading, received, total, percent, speed, fileName, path, done, error }
+const updateDownload = reactive({ downloading: false, received: 0, total: 0, percent: 0, speed: 0, fileName: '', path: '', done: false, error: '' })
 // 后台批量收集锁定：批量解析收集过文件后不自动切换到文件列表视图（静默后台下载），
 // 用户点"返回"/新搜索/导航切换时解锁
 const batchFileCollected = ref(false)
@@ -2204,6 +2211,44 @@ function handlePythonEvent(event) {
       githubUpdateInfo.value = event
       break
 
+    case 'update_download_progress':
+      // 更新安装包下载进度（后端流式推送，限频 0.5s）
+      updateDownload.downloading = true
+      updateDownload.received = event.received || 0
+      updateDownload.total = event.total || updateDownload.total || 0
+      updateDownload.percent = event.percent || 0
+      updateDownload.speed = event.speed || 0
+      updateDownload.fileName = event.file_name || updateDownload.fileName
+      updateDownload.path = event.path || updateDownload.path
+      break
+
+    case 'update_download_done':
+      // 更新安装包下载完成
+      updateDownload.downloading = false
+      updateDownload.done = true
+      updateDownload.percent = 100
+      updateDownload.received = event.size || updateDownload.received
+      updateDownload.total = event.total || updateDownload.total
+      updateDownload.path = event.path || updateDownload.path
+      updateDownload.fileName = event.file_name || updateDownload.fileName
+      updateDownload.speed = 0
+      message.success('更新安装包下载完成，点"立即安装"覆盖更新（数据不丢失）')
+      addLog('完成', `更新安装包已下载: ${updateDownload.fileName}`)
+      break
+
+    case 'update_download_error':
+      // 更新安装包下载/运行失败
+      updateDownload.downloading = false
+      updateDownload.error = event.error || '下载失败'
+      message.error(`更新下载失败: ${updateDownload.error}`)
+      addLog('错误', `更新下载失败: ${updateDownload.error}`)
+      break
+
+    case 'update_installer_launched':
+      // 更新安装包已运行（NSIS 向导接管，覆盖安装即更新）
+      message.info('更新安装程序已启动，按提示完成覆盖安装（登录与下载数据保留）')
+      break
+
     case 'github_update_marked':
       // 用户已确认更新完成 → 仅记录基准，不再自动连 GitHub（手动点击才检查）
       if (githubUpdateInfo.value && typeof githubUpdateInfo.value === 'object') {
@@ -3124,7 +3169,37 @@ function handleCheckGithubUpdate() {
   if (!window.api) return
   githubChecking.value = true       // 显式 loading（请求失败/超时由后端事件复位）
   githubUpdateInfo.value = null    // 清空旧结果
-  window.api.sendCommand({ cmd: 'check_github_update' })
+  window.api.sendCommand({ cmd: 'check_github_update', current_version: appVersion.value || '' })
+}
+
+// 下载最新版安装包（后端流式下载到系统「下载」文件夹，进度通过 update_download_progress 事件推送）
+function handleDownloadUpdate() {
+  if (!window.api || updateDownload.downloading) return
+  const assets = githubUpdateInfo.value?.release?.assets || []
+  const asset = assets.find(a => a.url) || assets[0]
+  if (!asset || !asset.url) {
+    message.error('未找到安装包下载地址，请到仓库主页手动下载')
+    return
+  }
+  // 复位下载状态
+  updateDownload.downloading = true
+  updateDownload.received = 0
+  updateDownload.total = asset.size || 0
+  updateDownload.percent = 0
+  updateDownload.speed = 0
+  updateDownload.fileName = asset.name || ''
+  updateDownload.path = ''
+  updateDownload.done = false
+  updateDownload.error = ''
+  window.api.sendCommand({ cmd: 'download_update', url: asset.url, file_name: asset.name || '' })
+  addLog('系统', `开始下载更新安装包: ${asset.name || asset.url}`)
+}
+
+// 运行已下载的更新安装包（NSIS 覆盖安装即更新）
+function handleInstallUpdate() {
+  if (!window.api || !updateDownload.path) return
+  window.api.sendCommand({ cmd: 'open_update_installer', path: updateDownload.path })
+  addLog('系统', `已运行更新安装包: ${updateDownload.path}（按提示覆盖安装，data 数据不会丢失）`)
 }
 
 // ============================
@@ -3364,32 +3439,6 @@ function handleOpenLoginPage(site) {
   if (url && window.api) {
     window.api.openExternal(url)
     message.info('已打开登录页（推荐直接使用左侧"打开内置浏览器登录"按钮，登录后点"确认"自动抓取）')
-  }
-}
-
-// 一键抓取：调用 fetch_cookies.py 从本机浏览器解密 Cookie 并自动登录
-async function handleFetchCookies(site) {
-  if (!window.api || !window.api.fetchCookies) {
-    message.error('当前环境不支持一键抓取，请双击根目录"抓取Cookie.bat"获取后粘贴')
-    return
-  }
-  message.info('正在从本机浏览器抓取 Cookie（首次可能需要十几秒）...')
-  try {
-    const result = await window.api.fetchCookies(site)
-    if (!result || !result.ok) {
-      message.error(`抓取失败：${(result && result.error) || '未知错误'}`)
-      addLog('错误', `Cookie 抓取失败（${site}）: ${(result && result.error) || ''}`)
-      return
-    }
-    message.success(`已从 ${result.source || '浏览器'} 抓取到 Cookie，正在验证登录...`)
-    addLog('系统', `Cookie 抓取成功（${site}，来源 ${result.source || '未知'}）`)
-    if (site === 'exhentai') {
-      window.api.sendCommand({ cmd: 'exhentai_set_cookies', cookies: result.cookie_str })
-    } else if (site === 'pawchive') {
-      window.api.sendCommand({ cmd: 'pawchive_set_cookies', cookies: result.cookie_str })
-    }
-  } catch (err) {
-    message.error(`抓取出错: ${err.message || err}`)
   }
 }
 
@@ -5010,6 +5059,12 @@ onMounted(() => {
   } else {
     console.error('[App] window.api 或 onEvent 不可用')
     addLog('错误', '无法连接后端：window.api 不可用')
+  }
+  // 获取当前程序版本号（设置区更新检查对比用）
+  if (window.api && window.api.getAppVersion) {
+    window.api.getAppVersion().then((v) => {
+      appVersion.value = v || ''
+    }).catch(() => { /* 开发环境下取不到也不影响 */ })
   }
   // 悬浮窗被关闭时，同步设置里的开关状态
   if (window.api && window.api.onFloatClosed) {

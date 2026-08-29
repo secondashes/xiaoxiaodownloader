@@ -1045,62 +1045,9 @@ ipcMain.handle('site-set-cookies', async (event, site, cookieStr) => {
 })
 
 // ============================
-// 一键抓取浏览器 Cookie（运行 fetch_cookies.py --json <站点名>）
+// 应用版本号（更新检查用：渲染进程拿 package.json version 与最新 release 对比）
 // ============================
-// 供运行脚本用的系统 Python 查找（不复用 findPythonPath：打包模式下它返回的是后端 exe）
-function findPythonForScript() {
-  const candidates = []
-  for (const cmd of ['python', 'python3', 'py']) {
-    try {
-      const output = execSync(`where ${cmd}`, {
-        encoding: 'utf-8', timeout: 5000, windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      for (const line of output.trim().split(/\r?\n/)) {
-        const p = line.trim()
-        if (p && p.toLowerCase().endsWith('.exe') && !p.toLowerCase().includes('windowsapps')) {
-          if (!candidates.includes(p)) candidates.push(p)
-        }
-      }
-    } catch (e) { /* where 找不到该命令，跳过 */ }
-  }
-  for (const p of candidates) {
-    if (verifyPythonCandidate(p)) return p
-  }
-  return ''
-}
-
-const FETCH_SITE_NAMES = { twitter: 'X (Twitter)', exhentai: 'ExHentai', pawchive: 'Pawchive' }
-
-ipcMain.handle('fetch-cookies', async (event, siteKey) => {
-  const siteName = FETCH_SITE_NAMES[siteKey]
-  if (!siteName) return { ok: false, error: '未知站点' }
-  const root = getProjectRoot()
-  const script = path.join(root, 'fetch_cookies.py')
-  if (!fs.existsSync(script)) {
-    return { ok: false, error: '未找到 fetch_cookies.py（请确认文件在程序根目录）' }
-  }
-  const pythonExe = findPythonForScript()
-  if (!pythonExe) {
-    return { ok: false, error: '未找到 Python（新版加密 Cookie 需要它解密）。可右键管理员运行 抓取Cookie.bat，再把结果粘贴到登录框' }
-  }
-  try {
-    const out = execFileSync(pythonExe, [script, '--json', siteName], {
-      encoding: 'utf-8',
-      timeout: 180000,
-      windowsHide: true,
-      cwd: root,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-    })
-    // 兼容个别库在 JSON 前打印提示行的情况：取最后一行以 { 开头的输出
-    const jsonLine = out.trim().split(/\r?\n/).filter((l) => l.trim().startsWith('{')).pop()
-    if (!jsonLine) return { ok: false, error: '抓取输出解析失败' }
-    return JSON.parse(jsonLine)
-  } catch (e) {
-    debugLog(`fetch-cookies 执行失败: ${e.message}`)
-    return { ok: false, error: `抓取执行失败: ${e.message}` }
-  }
-})
+ipcMain.handle('get-app-version', () => app.getVersion())
 
 // ============================
 // P3 设置功能：托盘 / 全局快捷键 / 不息屏 / 拟态模式

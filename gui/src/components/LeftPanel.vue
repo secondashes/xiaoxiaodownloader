@@ -494,23 +494,14 @@
           </div>
         </div>
 
-        <!-- 登录引导：打开登录页 / 一键抓取 -->
+        <!-- 登录引导：打开登录页 -->
         <div v-if="site !== 'oreno3d' && site !== 'erommdtube'" class="login-guide">
           <n-button size="small" block secondary @click="emit('open-login-page', site)">
             打开登录页（浏览器）
           </n-button>
-          <n-button
-            v-if="site !== 'iwara' && site !== 'hanime' && site !== 'twitter' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'"
-            size="small"
-            block
-            type="primary"
-            @click="emit('fetch-cookies', site)"
-          >
-            一键抓取浏览器 Cookie（自动登录）
-          </n-button>
           <div class="login-hint">
             {{ site === 'pawchive'
-              ? '推荐直接用上方账号密码登录；一键抓取会自动读取浏览器登录信息'
+              ? '推荐直接用上方账号密码登录'
               : site === 'twitter'
                 ? '推荐点上方"打开内置浏览器登录"在弹窗内登录 x.com，登录后点"确认"自动抓取'
                 : site === 'iwara'
@@ -523,9 +514,8 @@
                         ? '点上方"打开内置浏览器登录"在弹窗内登录（首次可能有人机验证），登录后点"确认"自动抓取 Cookie'
                         : site === 'javdb'
                           ? '推荐用上方邮箱密码登录（自动预填 + 弹窗内完成 Cloudflare 验证）；国内必须配置下方 JavDB 代理'
-                          : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
+                          : '推荐点上方"打开内置浏览器登录"在弹窗内登录 exhentai.org，登录后点"确认"自动抓取' }}
           </div>
-          <div v-if="site !== 'iwara' && site !== 'hanime' && site !== 'twitter' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
         </div>
 
         <!-- 未登录但保存过账号档案：直接选择切换即可恢复登录（当前账号过期也能换） -->
@@ -1405,6 +1395,7 @@
           <n-divider style="margin: 8px 0" />
           <div class="section-title">检查更新（GitHub）</div>
           <div class="setting-item">
+            <div class="setting-label">当前版本：{{ appVersion || '（开发模式）' }}</div>
             <div class="setting-label">GitHub 代理地址（国内访问需代理）</div>
             <n-input
               :value="settings.github_proxy"
@@ -1429,14 +1420,41 @@
           <div v-else-if="githubError" class="github-update-err">{{ githubError }}</div>
           <div v-else-if="!githubInfo" class="github-update-tip">未检查（点上方"检查更新"手动获取；仓库未公开前可能无法访问）</div>
           <div v-else class="github-update-box">
-            <div v-if="githubInfo.is_first_check" class="github-update-first">
-              首次检查：当前已记录为基准版本（之后有新提交会提示"有更新"）
+            <!-- 新版安装包更新（真实更新：下载安装包 + 覆盖安装） -->
+            <div v-if="githubInfo.has_new_release" class="github-update-new">
+              ⬆ 有新版本！{{ githubInfo.release?.tag }} 可下载更新
             </div>
-            <div v-else-if="githubInfo.has_update" class="github-update-new">
-              ⬆ 有更新！最新提交与本地基准版本不同
+            <!-- 更新安装包下载进度 -->
+            <div v-if="updateDownload.downloading" class="update-dl-box">
+              <div class="update-dl-title">正在下载 {{ updateDownload.fileName || '更新安装包' }}</div>
+              <n-progress
+                type="line"
+                :percentage="updateDownload.percent || 0"
+                :height="8"
+                :show-indicator="true"
+                processing
+              />
+              <div class="update-dl-meta">
+                {{ formatSize(updateDownload.received) }}<template v-if="updateDownload.total"> / {{ formatSize(updateDownload.total) }}</template>
+                <template v-if="updateDownload.speed"> · {{ formatSize(updateDownload.speed) }}/s</template>
+              </div>
             </div>
-            <div v-else class="github-update-none">
-              ✅ 已是最新（与本地基准一致）
+            <!-- 下载完成 → 立即安装 -->
+            <div v-else-if="updateDownload.done && updateDownload.path" class="update-dl-box">
+              <div class="update-dl-title">✅ 更新包已下载到「下载」文件夹</div>
+              <n-button size="small" type="primary" block @click="emit('install-update')">
+                立即安装（覆盖更新，数据不丢失）
+              </n-button>
+            </div>
+            <!-- 有新版本且未开始下载 → 下载按钮 -->
+            <div v-else-if="githubInfo.has_new_release && githubInfo.release?.assets?.length" class="update-dl-box">
+              <n-button size="small" type="primary" block @click="emit('download-update')">
+                下载更新安装包（{{ formatSize(githubInfo.release.assets[0]?.size || 0) }}）
+              </n-button>
+            </div>
+            <div v-else-if="updateDownload.error" class="github-update-err">上次下载失败：{{ updateDownload.error }}</div>
+            <div v-if="!githubInfo.has_new_release" :class="githubInfo.has_update ? 'github-update-new' : 'github-update-none'">
+              {{ githubInfo.has_update ? '⬆ 源码有新提交（发布新安装包后会在这里提示）' : '✅ 已是最新版本' }}
             </div>
             <div class="github-update-row">
               <span class="github-label">最新提交：</span>
@@ -1463,7 +1481,6 @@
               <n-button size="tiny" quaternary @click="openGithubUrl(githubInfo.latest_url)">查看提交</n-button>
               <n-button size="tiny" quaternary @click="openGithubUrl(githubInfo.commits_url)">提交历史</n-button>
               <n-button size="tiny" quaternary @click="openGithubUrl(githubInfo.repo_url)">仓库主页</n-button>
-              <n-button v-if="githubInfo.has_update" size="tiny" type="primary" @click="markGithubUpdated">我已更新</n-button>
             </div>
           </div>
 
@@ -1731,6 +1748,10 @@ const props = defineProps({
   githubUpdateInfo: { type: Object, default: null },
   // 检查进行中（仅手动点击"检查更新"时为 true；启动后不发任何 GitHub 请求）
   githubChecking: { type: Boolean, default: false },
+  // 当前程序版本号（Electron app.getVersion()）
+  appVersion: { type: String, default: '' },
+  // 更新安装包下载状态 { downloading, received, total, percent, speed, fileName, path, done, error }
+  updateDownload: { type: Object, default: () => ({ downloading: false, received: 0, total: 0, percent: 0, speed: 0, fileName: '', path: '', done: false, error: '' }) },
 })
 
 const emit = defineEmits([
@@ -1781,7 +1802,6 @@ const emit = defineEmits([
   'oreno-save-cred',      // O3D/E站 保存账号密码（参数：site_key, 账号, 密码）
   // 登录引导 / 账号档案
   'open-login-page',      // 打开登录页（参数：站点 key）
-  'fetch-cookies',        // 一键抓取浏览器 Cookie 并自动登录（参数：站点 key）
   'refresh-login',        // 重新检查登录状态（参数：站点 key）
   'save-account',         // 保存当前登录为账号档案（参数：站点 key）
   'switch-account',       // 切换账号档案（参数：站点 key, 档案名）
@@ -1797,7 +1817,9 @@ const emit = defineEmits([
   'translate-youdao',      // 调有道 API 翻译（参数：{text, from, to}）[兼容旧名]
   'translate-free',        // 调免费翻译（参数：{text, from, to}；后端按 settings.translate_engine 选 Google/LibreTranslate/有道）
   // GitHub 仓库更新检查
-  'check-github-update',   // 检查 GitHub 仓库 main 分支最新 commit
+  'check-github-update',   // 检查 GitHub 仓库 main 分支最新 commit + 最新 release
+  'download-update',       // 下载最新版安装包（后端流式下载 + 进度事件）
+  'install-update',        // 运行已下载的更新安装包（覆盖安装即更新）
   // P3 设置功能
   'shortcut-change',        // 快捷键录入变更（参数：action, accelerator）
   'prevent-sleep-change',   // 不息屏开关变更（参数：boolean）
@@ -2462,19 +2484,24 @@ function formatGithubDate(s) {
   return d.toLocaleString('zh-CN', { hour12: false })
 }
 
+// 字节数格式化（更新包大小/速度显示用）
+function formatSize(bytes) {
+  if (!bytes || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let v = bytes
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
+}
+
 async function openGithubUrl(url) {
   if (!url) return
   if (window.api && window.api.openExternal) {
     await window.api.openExternal(url)
   }
-}
-
-function markGithubUpdated() {
-  // 把当前 latest_sha 记为本地基准（更新流程已完成 → 不再提示"有更新"）
-  const sha = props.githubUpdateInfo?.latest_sha
-  if (!sha) return
-  window.api && window.api.sendCommand({ cmd: 'github_mark_update_done', sha })
-  message.success('已记录当前为基准版本')
 }
 
 // ============================
@@ -3274,6 +3301,36 @@ html.light-mode .translate-result-err {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 8px;
+}
+/* 更新安装包下载（进度条 + 速度 + 立即安装） */
+.update-dl-box {
+  margin: 8px 0;
+  padding: 8px;
+  background: rgba(99, 226, 183, 0.06);
+  border: 1px solid rgba(99, 226, 183, 0.2);
+  border-radius: 4px;
+}
+.update-dl-title {
+  font-weight: 600;
+  color: #63e2b7;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+.update-dl-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #8b8b93;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+html.light-mode .update-dl-box {
+  background: rgba(24, 160, 88, 0.06);
+  border-color: rgba(24, 160, 88, 0.2);
+}
+html.light-mode .update-dl-title {
+  color: #18a058;
+}
+html.light-mode .update-dl-meta {
+  color: #8a8d99;
 }
 html.light-mode .github-update-box {
   background: rgba(0, 0, 0, 0.03);
