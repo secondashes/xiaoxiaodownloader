@@ -201,8 +201,9 @@
       </div>
     </div>
 
-    <!-- X (Twitter) 工具栏：浏览模式 / 关注列表 / 关注我的人 / 我的分类（需登录） -->
-    <div v-if="site === 'twitter' && fileList.length === 0 && searchResults.length === 0" class="tw-toolbar">
+    <!-- X (Twitter) 工具栏：浏览模式 / 关注列表 / 关注我的人 / 我的分类（需登录）
+         常驻显示（此前文件列表/搜索结果非空时整条消失，导致无法进入浏览模式） -->
+    <div v-if="site === 'twitter' && !twFollowMode" class="tw-toolbar">
       <n-button
         size="small"
         :type="twFollowMode === 'browse' ? 'primary' : 'default'"
@@ -701,8 +702,11 @@
           </div>
         </div>
       </div>
-      <!-- 文件列表视图（后台批量收集期间与完成后均不切换：保持当前视图，静默后台下载） -->
-      <div v-else-if="fileList.length > 0 && !exBatchRunning && !batchFileCollected" class="file-list-area">
+      <!-- 文件列表视图（后台批量收集期间与完成后均不切换：保持当前视图，静默后台下载）；
+           EX 内联详情模式下不显示独立文件列表（内容追加在搜索结果下方） -->
+      <!-- X 浏览/关注/用户视图优先于文件列表（此前 fileList 有旧数据时
+           浏览模式解析结果被文件列表抢占，导致"看不到内容只看到下载数据"） -->
+      <div v-else-if="fileList.length > 0 && !(site === 'twitter' && twFollowMode) && !exBatchRunning && !batchFileCollected && !exInlineDetail" class="file-list-area">
         <!-- 列表操作栏 -->
         <div class="list-toolbar">
           <div class="album-info">
@@ -896,8 +900,9 @@
       </div>
 
       <!-- EX 画廊详情视图：完整信息（标题/发布者/时间/父画廊/大小/页数/收藏数/评分）+ 分组标签可点击 + 种子入口 -->
-      <!-- 文件列表加载完成后自动隐藏（让位给文件列表视图，点击"后退"可回到此处） -->
-      <div v-else-if="site === 'exhentai' && (exGalleryDetail || exDetailLoading) && fileList.length === 0" class="ex-detail">
+      <!-- 文件列表加载完成后自动隐藏（让位给文件列表视图，点击"后退"可回到此处）；
+           内联详情模式下不显示独立详情视图（内容追加在搜索结果下方） -->
+      <div v-else-if="site === 'exhentai' && (exGalleryDetail || exDetailLoading) && fileList.length === 0 && !exInlineDetail" class="ex-detail">
         <div class="ex-detail-toolbar">
           <n-button size="small" quaternary type="primary" @click="$emit('ex-close-detail')">← 后退</n-button>
           <span class="ex-detail-toolbar-title">画廊详情</span>
@@ -1333,6 +1338,71 @@
               :type="twViewUser.following ? 'error' : 'primary'"
               @click="$emit(twViewUser.following ? 'tw-unfollow' : 'tw-follow', twViewUser)"
             >{{ twViewUser.following ? '取消关注' : '关注' }}</n-button>
+          </div>
+
+          <!-- 博主内容流：点开博主自动解析，内容卡片直接展示在下方（可查看、可一键下载） -->
+          <div class="tw-user-feed-bar">
+            <n-button
+              size="small"
+              secondary
+              type="primary"
+              :disabled="!twUserFeed.length"
+              :title="'把下方已加载内容的全部媒体（' + twUserFeedMediaCount + ' 个文件）加入下载任务'"
+              @click="$emit('tw-user-feed-download-all')"
+            >⬇ 下载当前全部媒体 ({{ twUserFeedMediaCount }})</n-button>
+            <n-button
+              v-if="twUserFeedHasMore || twUserFeed.length"
+              size="small"
+              quaternary
+              :loading="twUserFeedLoading"
+              @click="$emit('tw-user-feed-more')"
+            >{{ twUserFeedHasMore ? '加载更多' : '刷新加载' }}</n-button>
+          </div>
+          <div v-if="twUserFeedLoading && twUserFeed.length === 0" class="tw-user-feed-loading">
+            <n-spin size="medium" />
+            <span>正在解析博主内容...</span>
+          </div>
+          <div v-else-if="!twUserFeedLoading && twUserFeed.length === 0" class="tw-follow-empty">
+            未获取到内容（博主可能没有图片/视频，或网络/代理异常，点"刷新加载"重试）
+          </div>
+          <div
+            v-for="t in twUserFeed"
+            :key="t.tweet_id"
+            class="tw-tweet-card"
+            title="点击解析这条推文的媒体并勾选下载"
+            @click="$emit('open-album', { album_name: `${twViewUser.name || twViewUser.screen_name} 的推文`, album_url: t.item_page, site: 'twitter' })"
+          >
+            <div class="tw-tweet-head">
+              <div class="tw-tweet-user">
+                <span class="tw-user-nick">{{ twViewUser.name || twViewUser.screen_name }}</span>
+                <span class="tw-user-handle">@{{ twViewUser.screen_name }}</span>
+              </div>
+              <span v-if="t.post_date" class="tw-tweet-time">{{ t.post_date }}</span>
+            </div>
+            <div v-if="t.text" class="tw-tweet-text">{{ t.text }}</div>
+            <div v-if="t.media?.length" class="tw-tweet-media">
+              <div
+                v-for="m in t.media.slice(0, 4)"
+                :key="m.media_url"
+                class="tw-tweet-thumb"
+                :class="{ 'tw-tweet-video': m.type === 'video' }"
+              >
+                <img v-if="m.thumbnail" :src="m.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
+                <span v-if="m.type === 'video'" class="tw-tweet-play">▶</span>
+              </div>
+              <span v-if="t.media.length > 4" class="tw-tweet-more">+{{ t.media.length - 4 }}</span>
+            </div>
+          </div>
+          <div v-if="twUserFeed.length" class="tw-browse-more">
+            <n-button
+              v-if="twUserFeedHasMore"
+              size="small"
+              block
+              secondary
+              :loading="twUserFeedLoading"
+              @click="$emit('tw-user-feed-more')"
+            >↓ 加载更多内容</n-button>
+            <div v-else class="tw-browse-end">已加载全部内容（已翻到时间线底部）</div>
           </div>
         </n-scrollbar>
       </div>
@@ -2502,9 +2572,10 @@
         />
       </div>
 
-      <!-- 搜索结果视图（解析中让位给"解析中"视图：点击后立即切换 + 显示加载态） -->
+      <!-- 搜索结果视图（解析中让位给"解析中"视图：点击后立即切换 + 显示加载态；
+           EX 内联详情模式下解析中也保留搜索结果，进度显示在内联区块底部） -->
       <n-scrollbar
-        v-else-if="searchResults.length > 0 && !inspecting"
+        v-else-if="searchResults.length > 0 && (!inspecting || exInlineDetail)"
         class="search-results"
         trigger="none"
         :on-scroll="handleScroll"
@@ -2674,6 +2745,170 @@
             :searching="searching"
             @go-page="p => $emit('go-page', p)"
           />
+
+          <!-- EX 内联详情+文件列表：从搜索结果/收藏点开作品后，追加在搜索结果下方（不跳转新界面） -->
+          <div v-if="exInlineDetail" class="ex-inline-detail">
+            <div class="ex-inline-detail-head">
+              <span class="ex-inline-detail-title">
+                {{ exGalleryDetail ? exGalleryDetail.title : (albumInfo.album_name || '正在解析...') }}
+              </span>
+              <n-button
+                size="tiny"
+                quaternary
+                type="error"
+                title="收起详情并清空文件列表，回到纯搜索结果"
+                @click="$emit('back-to-search')"
+              >✕ 收起详情</n-button>
+            </div>
+
+            <!-- 解析中：进度动画（搜索结果保留在上方） -->
+            <div v-if="inspecting || exDetailLoading" class="ex-inline-detail-loading">
+              <n-spin size="medium" />
+              <span>
+                正在解析文件列表...
+                <template v-if="inspectProgress && inspectProgress.total > 0">
+                  （{{ inspectProgress.current }}/{{ inspectProgress.total }}）
+                </template>
+              </span>
+            </div>
+
+            <template v-else>
+              <!-- 画廊详情（完整信息 + 分组标签，与独立详情视图一致） -->
+              <div v-if="exGalleryDetail" class="ex-detail-head">
+                <div class="ex-detail-cover">
+                  <img
+                    v-if="exGalleryDetail.thumbnail"
+                    :src="exGalleryDetail.thumbnail"
+                    referrerpolicy="no-referrer"
+                    :alt="exGalleryDetail.title"
+                  />
+                  <span v-else class="ex-thumb-empty">EX</span>
+                </div>
+                <div class="ex-detail-info">
+                  <div class="ex-detail-name" :title="exGalleryDetail.title">{{ exGalleryDetail.title }}</div>
+                  <div
+                    v-if="exGalleryDetail.title_jp && exGalleryDetail.title_jp !== exGalleryDetail.title"
+                    class="ex-detail-name-jp"
+                  >{{ exGalleryDetail.title_jp }}</div>
+                  <table class="ex-detail-meta">
+                    <tr v-if="exGalleryDetail.uploader"><td>发布者</td><td>{{ exGalleryDetail.uploader }}</td></tr>
+                    <tr v-if="exGalleryDetail.posted"><td>发布时间</td><td>{{ exGalleryDetail.posted }}</td></tr>
+                    <tr v-if="exGalleryDetail.language"><td>语言</td><td>{{ exGalleryDetail.language }}</td></tr>
+                    <tr v-if="exGalleryDetail.file_size"><td>文件大小</td><td>{{ exGalleryDetail.file_size }}</td></tr>
+                    <tr v-if="exGalleryDetail.length"><td>页数</td><td>{{ exGalleryDetail.length }}</td></tr>
+                    <tr v-if="exGalleryDetail.rating">
+                      <td>评分</td>
+                      <td>⭐ {{ exGalleryDetail.rating }}<span v-if="exGalleryDetail.rating_count">（{{ exGalleryDetail.rating_count }} 人评分）</span></td>
+                    </tr>
+                  </table>
+                  <div class="ex-detail-actions">
+                    <n-button
+                      size="small"
+                      type="warning"
+                      ghost
+                      :loading="torrentLoading"
+                      title="查看画廊附带的种子（可获取磁力或保存种子文件）"
+                      @click="exDetailTorrents(exGalleryDetail.url)"
+                    >种子 / 磁力</n-button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="exGalleryDetail && exGalleryDetail.tags && Object.keys(exGalleryDetail.tags).length" class="ex-detail-tags">
+                <div v-for="(tags, ns) in exGalleryDetail.tags" :key="ns" class="ex-detail-tagrow">
+                  <span class="ex-detail-tagrow-ns">{{ ns }}:</span>
+                  <a
+                    v-for="t in tags"
+                    :key="t"
+                    class="ex-detail-tag"
+                    title="点击搜索该标签"
+                    @click="searchTag(`${ns}:${t}`)"
+                  >{{ t }}</a>
+                </div>
+              </div>
+
+              <!-- 文件列表（工具栏 + 方格/列表 + 下载栏，与独立文件列表视图一致） -->
+              <div v-if="fileList.length > 0" class="ex-inline-file-list">
+                <div class="list-toolbar">
+                  <div class="album-info">
+                    <span class="album-name">{{ albumInfo.album_name || '未知相册' }}</span>
+                    <n-tag size="small" :type="albumInfo.is_album ? 'info' : 'warning'" round>
+                      {{ albumInfo.is_album ? '相册' : '单文件' }}
+                    </n-tag>
+                    <span class="file-count">共 {{ fileList.length }} 个文件</span>
+                  </div>
+                  <div class="list-actions">
+                    <n-button size="small" quaternary @click="selectAll">全选</n-button>
+                    <n-button size="small" quaternary @click="selectNone">取消全选</n-button>
+                    <n-button size="small" quaternary @click="invertSelection">反选</n-button>
+                    <n-button size="small" quaternary @click="selectByType('ok')">仅选可下载</n-button>
+                    <n-button
+                      size="small"
+                      quaternary
+                      :title="viewMode === 'grid' ? '切换为横向详细列表' : '切换为小方格排列'"
+                      @click="toggleViewMode"
+                    >{{ viewMode === 'grid' ? '列表' : '方格' }}</n-button>
+                  </div>
+                </div>
+
+                <n-data-table
+                  v-if="viewMode === 'list'"
+                  :columns="columns"
+                  :data="filteredFileList"
+                  :row-key="row => row.item_page"
+                  :row-props="fileRowProps"
+                  v-model:checked-row-keys="checkedKeys"
+                  :max-height="tableHeight"
+                  :scroll-x="700"
+                  size="small"
+                  striped
+                />
+                <div v-else class="file-grid">
+                  <div
+                    v-for="f in filteredFileList"
+                    :key="f.item_page"
+                    class="file-grid-item"
+                    :class="{ 'grid-selected': checkedKeys.includes(f.item_page), 'grid-bad': f.status === 'error' }"
+                    :title="`${f.filename}\n${f.size_text || ''}`"
+                    @click="toggleGridSelect(f.item_page)"
+                    @contextmenu.prevent="openFileCtxMenu($event, f)"
+                  >
+                    <div class="grid-thumb">
+                      <img v-if="f.thumbnail" :src="f.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
+                      <img v-else-if="f.file_icon" :src="f.file_icon" class="grid-icon" alt="" />
+                      <span v-else class="grid-type">{{ f.file_type || '文件' }}</span>
+                      <span v-if="f.is_new" class="grid-new">新</span>
+                      <span v-if="f.is_downloaded" class="grid-downloaded" title="历史任务已下载过（默认不勾选，可手动勾选重下）">已下载</span>
+                      <span v-if="checkedKeys.includes(f.item_page)" class="grid-check">✓</span>
+                      <span
+                        v-if="f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f))"
+                        class="grid-preview-btn"
+                        :title="isVideoItem(f) ? '在线播放' : '查看大图'"
+                        @click.stop="openPreview(f)"
+                      >{{ isVideoItem(f) ? '▶' : '👁' }}</span>
+                    </div>
+                    <div class="grid-name">{{ f.filename }}</div>
+                    <div class="grid-size">{{ f.size_text || '—' }}</div>
+                  </div>
+                </div>
+
+                <div class="download-bar">
+                  <div class="selected-info">
+                    已选择 <span class="selected-count">{{ checkedKeys.length }}</span> 个文件
+                    <span class="selected-size" v-if="selectedSizeText">({{ selectedSizeText }})</span>
+                  </div>
+                  <n-button
+                    type="primary"
+                    size="large"
+                    :disabled="checkedKeys.length === 0"
+                    :loading="downloading"
+                    @click="handleDownload"
+                  >
+                    {{ downloading ? '下载中...' : `下载选中 (${checkedKeys.length})` }}
+                  </n-button>
+                </div>
+              </div>
+            </template>
+          </div>
         </div>
 
         <!-- Pawchive：卡片网格 + 顶底分页（与 EX 同一套分页逻辑） -->
@@ -3465,6 +3700,8 @@ const props = defineProps({
   exhentaiUser: { type: String, default: '' },
   exGalleryDetail: { type: Object, default: null },   // EX 画廊详情（完整信息 + 分组标签）
   exDetailLoading: { type: Boolean, default: false }, // 详情加载中
+  // EX 内联详情模式：从搜索结果/收藏点开作品时，搜索结果保留在上方，详情+文件列表追加在下方（不跳转新界面）
+  exInlineDetail: { type: Boolean, default: false },
   exFavMode: { type: Boolean, default: false },       // 当前结果视图是否为"我的收藏"
   exBatchRunning: { type: Boolean, default: false },  // EX 批量解析进行中
   exBatchProgress: { type: Object, default: () => ({ done: 0, total: 0 }) }, // 批量进度 done/total
@@ -3492,6 +3729,10 @@ const props = defineProps({
   twBrowseUpdatedAt: { type: Number, default: null },
   twBrowseError: { type: String, default: '' },
   twBrowseHasMore: { type: Boolean, default: false },  // 是否还有下一批博主
+  // X 博主内容流（点开博主自动解析，详情页下方展示推文卡片）
+  twUserFeed: { type: Array, default: () => [] },      // [{tweet_id, item_page, text, post_date, media: [], media_items: []}]
+  twUserFeedLoading: { type: Boolean, default: false },
+  twUserFeedHasMore: { type: Boolean, default: false },
   // X 本地搜索（搜缓存内容）
   twLocalSearch: { type: String, default: '' },
   twSearchTweets: { type: Array, default: () => [] }, // 搜索命中的推文卡片
@@ -3646,6 +3887,8 @@ const emit = defineEmits([
   'tw-user-list',           // 查看指定用户的关注/粉丝列表（参数：模式, screen_name）
   'tw-browse',              // 打开/刷新浏览模式（最近博主更新）
   'tw-browse-more',         // 浏览模式加载下一批博主
+  'tw-user-feed-more',      // 博主内容流加载更多（下一页时间线）
+  'tw-user-feed-download-all', // 一键下载博主内容流已加载的全部媒体
   'update:tw-local-search', // X 本地搜索关键词（v-model 式）
   'tw-back',                // X 视图内返回上一层
   // Iwara 事件（由 App.vue 转发给 Python 后端）
@@ -3822,6 +4065,17 @@ const twParentOptions = computed(() =>
 const twChildOptions = computed(() => {
   const parent = (props.twFollowTags || []).find(t => t.name === twTagParent.value)
   return (parent && parent.children ? parent.children : []).map(c => ({ label: c, value: c }))
+})
+
+// 博主内容流已加载的媒体总数（"下载当前全部媒体"按钮显示用）
+const twUserFeedMediaCount = computed(() => {
+  const seen = new Set()
+  for (const c of props.twUserFeed || []) {
+    for (const it of (c.media_items || [])) {
+      if (it.media_url) seen.add(it.media_url)
+    }
+  }
+  return seen.size
 })
 
 function twOpenTagModal(user) {
@@ -5589,6 +5843,45 @@ html.light-mode .site-chip.on {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+/* ============ EX 内联详情+文件列表（搜索结果下方追加展示） ============ */
+.ex-inline-detail {
+  margin-top: 16px;
+  border: 1px solid #3a3a42;
+  border-radius: 8px;
+  background: #191a1d;
+  padding: 12px;
+}
+.ex-inline-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.ex-inline-detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #a3c74f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ex-inline-detail-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+  color: #8f8f98;
+  font-size: 13px;
+}
+.ex-inline-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .ex-detail-toolbar {
@@ -7892,6 +8185,24 @@ html.light-mode .preview-volume-text {
 /* 浏览模式"加载更多"区域 */
 .tw-browse-more {
   padding: 6px 12px 16px;
+}
+
+/* 博主内容流操作栏 + 加载中提示（用户详情页下方） */
+.tw-user-feed-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 2px;
+}
+
+.tw-user-feed-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 0;
+  color: #7a7a85;
+  font-size: 13px;
 }
 
 .tw-browse-end {

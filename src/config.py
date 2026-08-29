@@ -224,6 +224,9 @@ class ChunkInfo:
     headers: dict[str, str]
     on_progress: callable
     rate_limiter: RateLimiter | None = None
+    # 协同式中止检查（GUI 暂停/取消任务时置位）：返回 True 时下载循环立即抛
+    # DownloadInterrupted 终止当前线程，避免"点了暂停还在下载"。
+    should_abort: callable | None = None
 
 @dataclass
 class ResolveContext:
@@ -243,6 +246,17 @@ class DownloadConfig:
     num_connections: int
     headers: dict[str, str]
     rate_limiter: RateLimiter | None = None
+    should_abort: callable | None = None
+
+
+class DownloadInterrupted(Exception):
+    """下载被用户中断（暂停/取消任务）。
+
+    不要继承 OSError：_attempt_chunk_once 用 except (RequestException, OSError)
+    捕获网络错误并重试，若继承 OSError 会被误当成普通失败继续重试，
+    导致暂停按钮无法立即停止下载。
+    """
+
 
 @dataclass(slots=True)
 class RetryConfig:

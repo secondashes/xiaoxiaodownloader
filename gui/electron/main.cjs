@@ -1180,6 +1180,11 @@ function writeCloseActionToSettings(action) {
     fs.writeFileSync(tmpPath, JSON.stringify(settings, null, 2), 'utf-8')
     fs.renameSync(tmpPath, settingsPath)
     debugLog(`关闭行为已保存: ${action}`)
+    // 通知前端同步：① 刷新内存 settings（设置面板立即显示新值）
+    // ② 前端转发 set_setting 给 Python 后端刷新缓存，防止下次保存整份设置时旧值覆盖
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('close-action-changed', action)
+    }
   } catch (e) {
     debugLog(`保存关闭行为设置失败: ${e.message}`)
   }

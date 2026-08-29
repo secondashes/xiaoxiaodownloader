@@ -20,6 +20,7 @@ from src.config import (
     CompletedReason,
     DownloadConfig,
     DownloadInfo,
+    DownloadInterrupted,
     FailedReason,
     HTTPStatus,
     RetryConfig,
@@ -58,12 +59,18 @@ class MediaDownloader:
         download_info: DownloadInfo,
         live_manager: LiveManager,
         retry_config: RetryConfig,
+        should_abort: callable | None = None,
     ) -> None:
-        """Initialize the MediaDownloader instance."""
+        """Initialize the MediaDownloader instance.
+
+        should_abort: GUI 任务暂停/取消时的协同中止检查（每 chunk 调用一次），
+        返回 True 时抛 DownloadInterrupted 立即停止下载线程。
+        """
         self.session_info = session_info
         self.download_info = download_info
         self.live_manager = live_manager
         self.retry_config = retry_config
+        self.should_abort = should_abort
 
     def attempt_download(self, final_path: str) -> bool:
         """Attempt to download the file, using parallel chunks when possible.
@@ -84,6 +91,9 @@ class MediaDownloader:
         rate_limiter = self.session_info.rate_limiter
 
         for attempt in range(self.retry_config.retries):
+            # 任务被暂停/取消时立即中止（不再发起新的下载请求）
+            if self.should_abort and self.should_abort():
+                raise DownloadInterrupted("任务已暂停/取消")
             try:
                 supports_range, content_length = detect_range_support(
                     self.download_info.download_link, DOWNLOAD_HEADERS,
@@ -104,6 +114,7 @@ class MediaDownloader:
                             num_connections=num_connections,
                             headers=DOWNLOAD_HEADERS,
                             rate_limiter=rate_limiter,
+                            should_abort=self.should_abort,
                         ),
                     )
                     if not chunked_failed:
@@ -137,6 +148,7 @@ class MediaDownloader:
                     self.download_info.task,
                     self.live_manager,
                     rate_limiter=rate_limiter,
+                    should_abort=self.should_abort,
                 )
 
         return True

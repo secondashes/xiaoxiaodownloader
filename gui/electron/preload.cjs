@@ -116,6 +116,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('shortcut-triggered', listener)
     return () => ipcRenderer.removeListener('shortcut-triggered', listener)
   },
+  // 监听关闭行为变更（关闭弹窗勾选"记住我的选择" → 同步前端设置面板与后端缓存）
+  onCloseActionChanged: (cb) => {
+    const listener = (_, action) => cb(action)
+    ipcRenderer.on('close-action-changed', listener)
+    return () => ipcRenderer.removeListener('close-action-changed', listener)
+  },
 
   // 查询后端启动错误（页面加载完成时主动拉取，避免错过启动早期的事件）
   getBackendError: () => ipcRenderer.invoke('get-backend-error'),

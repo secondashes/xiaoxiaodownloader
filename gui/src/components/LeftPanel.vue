@@ -1620,9 +1620,53 @@
                 打开内置浏览器登录
               </n-button>
             </div>
+            <!-- 已保存的谷歌账号列表：邮箱/密码可见可复制 + 切换使用 + 删除 -->
+            <div v-if="googleAccounts && googleAccounts.length" class="google-account-list">
+              <div
+                v-for="acc in googleAccounts"
+                :key="acc.email"
+                class="google-account-item"
+                :class="{ active: (acc.email || '').toLowerCase() === (googleUser || googleEmailInput || '').toLowerCase() }"
+              >
+                <div class="google-account-row" title="点击复制邮箱" @click="copyText(acc.email, '邮箱')">
+                  <span class="google-account-email">{{ acc.email }}</span>
+                  <n-tag
+                    v-if="(acc.email || '').toLowerCase() === (googleUser || googleEmailInput || '').toLowerCase()"
+                    size="tiny"
+                    type="success"
+                    round
+                  >使用中</n-tag>
+                </div>
+                <div
+                  class="google-account-row google-account-pass"
+                  title="点击复制密码"
+                  @click="copyText(acc.password, '密码')"
+                >
+                  <span>{{ acc.password ? (showGooglePass[acc.email] ? acc.password : '••••••••') : '（未保存密码）' }}</span>
+                  <n-button
+                    v-if="acc.password"
+                    size="tiny"
+                    quaternary
+                    @click.stop="showGooglePass[acc.email] = !showGooglePass[acc.email]"
+                  >{{ showGooglePass[acc.email] ? '隐藏' : '显示' }}</n-button>
+                </div>
+                <div class="google-account-actions">
+                  <n-button
+                    size="tiny"
+                    secondary
+                    type="primary"
+                    :disabled="(acc.email || '').toLowerCase() === (googleUser || googleEmailInput || '').toLowerCase()"
+                    @click="emit('google-switch-account', acc.email)"
+                  >切换使用</n-button>
+                  <n-button size="tiny" tertiary type="error" @click="emit('google-delete-account', acc.email)">
+                    删除
+                  </n-button>
+                </div>
+              </div>
+            </div>
             <div class="setting-hint" style="font-size: 11px; color: #7f7f7f; margin-top: 4px">
               登录后的谷歌 cookie 会加密保存，在其他网站选择"使用 Google 登录"时自动带入凭据；
-              Xh/Por/Xv 等站登录弹窗已支持此链路
+              Xh/Por/Xv 等站登录弹窗已支持此链路；可保存多个账号方便切换（点击邮箱/密码即复制）
             </div>
           </div>
 
@@ -1801,6 +1845,8 @@ const props = defineProps({
   siteCreds: { type: Object, default: () => ({}) },
   // 谷歌邮箱表单初始值（来自加密凭据库的保存邮箱）
   googleEmail: { type: String, default: '' },
+  // 谷歌邮箱多账号列表（[{email, password, saved_at}]，设置区展示/复制/切换/删除）
+  googleAccounts: { type: Array, default: () => [] },
   // 全站点登录信息（后端 login_info 事件：用户名/Cookie/账号档案）
   loginInfo: { type: Object, default: () => ({}) },
   loginLoading: { type: Boolean, default: false },
@@ -1872,6 +1918,8 @@ const emit = defineEmits([
   'site-set-proxy',       // 修改代理（参数：站点 key, 代理地址）
   // 谷歌邮箱（OAuth 授权共用凭据源）
   'google-save-cred',     // 保存账号密码（参数：邮箱, 密码）
+  'google-switch-account', // 切换谷歌账号（参数：邮箱）
+  'google-delete-account', // 删除谷歌账号记录（参数：邮箱）
   'oreno-save-cred',      // O3D/E站 保存账号密码（参数：site_key, 账号, 密码）
   'site-save-cred',       // 通用保存账号密码（参数：站点 key, 账号, 密码）
   // 登录引导 / 账号档案
@@ -2383,6 +2431,8 @@ function handleSiteSaveCred(siteKey, email, password) {
 // 谷歌邮箱凭据表单（设置区"登录谷歌邮箱"）
 const googleEmailInput = ref('')
 const googlePasswordInput = ref('')
+// 多账号列表密码显示开关（email -> boolean，默认隐藏）
+const showGooglePass = reactive({})
 // 初始邮箱来自加密凭据库（App.vue 从 login_info 提取传入）
 watch(() => props.googleEmail, (v) => {
   if (v && !googleEmailInput.value) googleEmailInput.value = v
@@ -3102,6 +3152,53 @@ html.light-mode .site-help-modal .site-help-pre {
   border-radius: 4px;
   padding: 5px 8px;
   text-align: center;
+}
+
+/* 谷歌邮箱多账号列表（设置区） */
+.google-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.google-account-item {
+  border: 1px solid #3a3a42;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.google-account-item.active {
+  border-color: #3e8f4e;
+  background: rgba(62, 143, 78, 0.06);
+}
+.google-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  cursor: pointer;
+  min-height: 20px;
+}
+.google-account-email {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e0e0e6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.google-account-pass {
+  font-size: 11px;
+  color: #9f9f9f;
+  user-select: text;
+}
+.google-account-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
 }
 
 .login-title {

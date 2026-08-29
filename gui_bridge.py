@@ -63,6 +63,7 @@ from src.config import (
     MAX_WORKERS,
     DEFAULT_CONNECTIONS,
     DownloadInfo,
+    DownloadInterrupted,
     RetryConfig,
     SessionInfo,
     SkippedReason,
@@ -5196,6 +5197,128 @@ async def twitter_inspect(url: str, options: dict) -> None:
     except Exception as exc:
         emit({"event": "inspect_error", "message": f"解析过程出错: {exc}"})
         logging.exception("Twitter 解析过程出错")
+
+
+async def twitter_user_feed(screen_name: str = "", user_id: str = "",
+                            cursor: str = "") -> None:
+    """博主内容流：拉取指定博主 UserMedia 时间线一页（20 条带媒体推文）。
+
+    点开博主后前端自动调用，在用户详情页下方直接展示推文卡片
+    （缩略图 + 内容），支持 cursor 翻页；卡片自带 media_items（与文件列表
+    同构的下载条目），前端可一键批量下载当前已加载的全部媒体。
+    """
+    emit({"event": "twitter_user_feed_loading", "loading": True})
+    try:
+        screen_name = (screen_name or "").strip().lstrip("@")
+        if not user_id:
+            if not screen_name:
+                emit({"event": "twitter_user_feed", "items": [], "error": "缺少博主信息"})
+                return
+            # user_id 缺失时用 UserByScreenName 换取
+            data = await asyncio.to_thread(
+                _twitter_api_get,
+                _twitter_qid("UserByScreenName"), "UserByScreenName",
+                _TW_USER_FEATURES,
+                {"screen_name": screen_name, "withSafetyModeUserFields": True},
+                {"fieldToggles": json.dumps({"withAuxiliaryUserLabels": False})},
+            )
+            user_result = ((data.get("data") or {}).get("user") or {}).get("result") or {}
+            user_id = user_result.get("rest_id") or ""
+            legacy_u = user_result.get("legacy") or {}
+            screen_name = legacy_u.get("screen_name") or screen_name
+            if not user_id:
+                emit({"event": "twitter_user_feed",
+                      "items": [], "error": f"找不到用户 @{screen_name}"})
+                return
+        variables = {
+            "userId": user_id, "count": 20,
+            "includePromotedContent": False,
+            "withClientEventToken": False, "withBirdwatchNotes": False,
+            "withVoice": True, "withV2Timeline": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        data = await asyncio.to_thread(
+            _twitter_api_get,
+            _twitter_qid("UserMedia"), "UserMedia",
+            _TW_MEDIA_FEATURES, variables,
+        )
+        instructions = ((((data.get("data") or {}).get("user") or {})
+                        .get("result") or {}).get("timeline_v2")
+                       or {}).get("timeline", {}).get("instructions") or []
+        posts = _twitter_extract_posts(instructions)
+
+        cards: list[dict] = []
+        seen_urls: set[str] = set()
+        for post in posts:
+            legacy = post.get("legacy") or {}
+            if legacy.get("retweeted_status_result"):
+                continue  # 跳过转推
+            media_items = _twitter_map_tweet(post)
+            if not media_items:
+                continue
+            key = media_items[0].get("media_url") or ""
+            if key in seen_urls:
+                continue  # 跨页/线程重复推文去重
+            seen_urls.add(key)
+            created_at = legacy.get("created_at") or ""
+            post_date = ""
+            if created_at:
+                try:
+                    post_date = datetime.strptime(
+                        created_at, "%a %b %d %H:%M:%S %z %Y",
+                    ).strftime("%Y-%m-%d %H:%M")
+                except ValueError:
+                    pass
+            tweet_id = post.get("rest_id") or legacy.get("id_str") or ""
+            full_text = (legacy.get("full_text") or "").strip()
+            cards.append({
+                "tweet_id": tweet_id,
+                "item_page": media_items[0].get("item_page") or "",
+                "text": full_text[:200],
+                "post_date": post_date,
+                "created_ts": _tw_created_ts(created_at),
+                "media": [
+                    {
+                        "media_url": it.get("media_url") or "",
+                        "thumbnail": it.get("thumbnail") or "",
+                        "type": it.get("media_type") or "photo",
+                        "index": idx,
+                    }
+                    for idx, it in enumerate(media_items, start=1)
+                ],
+                # 与文件列表同构的下载条目（含 filename/site/media_url 等）
+                "media_items": media_items,
+                "user": {"user_id": user_id, "screen_name": screen_name},
+            })
+        cards.sort(key=lambda x: x.get("created_ts") or 0, reverse=True)
+        # 提取底部游标（翻页用）
+        next_cursor = ""
+        for inst in instructions:
+            if inst.get("type") != "TimelineAddEntries":
+                continue
+            for entry in inst.get("entries") or []:
+                c = entry.get("content") or {}
+                if c.get("cursorType") == "Bottom" and c.get("value"):
+                    next_cursor = c["value"]
+        if cards:
+            all_media = [m for c in cards for m in c["media"]]
+            _apply_cached_thumbnails(all_media)
+            asyncio.create_task(_cache_thumbnails(all_media))
+        emit({
+            "event": "twitter_user_feed", "items": cards,
+            "user_id": user_id, "screen_name": screen_name,
+            "cursor": next_cursor, "has_more": bool(next_cursor),
+            "append": bool(cursor),
+        })
+    except PermissionError as exc:
+        emit({"event": "twitter_user_feed", "items": [], "error": str(exc)})
+    except Exception as exc:
+        logging.exception("博主内容流获取失败")
+        emit({"event": "twitter_user_feed", "items": [],
+              "error": f"获取博主内容失败: {exc}（请检查登录状态与代理）"})
+    finally:
+        emit({"event": "twitter_user_feed_loading", "loading": False})
 
 
 def _twitter_subfolder(item: dict, options: dict) -> str:
@@ -10397,6 +10520,13 @@ class DownloadManager:
         task["status"] = "paused"
         self._save(immediate=True)
         self.emit_snapshot(immediate=True)
+        emit({"event": "task_paused", "task_id": task_id,
+              "message": f"任务「{task.get('album') or ''}」已暂停，正在停止下载中的文件..."})
+        emit({
+            "event": "log",
+            "type": "下载",
+            "message": f"任务「{task.get('album') or ''}」已暂停",
+        })
 
     def resume(self, task_id: str) -> None:
         self.start(task_id)
@@ -10411,7 +10541,10 @@ class DownloadManager:
         if not task:
             return
         if task_id in self._runners:
-            return  # 正在运行，无需重试
+            # 正在运行，无法重试：明确反馈给前端（此前静默返回，用户不知道有没有生效）
+            emit({"event": "task_retry", "ok": False, "task_id": task_id,
+                  "message": "任务正在下载中，等下载结束（或先暂停）后再重试失败文件"})
+            return
         reset_count = 0
         for item in task.get("files", []):
             if item.get("status") == "failed":
@@ -10422,11 +10555,21 @@ class DownloadManager:
         task["status"] = "running"
         self._save(immediate=True)
         self.emit_snapshot(immediate=True)
+        msg = (f"任务「{task.get('album') or ''}」重试 {reset_count} 个失败文件"
+               if reset_count else f"任务「{task.get('album') or ''}」没有失败文件，无需重试")
+        emit({"event": "task_retry", "ok": True, "task_id": task_id,
+              "reset": reset_count, "message": msg})
         emit({
             "event": "log",
             "type": "下载",
-            "message": f"任务「{task.get('album') or ''}」重试 {reset_count} 个失败文件",
+            "message": msg,
         })
+        if not reset_count:
+            # 没有失败文件：状态还原为 completed，不空跑一遍
+            task["status"] = "completed"
+            self._save(immediate=True)
+            self.emit_snapshot(immediate=True)
+            return
         self._runners[task_id] = asyncio.create_task(self._run(task_id))
         self.emit_snapshot(immediate=True)
 
@@ -10440,6 +10583,8 @@ class DownloadManager:
         if not task:
             return
         if task_id in self._runners:
+            emit({"event": "task_retry", "ok": False, "task_id": task_id,
+                  "message": "任务正在下载中，请等任务结束后再重试单个文件"})
             emit({
                 "event": "log",
                 "type": "下载",
@@ -10459,6 +10604,8 @@ class DownloadManager:
         task["status"] = "running"
         self._save(immediate=True)
         self.emit_snapshot(immediate=True)
+        emit({"event": "task_retry", "ok": True, "task_id": task_id,
+              "message": f"正在重试文件「{item.get('filename') or item_page}」"})
         emit({
             "event": "log",
             "type": "下载",
@@ -10623,7 +10770,11 @@ class DownloadManager:
 
             # 全部失败自动清理：任务没有任何文件下载成功时，下载目录里只有失败清单/空目录，
             # 直接删除整个空文件夹并移除下载记录（用户要求：不留垃圾目录和无效任务）
-            if files and not any(f.get("status") == "completed" for f in files):
+            # 注意：暂停/取消收尾绝不清理（大量文件还是 pending，不是"全部失败"）
+            if (
+                task["status"] not in ("paused", "cancelled")
+                and files and not any(f.get("status") == "completed" for f in files)
+            ):
                 try:
                     album_dir = Path(album_path)
                     # 目录里除"下载失败清单"外还有真实文件 → 说明是历史内容，不清理
@@ -10682,6 +10833,9 @@ class DownloadManager:
         self, task: dict, files: list, album_path: str, task_id: str,
     ) -> None:
         """任务收尾：汇总失败文件生成 txt 清单（文件名 + 网页链接），供用户手动下载。"""
+        # 暂停/取消收尾时不生成失败清单（任务还没真正结束，恢复后继续下载）
+        if task.get("status") in ("paused", "cancelled"):
+            return
         try:
             failed_items = [f for f in files if f.get("status") == "failed"]
             if not failed_items:
@@ -10900,9 +11054,19 @@ class DownloadManager:
                 retries=max_retries,
                 has_external_retry=False,
             ),
+            # 暂停/取消任务时协同中止下载线程（立即停止网络传输）
+            should_abort=lambda: task.get("status") in ("paused", "cancelled"),
         )
 
-        failed = await asyncio.to_thread(media_downloader.download)
+        try:
+            failed = await asyncio.to_thread(media_downloader.download)
+        except DownloadInterrupted:
+            # 任务暂停/取消：未完成文件复位为待下载，恢复时自动重新下载
+            item["status"] = "pending"
+            item["completed"] = 0
+            self._save()
+            self.emit_snapshot()
+            return
 
         final_path = Path(file_download_path) / truncate_filename(filename)
         if failed:
@@ -13750,7 +13914,8 @@ _GOOGLE_AUTH_COOKIES = ("SID", "HSID", "SSID")
 
 
 def google_save_cred(email: str, password: str) -> None:
-    """保存谷歌邮箱账号密码（cookie 保留不动；供内置浏览器登录时自动预填凭据）。"""
+    """保存谷歌邮箱账号密码（cookie 保留不动；供内置浏览器登录时自动预填凭据）。
+    同时把账号密码 upsert 进多账号列表（accounts），支持前端切换/复制/删除。"""
     email = (email or "").strip()
     if not email:
         emit({"event": "site_login_result", "site": "google", "logged_in": False,
@@ -13761,6 +13926,16 @@ def google_save_cred(email: str, password: str) -> None:
     if password:
         cred["password"] = password
     cred["cred_saved_at"] = time.time()
+    # 多账号列表：同邮箱覆盖更新，不同邮箱追加
+    accounts = list(cred.get("accounts") or [])
+    if password:
+        accounts = [a for a in accounts if (a.get("email") or "").lower() != email.lower()]
+        accounts.append({"email": email, "password": password, "saved_at": time.time()})
+        accounts.sort(key=lambda a: a.get("saved_at") or 0)
+        cred["accounts"] = accounts
+    elif not any((a.get("email") or "").lower() == email.lower() for a in accounts):
+        accounts.append({"email": email, "password": "", "saved_at": time.time()})
+        cred["accounts"] = accounts
     _secure_store_write_cred("google", cred)
     cookies = cred.get("cookies") or {}
     logged_in = _google_has_auth(cookies)
@@ -13773,6 +13948,51 @@ def google_save_cred(email: str, password: str) -> None:
         "message": "谷歌邮箱账号密码已保存" + ("（cookie 已就绪，可给其他网站授权）" if logged_in else ""),
     })
     logging.info("谷歌邮箱凭据已保存: %s", email)
+    _emit_login_info()
+
+
+def google_switch_account(email: str) -> None:
+    """切换谷歌邮箱账号：把选中账号的邮箱密码设为当前使用（登录表单/浏览器预填用）。"""
+    email = (email or "").strip()
+    cred = _secure_store_read_cred("google")
+    accounts = list(cred.get("accounts") or [])
+    target = next((a for a in accounts if (a.get("email") or "").lower() == email.lower()), None)
+    if not target:
+        emit({"event": "site_login_result", "site": "google", "logged_in": False,
+              "message": "未找到该谷歌账号，请重新保存"})
+        return
+    cred["email"] = target.get("email") or email
+    cred["password"] = target.get("password") or ""
+    _secure_store_write_cred("google", cred)
+    emit({
+        "event": "site_login_result",
+        "site": "google",
+        "logged_in": _google_has_auth(cred.get("cookies") or {}),
+        "username": cred["email"],
+        "message": f"已切换谷歌账号：{cred['email']}（下次打开内置浏览器登录时自动预填）",
+    })
+    _emit_login_info()
+
+
+def google_delete_account(email: str) -> None:
+    """删除谷歌邮箱账号记录（不影响当前 cookie 会话）。"""
+    email = (email or "").strip()
+    cred = _secure_store_read_cred("google")
+    accounts = [a for a in (cred.get("accounts") or [])
+                if (a.get("email") or "").lower() != email.lower()]
+    cred["accounts"] = accounts
+    # 删除的是当前账号时清空当前邮箱密码（cookie 保留）
+    if (cred.get("email") or "").lower() == email.lower():
+        cred["email"] = (accounts[0].get("email") if accounts else "")
+        cred["password"] = (accounts[0].get("password") if accounts else "")
+    _secure_store_write_cred("google", cred)
+    emit({
+        "event": "site_login_result",
+        "site": "google",
+        "logged_in": _google_has_auth(cred.get("cookies") or {}),
+        "username": cred.get("email") or "",
+        "message": f"已删除谷歌账号记录：{email}",
+    })
     _emit_login_info()
 
 
@@ -13852,10 +14072,11 @@ def _emit_login_info() -> None:
             sites[_s_site]["email"] = _s_user
             if _s_cred.get("password"):
                 sites[_s_site]["password"] = _s_cred["password"]
-    # 谷歌邮箱：用户名 = 保存的邮箱（凭据库）
+    # 谷歌邮箱：用户名 = 保存的邮箱（凭据库）+ 多账号列表（切换/复制/删除）
     g_cred = _secure_store_read_cred("google")
     if g_cred.get("email"):
         sites["google"]["username"] = g_cred["email"]
+    sites["google"]["accounts"] = list(g_cred.get("accounts") or [])
     # JavDB：回填保存的账号密码（前端登录表单预填）
     j_cred = _javdb_load_cred()
     if j_cred.get("email"):
@@ -14408,6 +14629,14 @@ async def command_loop() -> None:
             elif cmd == "twitter_browse":
                 await twitter_browse(int(command.get("offset") or 0))
 
+            # ---------- X 博主内容流（点开博主自动解析展示） ----------
+            elif cmd == "twitter_user_feed":
+                await twitter_user_feed(
+                    command.get("screen_name", ""),
+                    str(command.get("user_id") or ""),
+                    command.get("cursor", ""),
+                )
+
             elif cmd == "twitter_clear_cache":
                 twitter_clear_cache()
 
@@ -14767,6 +14996,12 @@ async def command_loop() -> None:
             elif cmd == "google_save_cred":
                 # 设置区"登录谷歌邮箱"表单：保存账号密码（cookie 登录后自动补充）
                 google_save_cred(command.get("email", ""), command.get("password", ""))
+
+            elif cmd == "google_switch_account":
+                google_switch_account(command.get("email", ""))
+
+            elif cmd == "google_delete_account":
+                google_delete_account(command.get("email", ""))
 
             elif cmd == "google_check_login":
                 google_check_login(bool(command.get("silent", False)))

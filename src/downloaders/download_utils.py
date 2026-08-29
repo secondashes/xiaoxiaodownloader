@@ -27,6 +27,7 @@ from src.config import (
     UNITS_PER_CONNECTION,
     ChunkInfo,
     DownloadConfig,
+    DownloadInterrupted,
     DownloadPlan,
 )
 
@@ -50,6 +51,7 @@ def save_file_with_progress(
     task: int,
     live_manager: LiveManager,
     rate_limiter: RateLimiter | None = None,
+    should_abort: callable | None = None,
 ) -> bool:
     """Save the file from the response to the specified path.
 
@@ -70,6 +72,9 @@ def save_file_with_progress(
     try:
         with temp_download_path.open("wb") as file:
             for chunk in response.iter_content(chunk_size=chunk_size):
+                # GUI 暂停/取消任务时立即中止（不再继续写盘/占带宽）
+                if should_abort and should_abort():
+                    raise DownloadInterrupted("任务已暂停/取消")
                 if chunk is not None:
                     file.write(chunk)
                     if rate_limiter:
@@ -270,6 +275,10 @@ def _attempt_chunk_once(
             response.raise_for_status()
             with path.open("wb") as file:
                 for data in response.iter_content(chunk_size=LARGE_FILE_CHUNK_SIZE):
+                    # GUI 暂停/取消任务时立即中止（DownloadInterrupted 不是
+                    # OSError 子类，不会被下方的重试逻辑捕获吞掉）
+                    if chunk_info.should_abort and chunk_info.should_abort():
+                        raise DownloadInterrupted("任务已暂停/取消")
                     if data:
                         file.write(data)
                         num_bytes = len(data)
@@ -317,6 +326,9 @@ def _download_single_chunk(
         return False
 
     for attempt in range(1, CHUNK_MAX_RETRIES + 1):
+        # 重试间隔 sleep 期间任务被暂停/取消：下一轮重试直接中止
+        if chunk_info.should_abort and chunk_info.should_abort():
+            raise DownloadInterrupted("任务已暂停/取消")
         failed = _attempt_chunk_once(
             url,
             (start_byte, end_byte),
@@ -396,6 +408,7 @@ def download_chunks(
                     headers=download_config.headers,
                     on_progress=on_progress,
                     rate_limiter=download_config.rate_limiter,
+                    should_abort=download_config.should_abort,
                 ),
             ): path
             for byte_range, path in zip(download_plan.ranges, download_plan.chunk_paths)

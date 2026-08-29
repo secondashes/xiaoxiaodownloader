@@ -38,10 +38,13 @@
             :oreno3d-cred="oreno3dCred"
             :erommdtube-cred="erommdtubeCred"
             :google-email="googleEmail"
+            :google-accounts="googleAccounts"
             @site-oauth-login="handleSiteOAuthLogin"
             @site-logout="handleSiteLogout"
             @site-set-proxy="handleSiteSetProxy"
             @google-save-cred="handleGoogleSaveCred"
+            @google-switch-account="handleGoogleSwitchAccount"
+            @google-delete-account="handleGoogleDeleteAccount"
             @oreno-save-cred="handleOrenoSaveCred"
             @site-save-cred="handleSiteSaveCred"
             :site-creds="siteCreds"
@@ -126,6 +129,7 @@
             :exhentai-user="exhentaiUser"
             :ex-gallery-detail="exGalleryDetail"
             :ex-detail-loading="exDetailLoading"
+            :ex-inline-detail="exInlineDetail"
             :ex-fav-mode="exFavMode"
             :ex-batch-running="exBatchDownloading"
             :ex-batch-progress="exBatchProgress"
@@ -149,6 +153,9 @@
             :tw-browse-updated-at="twBrowseUpdatedAt"
             :tw-browse-error="twBrowseError"
             :tw-browse-has-more="twBrowseHasMore"
+            :tw-user-feed="twUserFeed"
+            :tw-user-feed-loading="twUserFeedLoading"
+            :tw-user-feed-has-more="twUserFeedHasMore"
             :tw-local-search="twLocalSearch"
             :tw-search-tweets="twSearchTweets"
             :iw-view="iwView"
@@ -252,6 +259,8 @@
             @tw-user-list="handleTwUserList"
             @tw-browse="handleTwBrowse"
             @tw-browse-more="handleTwBrowseMore"
+            @tw-user-feed-more="handleTwUserFeedMore"
+            @tw-user-feed-download-all="handleTwUserFeedDownloadAll"
             @tw-back="handleTwBack"
             @iw-set-site="handleIwSetSite"
             @iw-home="handleIwHome"
@@ -608,6 +617,8 @@ const iwaraUser = ref('')
 const iwaraLoginLoading = ref(false)
 const exGalleryDetail = ref(null)   // EX 画廊详情（完整信息 + 分组标签）
 const exDetailLoading = ref(false)  // 详情加载中
+// EX 内联详情模式：从搜索结果/收藏点开作品时，搜索结果保留在上方，详情+文件列表追加在下方（不跳转）
+const exInlineDetail = ref(false)
 const exFavMode = ref(false)        // 当前搜索结果视图是否为"我的收藏"模式
 const exBatchDownloading = ref(false)  // EX 批量下载进行中（inspect_complete 时追加而非替换 fileList）
 const exBatchPending = ref(0)            // EX 批量下载待完成的 inspect_complete 计数（异步返回时减一）
@@ -698,6 +709,12 @@ const twBrowseError = ref('')
 // 浏览模式"加载更多"：下一批关注博主的偏移量（后端 next_offset）
 const twBrowseNextOffset = ref(0)
 const twBrowseHasMore = ref(false)
+// 博主内容流（点开博主自动解析，详情页下方展示推文卡片）
+const twUserFeed = ref([])
+const twUserFeedLoading = ref(false)
+const twUserFeedCursor = ref('')
+const twUserFeedHasMore = ref(false)
+const twUserFeedUserId = ref('')   // 当前请求的博主 id（防快速切换博主时旧数据串台）
 // X 本地搜索：在已缓存内容（浏览模式信息流/关注列表/我的分类）中过滤
 const twLocalSearch = ref('')
 // 本地搜索的推文结果
@@ -879,6 +896,8 @@ const wvLogin = reactive({
 
 // 谷歌邮箱凭据表单（设置区"登录谷歌邮箱"：保存账号密码 + 内置浏览器登录）
 const googleEmail = ref('')
+// 谷歌邮箱多账号列表（login_info 提取，设置区展示/复制/切换/删除）
+const googleAccounts = ref([])
 const googlePassword = ref('')
 
 
@@ -1037,6 +1056,8 @@ function handlePythonEvent(event) {
       requestTasks()
       // P3 设置功能：监听主进程触发的快捷键事件
       setupShortcutTriggeredListener()
+      // 关闭弹窗勾选"记住我的选择"后，主进程直接写 settings.json → 同步本地 + 后端缓存
+      setupCloseActionListener()
       // 加载搜索历史与本地收藏
       if (window.api) {
         window.api.sendCommand({ cmd: 'get_search_history' })
@@ -1235,6 +1256,23 @@ function handlePythonEvent(event) {
         event.success ? '完成' : '失败',
         `${event.filename} ${event.success ? '下载完成' : '下载失败'}`
       )
+      break
+
+    case 'task_paused':
+      // 暂停已生效（后端正在协同停止下载中的文件），明确反馈
+      message.info(event.message || '任务已暂停')
+      addLog('下载', event.message || '任务已暂停')
+      break
+
+    case 'task_retry':
+      // 重试按钮结果反馈（运行中不可重试 / 已重置 N 个失败文件 / 单文件重试）
+      if (event.ok) {
+        message.success(event.message || '重试已开始')
+      } else {
+        message.warning(event.message || '无法重试')
+      }
+      addLog('下载', event.message || '')
+      requestTasks()
       break
 
     case 'download_complete':
@@ -2068,6 +2106,8 @@ function handlePythonEvent(event) {
       if (loginInfo.value.google && loginInfo.value.google.username) {
         googleEmail.value = loginInfo.value.google.username
       }
+      // 谷歌邮箱多账号列表（设置区展示/复制/切换/删除）
+      googleAccounts.value = (loginInfo.value.google && loginInfo.value.google.accounts) || []
       // O3D / E站：回填账号密码（LeftPanel 登录表单预填）
       for (const _oKey of ['oreno3d', 'erommdtube']) {
         const _oInfo = loginInfo.value[_oKey] || {}
@@ -2338,6 +2378,32 @@ function handlePythonEvent(event) {
       twBrowseProgress.total = event.total || 0
       break
 
+    case 'twitter_user_feed_loading':
+      twUserFeedLoading.value = !!event.loading
+      break
+
+    case 'twitter_user_feed': {
+      // 仅在用户详情视图时应用；快速切换博主时丢弃旧博主的数据（防串台）
+      if (twFollowMode.value !== 'user') break
+      if (event.error) {
+        twUserFeed.value = []
+        message.error(event.error)
+        addLog('错误', event.error)
+        break
+      }
+      if (twUserFeedUserId.value && event.user_id
+        && String(event.user_id) !== twUserFeedUserId.value) break
+      twUserFeed.value = event.append
+        ? twUserFeed.value.concat(event.items || [])
+        : (event.items || [])
+      twUserFeedCursor.value = event.cursor || ''
+      twUserFeedHasMore.value = !!event.has_more
+      if (!event.append) {
+        addLog('X', `博主内容流：@${event.screen_name || ''} ${(event.items || []).length} 条推文`)
+      }
+      break
+    }
+
     case 'twitter_browse_feed':
       // 用户可能已离开浏览视图，迟到的结果不覆盖当前视图
       if (!['browse', ''].includes(twFollowMode.value)) break
@@ -2541,6 +2607,8 @@ function updateSite(site) {
   searchResults.value = []
   fileList.value = []
   cameFromSearch.value = false
+  exInlineDetail.value = false
+  exGalleryDetail.value = null
   paArtistPosts.value = null
   if (site !== 'iwara') iwView.value = ''
   if (site !== 'hanime') haView.value = ''
@@ -2586,6 +2654,9 @@ function doSearch(query, page) {
     searchResults.value = []
     searchPage.value = 1
     lastSearchKeyword.value = query
+    // 新搜索：退出 EX 内联详情模式（详情区让位给新结果）
+    exInlineDetail.value = false
+    exGalleryDetail.value = null
     // 新搜索：清空旧译文，避免上一搜索的标题译文错位
     translatedTitles.value = {}
     // 新搜索：清空 EX 批量母文件夹，避免误套用
@@ -2764,7 +2835,8 @@ async function handleDownload(selectedItems, opts = {}) {
     options,
     // 批量自动提交（opts.fromBatch）时 album_name 传空：让后端从文件列表取画师名作目录，
     // 避免多画廊混合任务顶层目录错用"最后一个解析的画廊标题"
-    album_name: opts.fromBatch ? '' : (albumInfo.album_name || ''),
+    // opts.album_name 可显式指定任务名（如 X 博主内容流一键下载用博主名）
+    album_name: opts.album_name ?? (opts.fromBatch ? '' : (albumInfo.album_name || '')),
     album_id: opts.fromBatch ? undefined : (albumInfo.album_id || undefined),
   })
 }
@@ -2820,6 +2892,7 @@ function handleClearBatchTasks() {
   exBatchPending.value = 0
   exBatchDownloading.value = false
   exGalleryDetail.value = null
+  exInlineDetail.value = false
   message.success(`已清除批量任务（${n} 个文件）。下载任务不受影响，可在"下载状态"查看`)
   addLog('系统', `清除批量任务：清空 ${n} 个已收集文件，解锁视图`)
 }
@@ -2833,6 +2906,7 @@ function handleBackToSearch() {
   // 同步清理各站点详情/子项目视图（避免回退后被旧详情卡住看不到搜索结果）
   exGalleryDetail.value = null
   exDetailLoading.value = false
+  exInlineDetail.value = false
   paPostDetail.value = null
   paArtistPosts.value = null
   iwDetail.value = null
@@ -3139,12 +3213,23 @@ function setupShortcutTriggeredListener() {
     const action = data?.action
     if (action === 'toggle_float') {
       // 切换悬浮窗（复用现有 float_visible 设置）
-      const next = !settings.value.float_visible
+      const next = !settings.float_visible
       updateSettings({ float_visible: next })
       if (next) {
         window.api.sendCommand({ cmd: 'get_tasks' })  // 触发悬浮窗刷新
       }
     }
+  })
+}
+
+// 关闭弹窗"记住我的选择"→ 主进程已写 settings.json，这里同步：
+// ① 前端内存 settings（设置面板立即显示新值）；② Python 后端 set_setting 刷新缓存（防旧值覆盖）
+function setupCloseActionListener() {
+  if (!window.api || !window.api.onCloseActionChanged) return
+  window.api.onCloseActionChanged((action) => {
+    if (action !== 'tray' && action !== 'exit' && action !== 'ask') return
+    settings.close_action = action
+    window.api.sendCommand({ cmd: 'set_setting', key: 'close_action', value: action })
   })
 }
 
@@ -3225,6 +3310,8 @@ function handleExOpenGallery(galleryUrl) {
   url.value = galleryUrl
   searchQuery.value = galleryUrl
   cameFromSearch.value = true
+  // 内联详情模式：搜索结果/收藏列表还在时，详情+文件列表追加在结果下方（不跳转新界面）
+  exInlineDetail.value = searchResults.value.length > 0
   // 退出其他站点视图，进入 EX 详情+文件列表视图
   paPostDetail.value = null
   paArtistPosts.value = null
@@ -3295,6 +3382,7 @@ async function confirmExBatchFolder(useFolder) {
   // 清空 fileList（后台解析模式，避免与旧文件列表混在一起）
   fileList.value = []
   exGalleryDetail.value = null
+  exInlineDetail.value = false
   exBatchDownloading.value = true
   exBatchPending.value = urls.length
   exBatchTotal.value = urls.length
@@ -3317,6 +3405,7 @@ async function confirmExBatchFolder(useFolder) {
 
 function handleExCloseDetail() {
   exGalleryDetail.value = null
+  exInlineDetail.value = false
 }
 
 // 下载 .torrent 种子文件到 downloads/torrents/
@@ -4242,6 +4331,18 @@ function handleGoogleSaveCred(email, password) {
   addLog('系统', `谷歌邮箱账号密码已保存: ${email.trim()}`)
 }
 
+// 谷歌邮箱：切换账号（选中账号设为当前使用，登录表单/浏览器预填用）
+function handleGoogleSwitchAccount(email) {
+  if (!window.api || !email) return
+  window.api.sendCommand({ cmd: 'google_switch_account', email })
+}
+
+// 谷歌邮箱：删除账号记录（不影响当前 cookie 会话）
+function handleGoogleDeleteAccount(email) {
+  if (!window.api || !email) return
+  window.api.sendCommand({ cmd: 'google_delete_account', email })
+}
+
 // 通用退出登录
 function handleSiteLogout(siteKey) {
   if (!window.api) return
@@ -4597,6 +4698,10 @@ function handleTwBack() {
     twFollowOwner.value = ''
     twFollowError.value = ''
     twBrowseError.value = ''
+    twUserFeed.value = []
+    twUserFeedCursor.value = ''
+    twUserFeedHasMore.value = false
+    twUserFeedUserId.value = ''
     return
   }
   twFollowMode.value = prev.mode
@@ -4608,9 +4713,20 @@ function handleTwBack() {
   twFollowHasMore.value = prev.hasMore
   twBrowseFeed.value = prev.feed
   twFollowError.value = ''
+  // 返回用户详情页时内容流为空：自动重新拉取（导航栈不存内容流数据）
+  if (twFollowMode.value === 'user' && twViewUser.value
+    && !twUserFeed.value.length && window.api) {
+    twUserFeedUserId.value = String(twViewUser.value.user_id || '')
+    window.api.sendCommand({
+      cmd: 'twitter_user_feed',
+      screen_name: twViewUser.value.screen_name,
+      user_id: String(twViewUser.value.user_id || ''),
+      cursor: '',
+    })
+  }
 }
 
-// 查看用户详情（点开关注的人：显示 TA 的关注/粉丝入口 + 解析媒体）
+// 查看用户详情（点开关注的人：显示 TA 的关注/粉丝入口 + 自动解析内容流展示在下方）
 function handleTwOpenUser(u) {
   if (!u || !u.screen_name) return
   twPushNav()
@@ -4621,6 +4737,55 @@ function handleTwOpenUser(u) {
   twFollowMode.value = 'user'
   twViewUser.value = JSON.parse(JSON.stringify(u))
   twFollowError.value = ''
+  // 点开博主即自动解析内容流（无需再手动点"解析 TA 的全部媒体"）
+  twUserFeed.value = []
+  twUserFeedCursor.value = ''
+  twUserFeedHasMore.value = false
+  twUserFeedUserId.value = String(u.user_id || '')
+  if (window.api) {
+    window.api.sendCommand({
+      cmd: 'twitter_user_feed',
+      screen_name: u.screen_name,
+      user_id: String(u.user_id || ''),
+      cursor: '',
+    })
+  }
+}
+
+// 博主内容流：加载更多（UserMedia 时间线 cursor 翻页）
+function handleTwUserFeedMore() {
+  if (!window.api || twUserFeedLoading.value) return
+  const u = twViewUser.value || {}
+  window.api.sendCommand({
+    cmd: 'twitter_user_feed',
+    screen_name: u.screen_name || '',
+    user_id: String(u.user_id || twUserFeedUserId.value || ''),
+    cursor: twUserFeedCursor.value || '',
+  })
+}
+
+// 博主内容流：一键下载当前已加载的全部媒体（卡片自带与文件列表同构的条目）
+async function handleTwUserFeedDownloadAll() {
+  const items = []
+  const seen = new Set()
+  for (const c of twUserFeed.value) {
+    for (const it of (c.media_items || [])) {
+      const k = it.media_url
+      if (!k || seen.has(k)) continue
+      seen.add(k)
+      items.push(it)
+    }
+  }
+  if (!items.length) {
+    message.warning('当前还没有可下载的内容，先等内容流加载出来')
+    return
+  }
+  const u = twViewUser.value || {}
+  // handleDownload 从 url.value 取任务 URL（后端 X 任务实际按 items.site 走媒体直链）
+  url.value = u.album_url || `https://x.com/${u.screen_name || ''}`
+  await handleDownload(items, {
+    album_name: u.name || u.screen_name || 'X 下载',
+  })
 }
 
 // 打开指定用户的关注/粉丝列表（TA 的列表）
