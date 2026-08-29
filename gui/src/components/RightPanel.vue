@@ -2666,9 +2666,14 @@
         <div v-else-if="site === 'pawchive'" class="pa-results">
           <div class="pa-toolbar">
             <span class="pa-result-count">
-              {{ !searchQuery ? '我的收藏' : (searchMode === 'tag' ? `标签「${searchQuery}」` : `画师「${searchQuery}」`) }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
+              {{ !searchQuery ? (searchResults.length && searchResults[0]?.album_url?.includes('/post/') ? '主页' : '我的收藏') : (searchMode === 'tag' ? `标签「${searchQuery}」` : `画师「${searchQuery}」`) }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
               <template v-if="searchTotalResults > 0">（{{ searchMode === 'artist' ? `共 ${formatCount(searchTotalResults)} 位画师` : `约 ${formatCount(searchTotalResults)} 条结果` }}）</template>
             </span>
+            <button
+              class="ex-cat-chip ex-fav-btn"
+              title="查看全站最新帖子（主页内容流）"
+              @click="$emit('pa-home')"
+            >🏠 主页</button>
             <button
               class="ex-cat-chip ex-fav-btn"
               title="查看我在 Pawchive 服务器上收藏的画师（需登录）"
@@ -3096,8 +3101,18 @@
         </template>
         <template v-else-if="site === 'pawchive'">
           <div class="empty-text">搜索 Pawchive 画师或标签，或粘贴 pawchive.pw 链接</div>
+          <div class="empty-actions">
+            <button class="empty-action-btn" @click="$emit('pa-home')">
+              <span class="ea-icon">🏠</span> 主页
+              <span class="ea-desc">全站最新帖子</span>
+            </button>
+            <button class="empty-action-btn" @click="$emit('pa-favorites')">
+              <span class="ea-icon">★</span> 我的收藏
+              <span class="ea-desc">收藏的画师（需登录）</span>
+            </button>
+          </div>
           <div class="empty-hint">
-            画师搜索按名称匹配，标签搜索按帖子标签匹配；登录后可在左侧使用"我的收藏"
+            画师搜索按名称匹配，标签搜索按帖子标签匹配
           </div>
         </template>
         <template v-else-if="site === 'exhentai'">
@@ -3582,6 +3597,7 @@ const emit = defineEmits([
   'pa-open-post',           // 打开 PA 帖子详情（参数：帖子 URL）
   'pa-close-detail',        // 关闭 PA 帖子详情（返回搜索结果）
   'pa-favorites',           // PA 我的收藏（服务器收藏，需登录）
+  'pa-home',                // PA 主页（全站最新帖子流）
   'pa-open-artist',         // 打开 PA 画师子项目列表（参数：画师 URL）
   'pa-close-artist',        // 关闭画师子项目视图（返回搜索结果）
   'pa-download-artist',     // 右键下载画师所有内容（参数：{url, name}，后台解析并提交下载任务）
@@ -7156,6 +7172,44 @@ html.light-mode .or-group-chip:hover {
   align-items: center;
   justify-content: center;
   color: #7f7f7f;
+}
+
+/* 空状态快捷操作按钮（PA 主页/我的收藏等） */
+.empty-actions {
+  display: flex;
+  gap: 14px;
+  margin: 14px 0 6px;
+}
+
+.empty-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 150px;
+  padding: 12px 18px;
+  border: 1px solid rgba(99, 226, 183, 0.25);
+  border-radius: 10px;
+  background: rgba(99, 226, 183, 0.06);
+  color: #e8e8e8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 14px;
+}
+
+.empty-action-btn:hover {
+  background: rgba(99, 226, 183, 0.14);
+  border-color: rgba(99, 226, 183, 0.5);
+  transform: translateY(-1px);
+}
+
+.empty-action-btn .ea-icon {
+  font-size: 20px;
+}
+
+.empty-action-btn .ea-desc {
+  font-size: 11px;
+  color: #8f8f8f;
 }
 
 .empty-icon {

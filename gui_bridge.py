@@ -46,6 +46,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+import urllib.request
 
 import aiohttp
 from aiohttp import web as aiohttp_web
@@ -1534,6 +1535,66 @@ async def pawchive_get_favorites() -> None:
     })
     asyncio.create_task(_cache_thumbnails(items))
     logging.info("Pawchive 收藏获取完成: %d 个画师", len(items))
+
+
+async def pawchive_home(page: int = 1) -> None:
+    """PA 主页：全站最新帖子流（/api/v1/posts 每页 50，发布时间倒序）。
+
+    以搜索结果事件返回帖子卡片（点击卡片直接打开帖子详情）。
+    """
+    page = max(1, int(page or 1))
+    emit({"event": "search_start", "query": "主页", "page": page})
+    items: list[dict] = []
+    try:
+        offset = (page - 1) * PAWCHIVE_PAGE_SIZE
+        data = await asyncio.to_thread(
+            _pawchive_fetch_json, "/api/v1/posts", {"o": offset},
+        )
+        if isinstance(data, list):
+            for post in data:
+                if not isinstance(post, dict):
+                    continue
+                post_id = str(post.get("id") or "")
+                user_id = str(post.get("user") or "")
+                service = post.get("service") or ""
+                if not (post_id and user_id and service):
+                    continue
+                main_file = post.get("file") or {}
+                att_count = len([
+                    a for a in (post.get("attachments") or [])
+                    if isinstance(a, dict) and a.get("path")
+                ])
+                items.append({
+                    "album_name": post.get("title") or "未命名帖子",
+                    "album_url": f"{PAWCHIVE_HOST}/{service}/user/{user_id}/post/{post_id}",
+                    "thumbnail": (
+                        PAWCHIVE_IMG_HOST + "/thumbnail/data" + main_file["path"]
+                        if main_file.get("path") else ""
+                    ),
+                    "files": 1 + att_count if (main_file.get("path") or att_count) else att_count,
+                    "site": "pawchive",
+                    "service": service,
+                })
+    except Exception as exc:
+        emit({"event": "search_error", "message": f"获取主页内容失败: {exc}"})
+        logging.exception("Pawchive 主页获取失败")
+        return
+
+    if not items:
+        emit({"event": "search_error", "message": "主页没有更多内容了"})
+        return
+
+    _apply_cached_thumbnails(items)
+    emit({
+        "event": "search_result",
+        "query": "主页",
+        "page": page,
+        "total_pages": 0,          # 未知总页数：分页条只显示当前页
+        "has_more": len(items) >= PAWCHIVE_PAGE_SIZE,
+        "items": items,
+    })
+    asyncio.create_task(_cache_thumbnails(items))
+    logging.info("Pawchive 主页: 第 %d 页 %d 个帖子", page, len(items))
 
 
 # ============================
@@ -5925,26 +5986,85 @@ def _iwara_x_version(file_url: str) -> str:
     return hashlib.sha1("_".join((paths[-1], expires, IWARA_SALT)).encode()).hexdigest()
 
 
+def _system_proxies() -> list[str]:
+    """读取系统代理（Windows 注册表/IE 设置，与浏览器同源）。
+
+    用户场景：浏览器走系统代理下载很快，但本程序直连媒体服务器（mikoto.iwara.tv 等）
+    会超时。直连失败时自动用系统代理重试，行为对齐浏览器。
+    """
+    try:
+        proxies = urllib.request.getproxies()
+        out = []
+        for scheme in ("https", "http"):
+            url = (proxies.get(scheme) or "").strip()
+            if url and url not in out:
+                out.append(url)
+        return out
+    except Exception:
+        return []
+
+
 def _iwara_resolve_best_url(file_url: str) -> tuple[str, str]:
-    """解析视频源列表，返回 (最高画质直链, MIME)。画质优先级 Source > 540 > 360。"""
+    """解析视频源列表，返回 (最高画质直链, MIME)。画质优先级 Source > 540 > 360。
+
+    健壮性处理（实测踩坑）：
+    - 带失效 Bearer token 时 filesq 可能返回 200 + 空体 → 去掉 auth 重试一次
+    - 最高画质条目可能没有 src（转码中）→ 依画质优先级逐级回退
+    - 直连超时 → 用系统代理（浏览器同源）重试
+    """
     if not file_url:
         return "", ""
     headers = {"X-Version": _iwara_x_version(file_url)}
     auth = _iwara_auth_headers()
     if auth:
         headers.update(auth)
-    resp = _iwara_session.get(file_url, timeout=20, headers=headers)
-    resp.raise_for_status()
-    files = resp.json() if resp.content else []
-    if not isinstance(files, list) or not files:
+
+    files = None
+    last_err: Exception | None = None
+    attempts = [(dict(headers), None)]                      # 1. 原样（含 auth）
+    attempts.append(({k: v for k, v in headers.items() if k != "Authorization"}, None))  # 2. 去 auth
+    for proxy in _system_proxies():                          # 3+. 系统代理
+        attempts.append((dict(headers), proxy))
+        if len(attempts) >= 4:                               # 最多试 1 个系统代理，避免拖太久
+            break
+
+    for req_headers, proxy in attempts:
+        try:
+            proxies = {"http": proxy, "https": proxy} if proxy else None
+            resp = _iwara_session.get(file_url, timeout=20, headers=req_headers, proxies=proxies)
+            resp.raise_for_status()
+            data = resp.json() if resp.content else []
+            if isinstance(data, list) and data:
+                files = data
+                if proxy:
+                    logging.info("视频源解析经系统代理成功: %s", proxy)
+                break
+            # 200 但空/非列表：换下一种尝试（去 auth / 走代理）
+            logging.warning("视频源列表为空 (len=%s, proxy=%s)，尝试其他方式",
+                            len(resp.content), proxy or "直连")
+        except Exception as exc:
+            last_err = exc
+            logging.warning("视频源解析失败 (proxy=%s): %s", proxy or "直连", exc)
+    if files is None:
+        if last_err:
+            logging.warning("视频源解析全部失败: %s", last_err)
         return "", ""
-    best = min(
+
+    # 按画质优先级排序后逐级回退：最优画质没有 src 时用次优
+    ranked = sorted(
         files,
         key=lambda f: IWARA_QUALITY_PREF.get(str(f.get("name") or "").lower(), 9),
     )
-    src = best.get("src") or {}
-    url = src.get("download") or src.get("view") or ""
-    return url, best.get("type") or "video/mp4"
+    for entry in ranked:
+        src = entry.get("src") or {}
+        url = src.get("download") or src.get("view") or ""
+        # 协议相对 URL（//hime.iwara.tv/...）：浏览器能自动解析，requests 不能 ——
+        # 这正是"无法解析视频源"误报的根因，必须补上 https: 前缀
+        if url.startswith("//"):
+            url = "https:" + url
+        if url.startswith("http"):
+            return url, entry.get("type") or "video/mp4"
+    return "", ""
 
 
 def _iwara_video_ext(mime: str) -> str:
@@ -6113,13 +6233,20 @@ def _mark_items_new(album_id: str | None, items: list[dict]) -> None:
 
 
 def _update_download_state(album_id: str | None, items: list[dict]) -> None:
-    """下载成功后更新相册的下载进度（记录已下载文件和最后下载时间）。"""
+    """下载成功后更新相册的下载进度（记录已下载文件和最后下载时间）。
+
+    只记录 status == "completed" 的文件：失败/跳过的文件不能进 downloaded 集合，
+    否则重新解析时会被误标"已下载"且默认不勾选，用户以为下过了实际没有。
+    """
     if not album_id or not items:
+        return
+    ok_items = [i for i in items if i.get("status") == "completed"]
+    if not ok_items:
         return
     state = _load_download_state()
     album_state = state.get(album_id) or {"downloaded": [], "last_downloaded": ""}
     downloaded = set(album_state.get("downloaded", []))
-    for item in items:
+    for item in ok_items:
         key = item.get("item_page", "")
         if key:
             downloaded.add(key)
@@ -6127,7 +6254,8 @@ def _update_download_state(album_id: str | None, items: list[dict]) -> None:
     album_state["last_downloaded"] = datetime.now().isoformat(timespec="seconds")
     state[album_id] = album_state
     _save_download_state(state)
-    logging.info("下载状态已更新: %s (累计 %d 个文件)", album_id, len(downloaded))
+    logging.info("下载状态已更新: %s (本次成功 %d 个，累计 %d 个文件)",
+                 album_id, len(ok_items), len(downloaded))
 
 
 # ============================
@@ -10097,6 +10225,35 @@ class DownloadManager:
     def resume(self, task_id: str) -> None:
         self.start(task_id)
 
+    def retry(self, task_id: str) -> None:
+        """重试任务：失败文件重置为待下载并重新启动下载。
+
+        已完成的文件不动（本地校验机制会在启动时核对文件是否存在）；
+        失败计数清零，任务状态回到 running。
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            return
+        if task_id in self._runners:
+            return  # 正在运行，无需重试
+        reset_count = 0
+        for item in task.get("files", []):
+            if item.get("status") == "failed":
+                item["status"] = "pending"
+                item["completed"] = 0
+                reset_count += 1
+        task["failed"] = 0
+        task["status"] = "running"
+        self._save(immediate=True)
+        self.emit_snapshot(immediate=True)
+        emit({
+            "event": "log",
+            "type": "下载",
+            "message": f"任务「{task.get('album') or ''}」重试 {reset_count} 个失败文件",
+        })
+        self._runners[task_id] = asyncio.create_task(self._run(task_id))
+        self.emit_snapshot(immediate=True)
+
     def cancel(self, task_id: str) -> None:
         task = self.tasks.get(task_id)
         if not task:
@@ -11046,11 +11203,38 @@ class DownloadManager:
                     final_path = Path(file_dir) / truncate_filename(final_name)
 
                     _iwara_throttle()
-                    with _iwara_session.get(
-                        download_link, stream=True, timeout=120,
-                        headers={"Referer": "https://www.iwara.tv/"},
-                    ) as resp:
+                    # 媒体服务器（mikoto.iwara.tv 等）直连不通时用系统代理重试（对齐浏览器行为）
+                    resp = None
+                    try:
+                        resp = _iwara_session.get(
+                            download_link, stream=True, timeout=(15, 60),
+                            headers={"Referer": "https://www.iwara.tv/"},
+                        )
                         resp.raise_for_status()
+                    except requests.RequestException as dexc:
+                        resp and resp.close()
+                        resp = None
+                        proxy_used = ""
+                        for proxy in _system_proxies():
+                            try:
+                                logging.info("媒体直连失败(%s)，尝试系统代理: %s", dexc, proxy)
+                                resp = _iwara_session.get(
+                                    download_link, stream=True, timeout=(15, 120),
+                                    headers={"Referer": "https://www.iwara.tv/"},
+                                    proxies={"http": proxy, "https": proxy},
+                                )
+                                resp.raise_for_status()
+                                proxy_used = proxy
+                                break
+                            except requests.RequestException:
+                                resp and resp.close()
+                                resp = None
+                        if resp is None:
+                            raise PermissionError(
+                                f"媒体服务器无法连接（直连与系统代理都失败）: {dexc}"
+                            )
+                        logging.info("媒体下载经系统代理成功: %s", proxy_used)
+                    try:
                         size = int(resp.headers.get("Content-Length") or 0)
                         live_manager.set_task_info(internal_task, final_name, size or None)
                         emit({
@@ -11075,6 +11259,8 @@ class DownloadManager:
                                         if pct != last_pct:
                                             live_manager.update_task(internal_task, pct)
                                             last_pct = pct
+                    finally:
+                        resp.close()
 
                     item["_final_path"] = str(final_path)
                     item["_final_name"] = final_name
@@ -13562,6 +13748,9 @@ async def command_loop() -> None:
             elif cmd == "resume_task":
                 download_manager.resume(command.get("task_id", ""))
 
+            elif cmd == "retry_task":
+                download_manager.retry(command.get("task_id", ""))
+
             elif cmd == "cancel_task":
                 download_manager.cancel(command.get("task_id", ""))
 
@@ -13642,6 +13831,9 @@ async def command_loop() -> None:
 
             elif cmd == "pawchive_favorites":
                 await pawchive_get_favorites()
+
+            elif cmd == "pawchive_home":
+                await pawchive_home(int(command.get("page", 1) or 1))
 
             elif cmd == "pawchive_post_info":
                 await pawchive_post_info(command.get("url", ""))

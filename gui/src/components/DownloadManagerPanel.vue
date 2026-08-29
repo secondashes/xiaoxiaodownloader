@@ -76,6 +76,12 @@
                   size="tiny" quaternary type="primary" @click="$emit('resume', task.id)"
                 >继续</n-button>
                 <n-button
+                  v-if="task.status === 'failed' || (task.failed || 0) > 0"
+                  size="tiny" quaternary type="warning"
+                  title="重试该任务的失败文件（失败项重置为待下载并重新开始）"
+                  @click="$emit('retry', task.id)"
+                >↻ 重试</n-button>
+                <n-button
                   size="tiny" quaternary
                   title="在文件管理器中打开该任务的保存文件夹"
                   @click="$emit('open-folder', task)"
@@ -138,7 +144,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'close', 'pause', 'resume', 'resume-all', 'cancel', 'remove', 'toggle-shutdown',
-  'open-folder', 'locate-file',
+  'open-folder', 'locate-file', 'retry',
 ])
 
 // 展开状态（母组 / 任务两级，点击头部切换）

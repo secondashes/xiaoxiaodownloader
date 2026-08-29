@@ -331,6 +331,7 @@
             @pa-open-post="handlePaOpenPost"
             @pa-close-detail="handlePaCloseDetail"
             @pa-favorites="handlePawchiveFavorites"
+            @pa-home="handlePawchiveHome"
             @pa-open-artist="handlePaOpenArtist"
             @pa-close-artist="handlePaCloseArtist"
             @ex-add-hidden-tag="handleExAddHiddenTag"
@@ -350,6 +351,7 @@
             @close="detailVisible = false"
             @pause="pauseTask"
             @resume="resumeTask"
+            @retry="retryTask"
             @resume-all="resumeAllTasks"
             @cancel="cancelTask"
             @remove="removeTask"
@@ -2498,6 +2500,7 @@ function doSearch(query, page) {
     return
   }
   searching.value = true
+  paHomeMode.value = false   // 新搜索退出 PA 主页模式（翻页不再走主页命令）
   if (page === 1) {
     searchResults.value = []
     searchPage.value = 1
@@ -2546,6 +2549,11 @@ function handleGoPage(page) {
   // H站分类浏览模式：翻页走分类浏览命令（无关键词）
   if ((settings.site || 'bunkr') === 'hanime' && !lastSearchKeyword.value && settings.hanime_genre) {
     handleHanimeGenreBrowse(target)
+    return
+  }
+  // PA 主页模式：翻页走主页命令（全站最新帖子流）
+  if ((settings.site || 'bunkr') === 'pawchive' && paHomeMode.value && !lastSearchKeyword.value) {
+    handlePawchiveHome(target)
     return
   }
   doSearch(lastSearchKeyword.value || searchQuery.value.trim(), target)
@@ -2765,7 +2773,22 @@ function handlePawchiveFavorites() {
   cameFromSearch.value = false
   searchResults.value = []
   searching.value = true
+  paHomeMode.value = false
   window.api.sendCommand({ cmd: 'pawchive_favorites' })
+}
+
+// PA 主页模式（全站最新帖子流，支持翻页）
+const paHomeMode = ref(false)
+
+function handlePawchiveHome(page = 1) {
+  if (!window.api) return
+  searchQuery.value = ''
+  fileList.value = []
+  cameFromSearch.value = false
+  searchResults.value = []
+  searching.value = true
+  paHomeMode.value = true
+  window.api.sendCommand({ cmd: 'pawchive_home', page: Math.max(1, Math.floor(Number(page) || 1)) })
 }
 
 function updateSearchMode(mode) {
@@ -4717,6 +4740,11 @@ function pauseTask(taskId) {
 
 function resumeTask(taskId) {
   if (window.api) window.api.sendCommand({ cmd: 'resume_task', task_id: taskId })
+}
+
+// 重试任务：失败文件重置为待下载并重新开始
+function retryTask(taskId) {
+  if (window.api) window.api.sendCommand({ cmd: 'retry_task', task_id: taskId })
 }
 
 function resumeAllTasks() {
