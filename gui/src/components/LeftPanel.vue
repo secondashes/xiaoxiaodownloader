@@ -1026,12 +1026,13 @@
               <div class="switch-hint" style="margin-top: 4px">国内必须配置代理才能访问 x.com</div>
             </div>
             <div class="setting-item">
-              <div class="setting-label">X 文件夹组织（父文件夹为用户名）</div>
+              <div class="setting-label">X 文件夹组织（父文件夹为博主名）</div>
               <n-select
-                :value="settings.twitter_subfolder || 'date_post'"
-                :options="pawchiveSubfolderOptions"
+                :value="settings.twitter_subfolder || 'media'"
+                :options="twitterSubfolderOptions"
                 @update:value="v => update('twitter_subfolder', v)"
               />
+              <div class="switch-hint" style="margin-top: 4px">文件名自动为「发帖日期_帖子内容_序号」</div>
             </div>
             <div class="setting-item">
               <div class="setting-label">X 自定义子文件夹模板（优先于上方规则）</div>
@@ -2311,6 +2312,12 @@ const pawchiveSubfolderOptions = [
   { label: '按月份 (2026-08)', value: 'date' },
   { label: '按帖子名', value: 'post' },
   { label: '不分子文件夹', value: 'none' },
+]
+
+// X 文件夹组织选项（博主名/图片|视频 两级，避免嵌套过多）
+const twitterSubfolderOptions = [
+  { label: '图片/视频分类（推荐）', value: 'media' },
+  { label: '不分类（全部放博主名下）', value: 'none' },
 ]
 
 // Pawchive 搜索模式选项

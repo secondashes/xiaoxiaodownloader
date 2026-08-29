@@ -4740,10 +4740,23 @@ def _twitter_extract_posts(instructions: list) -> list[dict]:
     return posts
 
 
+def _twitter_filename(post_date: str, title: str, tweet_id: str, idx: int, ext: str) -> str:
+    """X 文件名规则：发帖日期_帖子内容_序号.ext（无内容回退推文ID）。"""
+    safe_title = sanitize_directory_name((title or "").strip())[:40]
+    if post_date and safe_title:
+        return f"{post_date}_{safe_title}_{idx:02d}.{ext}"
+    if post_date and tweet_id:
+        return f"{post_date}_{tweet_id}_{idx:02d}.{ext}"
+    if tweet_id:
+        return f"{tweet_id}_{idx:02d}.{ext}"
+    return f"twitter_{int(time.time())}_{idx:02d}.{ext}"
+
+
 def _twitter_map_tweet(result: dict) -> list[dict]:
     """把单条推文的 GraphQL result 转成下载条目（跳过转推/无媒体）。
 
     图片取 orig 原图质量；视频取最高码率 mp4。
+    文件名：发帖日期_帖子内容_序号.ext（目录：用户名/图片|视频）。
     """
     if result.get("__typename") == "TweetWithVisibilityResults":
         result = result.get("tweet") or result
@@ -4796,8 +4809,7 @@ def _twitter_map_tweet(result: dict) -> list[dict]:
                 ext = "webm"
         if not media_url:
             continue
-        filename = f"{post_date}_{tweet_id}_{idx:02d}.{ext}" if post_date \
-            else f"{tweet_id}_{idx:02d}.{ext}"
+        filename = _twitter_filename(post_date, full_text, tweet_id, idx, ext)
         items.append({
             "filename": filename,
             "size": None,
@@ -4808,6 +4820,8 @@ def _twitter_map_tweet(result: dict) -> list[dict]:
             "thumbnail": thumb,
             "post_date": post_date,
             "post_title": full_text[:80],
+            "post_id": tweet_id,
+            "media_type": "video" if mtype in ("video", "animated_gif") else "photo",
         })
     return items
 
@@ -5009,8 +5023,7 @@ async def twitter_inspect(url: str, options: dict) -> None:
                             continue
                         ext = base.rsplit(".", 1)[-1].lower() if "." in base else "jpg"
                         items.append({
-                            "filename": f"{post_date}_{tweet_id}_{idx:02d}.{ext}" if post_date
-                            else f"{tweet_id}_{idx:02d}.{ext}",
+                            "filename": _twitter_filename(post_date, text, tweet_id, idx, ext),
                             "size": None,
                             "item_page": f"https://x.com/{screen_name}/status/{tweet_id}",
                             "status": "pending",
@@ -5019,6 +5032,8 @@ async def twitter_inspect(url: str, options: dict) -> None:
                             "thumbnail": f"{base}?name=small",
                             "post_date": post_date,
                             "post_title": text[:80],
+                            "post_id": tweet_id,
+                            "media_type": "photo",
                         })
                     video = data.get("video") or {}
                     for variant in video.get("variants") or []:
@@ -5027,8 +5042,7 @@ async def twitter_inspect(url: str, options: dict) -> None:
                             continue
                         idx += 1
                         items.append({
-                            "filename": f"{post_date}_{tweet_id}_{idx:02d}.mp4" if post_date
-                            else f"{tweet_id}_{idx:02d}.mp4",
+                            "filename": _twitter_filename(post_date, text, tweet_id, idx, "mp4"),
                             "size": None,
                             "item_page": f"https://x.com/{screen_name}/status/{tweet_id}",
                             "status": "pending",
@@ -5037,6 +5051,8 @@ async def twitter_inspect(url: str, options: dict) -> None:
                             "thumbnail": video.get("poster") or "",
                             "post_date": post_date,
                             "post_title": text[:80],
+                            "post_id": tweet_id,
+                            "media_type": "video",
                         })
             if not items:
                 emit({"event": "inspect_error", "message": "推文中没有找到可下载的媒体文件"})
@@ -5093,6 +5109,12 @@ async def twitter_inspect(url: str, options: dict) -> None:
         cursor = ""
         seen_media: set[str] = set()
         seen_cursors: set[str] = set()
+        # 增量更新截断日期：上次已下载到的最新发帖日期。
+        # 时间线从新到旧翻页，翻到早于截断日期即可停止（只拉取更新的内容，
+        # 大博主不用每次都把整个时间线翻到底）。
+        cutoff = ((_load_download_state().get(identifier) or {}).get("latest_post")) or ""
+        if cutoff:
+            logging.info("Twitter 增量解析: @%s 截断日期 %s（只拉取更新的内容）", screen_name, cutoff)
         while True:
             variables = {
                 "userId": user_id, "count": 20,
@@ -5112,6 +5134,7 @@ async def twitter_inspect(url: str, options: dict) -> None:
                            or {}).get("timeline", {}).get("instructions") or []
             posts = _twitter_extract_posts(instructions)
             new_count = 0
+            oldest_date = ""
             for post in posts:
                 mapped = _twitter_map_tweet(post)
                 for it in mapped:
@@ -5119,6 +5142,9 @@ async def twitter_inspect(url: str, options: dict) -> None:
                         seen_media.add(it["media_url"])
                         all_items.append(it)
                         new_count += 1
+                        pd = it.get("post_date") or ""
+                        if pd and (not oldest_date or pd < oldest_date):
+                            oldest_date = pd
             # 提取底部游标
             next_cursor = ""
             for inst in instructions:
@@ -5128,7 +5154,11 @@ async def twitter_inspect(url: str, options: dict) -> None:
                     c = entry.get("content") or {}
                     if c.get("cursorType") == "Bottom" and c.get("value"):
                         next_cursor = c["value"]
-            if not next_cursor or next_cursor in seen_cursors or new_count == 0:
+            # 翻页终止：无游标 / 游标循环 / 无新内容 / 已翻到截断日期之前
+            reached_cutoff = bool(cutoff and oldest_date and oldest_date <= cutoff)
+            if reached_cutoff:
+                logging.info("Twitter 时间线已翻到截断日期(%s)，停止翻页", cutoff)
+            if not next_cursor or next_cursor in seen_cursors or new_count == 0 or reached_cutoff:
                 break
             seen_cursors.add(next_cursor)
             cursor = next_cursor
@@ -5169,14 +5199,10 @@ async def twitter_inspect(url: str, options: dict) -> None:
 
 
 def _twitter_subfolder(item: dict, options: dict) -> str:
-    """Twitter 专属子文件夹规则（父文件夹为用户名，由相册目录承担）。
+    """Twitter 专属子文件夹规则（父文件夹为博主名，由相册目录承担）。
 
-    模式 twitter_subfolder:
-      - none:       不建子文件夹
-      - date:       按发布月份 YYYY-MM
-      - post:       按推文（推文id）
-      - date_post:  "YYYY-MM-推文id"（默认，日期并入文件夹名，减少嵌套层级）
-    自定义模板 twitter_folder_template 非空时优先。
+    目录结构：博主名/图片 或 博主名/视频（按媒体类型两级，避免嵌套过多）。
+    自定义模板 twitter_folder_template 非空时优先（兼容旧设置值）。
     """
     template = (options.get("twitter_folder_template") or "").strip()
     if template:
@@ -5186,23 +5212,11 @@ def _twitter_subfolder(item: dict, options: dict) -> str:
             (item.get("post_title") or "").strip(),
             item.get("post_id") or "",
         )
-    mode = options.get("twitter_subfolder", "date_post")
-    parts: list[str] = []
-    date = (item.get("post_date") or "")[:7]  # YYYY-MM
-    title = sanitize_directory_name((item.get("post_title") or "").strip())[:60]
-
-    if mode == "date" and date:
-        parts.append(date)
-    elif mode == "post" and title:
-        parts.append(title)
-    elif mode == "date_post":
-        if date and title:
-            parts.append(f"{date}-{title}")
-        elif date:
-            parts.append(date)
-        elif title:
-            parts.append(title)
-    return str(Path(*parts)) if parts else ""
+    # twitter_subfolder: media（默认，图片/视频分类）| none（不分类，直接放博主名下）
+    mode = options.get("twitter_subfolder", "media")
+    if mode == "none":
+        return ""
+    return "视频" if item.get("media_type") == "video" else "图片"
 
 
 # ============================
@@ -6224,39 +6238,37 @@ def _save_download_state(state: dict) -> None:
 
 
 def _mark_items_new(album_id: str | None, items: list[dict]) -> None:
-    """给解析出的文件列表标记 is_new / is_downloaded（历史查重）。
+    """给解析出的文件列表标记 is_new / is_downloaded（历史查重 + 增量更新截断）。
 
-    is_new 判定规则（满足任一即为新）：
-    - 该文件的 item_page 不在上次已下载集合中
-    - 文件带 post_date 且晚于上次下载时间
-
-    is_downloaded：item_page 在已下载集合中（前端状态栏显示"已下载"，
-    默认不勾选，避免重复下载）。
+    截断日期（latest_post）：该相册上次成功下载的文件里最新的发帖日期。
+    - 发帖日期 <= 截断日期 → is_downloaded（视为已处理过，默认不勾选）
+    - 发帖日期 >  截断日期 → is_new（新内容，默认勾选下载）
+    - item_page 在已下载集合中 → is_downloaded（精确到单文件的查重）
     """
     if not album_id or not items:
         return
     state = _load_download_state()
     album_state = state.get(album_id) or {}
     downloaded = set(album_state.get("downloaded", []))
-    last_date = album_state.get("last_downloaded", "")
+    cutoff = album_state.get("latest_post") or ""
 
     new_count = 0
     dup_count = 0
     for item in items:
         key = item.get("item_page", "")
-        is_new = key not in downloaded
         post_date = item.get("post_date") or ""
-        if not is_new and post_date and last_date and post_date > last_date:
-            is_new = True
-        item["is_new"] = is_new
-        # 历史查重：下载记录里有这个文件（key 非空才算，避免空 key 全部误标）
-        item["is_downloaded"] = bool(key) and key in downloaded
-        if is_new:
+        # 截断日期之前的内容统一视为已下载（下次只下载更新）
+        is_dl = bool(key) and key in downloaded
+        if not is_dl and post_date and cutoff and post_date <= cutoff:
+            is_dl = True
+        item["is_downloaded"] = is_dl
+        item["is_new"] = not is_dl
+        if not is_dl:
             new_count += 1
-        if item["is_downloaded"]:
+        else:
             dup_count += 1
     if new_count:
-        logging.info("增量标记: %s 有 %d 个新文件", album_id, new_count)
+        logging.info("增量标记: %s 有 %d 个新文件（截断日期 %s）", album_id, new_count, cutoff or "无")
     if dup_count:
         logging.info("查重标记: %s 有 %d 个文件已下载过", album_id, dup_count)
 
@@ -6266,6 +6278,9 @@ def _update_download_state(album_id: str | None, items: list[dict]) -> None:
 
     只记录 status == "completed" 的文件：失败/跳过的文件不能进 downloaded 集合，
     否则重新解析时会被误标"已下载"且默认不勾选，用户以为下过了实际没有。
+
+    同时记录 latest_post（已下载文件中最新的发帖日期）作为下次增量更新
+    的截断日期：重新解析时早于该日期的内容默认不勾选，只下载更新的内容。
     """
     if not album_id or not items:
         return
@@ -6275,16 +6290,21 @@ def _update_download_state(album_id: str | None, items: list[dict]) -> None:
     state = _load_download_state()
     album_state = state.get(album_id) or {"downloaded": [], "last_downloaded": ""}
     downloaded = set(album_state.get("downloaded", []))
+    latest_post = album_state.get("latest_post") or ""
     for item in ok_items:
         key = item.get("item_page", "")
         if key:
             downloaded.add(key)
+        pd = item.get("post_date") or ""
+        if pd and pd > latest_post:
+            latest_post = pd
     album_state["downloaded"] = sorted(downloaded)[-3000:]  # 防止无限增长
     album_state["last_downloaded"] = datetime.now().isoformat(timespec="seconds")
+    album_state["latest_post"] = latest_post
     state[album_id] = album_state
     _save_download_state(state)
-    logging.info("下载状态已更新: %s (本次成功 %d 个，累计 %d 个文件)",
-                 album_id, len(ok_items), len(downloaded))
+    logging.info("下载状态已更新: %s (本次成功 %d 个，累计 %d 个文件，更新至 %s)",
+                 album_id, len(ok_items), len(downloaded), latest_post or "无日期")
 
 
 # ============================
@@ -11127,7 +11147,8 @@ class DownloadManager:
     ) -> None:
         """下载单个 Twitter 媒体文件：直链（pbs/video.twimg.com）+ 代理流式下载。
 
-        目录组织：下载根目录/用户名/YYYY-MM/推文内容（twitter_subfolder 设置）。
+        目录组织：下载根目录/博主名/图片|视频（媒体类型分类），
+        文件名：发帖日期_帖子内容_序号.ext。
         """
         filename = item.get("filename") or f"twitter_{int(time.time())}.jpg"
         media_url = item.get("media_url") or ""
@@ -12354,7 +12375,8 @@ DEFAULT_SETTINGS = {
     "exhentai_subfolder": "date_post",
     # Twitter/X 专属设置
     "twitter_proxy": "http://127.0.0.1:10809",
-    "twitter_subfolder": "date_post",
+    # twitter_subfolder: media（图片/视频分类，默认，旧值 date_post 等已兼容为新结构）
+    "twitter_subfolder": "media",
     # Iwara 专属设置（代理留空 = 直连）
     "iwara_proxy": "",
     # Hanime1 / Oreno3D / EroMMDTube / ASMR 专属设置（Hanime1 国内需代理；其余默认直连）

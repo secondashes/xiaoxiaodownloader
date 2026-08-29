@@ -462,7 +462,7 @@ const settings = reactive({
   exhentai_page_max: 0,        // 最大页数（0=不限）
   // Twitter/X 专属设置
   twitter_proxy: 'http://127.0.0.1:10809',
-  twitter_subfolder: 'date_post',
+  twitter_subfolder: 'media',
   // Iwara 专属设置（代理留空 = 直连）
   iwara_proxy: '',
   // Hanime1 / Oreno3D / EroMMDTube 专属设置（H站国内需代理；O3D/E站 默认直连）
@@ -1127,6 +1127,11 @@ function handlePythonEvent(event) {
         // 非图片/视频文件加载系统图标作为缩略图占位
         applyFileIcons()
         addLog('解析', `完成: ${event.album_name} (${fileList.value.length} 个文件)`)
+        // 增量提示：已下载过的默认不勾选，只勾选截断日期之后的新内容
+        const dlCount = fileList.value.filter(it => it.is_downloaded).length
+        if (dlCount) {
+          addLog('解析', `增量更新: 已下载过 ${dlCount} 个（默认不勾选），新内容 ${fileList.value.length - dlCount} 个`)
+        }
       }
       break
 
