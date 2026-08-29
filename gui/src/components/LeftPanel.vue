@@ -182,33 +182,36 @@
           <div class="login-hint">登录后可使用"我的收藏"功能</div>
         </div>
 
-        <!-- Twitter/X cookie 登录（auth_token / ct0 分开填写） -->
+        <!-- Twitter/X webview 浏览器登录（推荐）+ 可选粘贴 Cookie -->
         <div v-if="site === 'twitter'" class="pawchive-login-form">
-          <n-input
-            v-model:value="twAuthTokenInput"
+          <n-button
             size="small"
-            placeholder="auth_token（x.com 登录 Cookie）"
-            :disabled="loginLoading"
-            @keyup.enter="handleTwitterLogin"
-          />
+            type="primary"
+            block
+            @click="emit('site-oauth-login', 'twitter')"
+          >
+            打开浏览器登录（推荐）
+          </n-button>
           <n-input
-            v-model:value="twCt0Input"
+            v-model:value="twCookieInput"
             size="small"
-            placeholder="ct0（x.com 登录 Cookie）"
-            :disabled="loginLoading"
+            type="password"
+            show-password-on="click"
+            placeholder="或粘贴 Cookie（含 auth_token / ct0）"
             @keyup.enter="handleTwitterLogin"
           />
           <n-button
             size="small"
             type="primary"
             block
-            :disabled="!twAuthTokenInput.trim() || !twCt0Input.trim()"
+            :disabled="!twCookieInput.trim()"
             @click="handleTwitterLogin"
           >
             保存并验证登录
           </n-button>
           <div class="login-hint">
-            浏览器登录 x.com → F12 → 应用 → Cookie → 分别复制 auth_token 和 ct0 的值填入上方两个框
+            推荐点上方按钮：弹出浏览器登录 x.com（邮箱/手机号/Google 皆可），
+            登录后点弹窗下方"确认"自动抓取 Cookie；国内网络需先在下方设置 X 站代理
           </div>
         </div>
 
@@ -359,7 +362,7 @@
           </div>
         </div>
 
-        <!-- xHamster / Pornhub 用 Twitter (X) 站 OAuth 登录（复用 X 站 cookie 自动授权） -->
+        <!-- xHamster / Pornhub webview 浏览器登录（和 EX 站相同操作） -->
         <div v-if="site === 'xhamster' || site === 'pornhub'" class="pawchive-login-form">
           <n-button
             size="small"
@@ -367,40 +370,27 @@
             block
             @click="emit('site-oauth-login', site)"
           >
-            用 Twitter (X) 登录
+            打开浏览器登录（推荐）
           </n-button>
           <div class="login-hint">
-            {{ site === 'xhamster' ? 'xHamster' : 'Pornhub' }} 选用 jp 区域版本（{{ site === 'xhamster' ? 'jp.xhamster.com' : 'jp.pornhub.com' }}）；点上方按钮在弹窗内自动用已登录的 X 站 cookie 完成 OAuth 授权
+            {{ site === 'xhamster' ? 'xHamster' : 'Pornhub' }} 点上方按钮在弹出的浏览器内登录
+            （邮箱密码或 Twitter/X 授权皆可），登录后点弹窗下方"确认"自动抓取 Cookie
           </div>
         </div>
 
-        <!-- XVideos 邮箱密码登录（含人机验证 + 记住装置） -->
+        <!-- XVideos webview 浏览器登录（和 EX 站相同操作） -->
         <div v-if="site === 'xvideos'" class="pawchive-login-form">
-          <n-input
-            v-model:value="xvEmailInput"
-            size="small"
-            placeholder="XVideos 登录邮箱"
-            @keyup.enter="handleXvLogin"
-          />
-          <n-input
-            v-model:value="xvPasswordInput"
-            size="small"
-            type="password"
-            show-password-on="click"
-            placeholder="密码"
-            @keyup.enter="handleXvLogin"
-          />
-          <n-checkbox v-model:checked="xvRemember" size="small">在此装置上记住我（减少后续验证）</n-checkbox>
           <n-button
             size="small"
             type="primary"
             block
-            @click="handleXvLogin"
+            @click="emit('site-oauth-login', 'xvideos')"
           >
-            登录（弹窗内完成人机验证）
+            打开浏览器登录（推荐）
           </n-button>
           <div class="login-hint">
-            XVideos 首次登录可能弹出人机验证（图片选择/点击），在弹窗内按提示完成即可；cookie 加密长期保存
+            XVideos 点上方按钮在弹出的浏览器内登录（邮箱密码皆可，首次可能有人机验证，按提示完成），
+            登录后点弹窗下方"确认"自动抓取 Cookie；cookie 加密长期保存
           </div>
         </div>
 
@@ -440,7 +430,7 @@
             打开登录页（浏览器）
           </n-button>
           <n-button
-            v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'"
+            v-if="site !== 'iwara' && site !== 'hanime' && site !== 'twitter' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'"
             size="small"
             block
             type="primary"
@@ -452,20 +442,20 @@
             {{ site === 'pawchive'
               ? '推荐直接用上方账号密码登录；一键抓取会自动读取浏览器登录信息'
               : site === 'twitter'
-                ? '先在浏览器登录 x.com，再点上方按钮自动抓取登录信息'
+                ? '推荐点上方"打开浏览器登录"在弹窗内登录 x.com，登录后点"确认"自动抓取'
                 : site === 'iwara'
                   ? 'Iwara 使用邮箱密码登录（cookie 会过期，密码登录自动续期）；国内网络建议在设置里配置 Iwara 代理'
                   : site === 'hanime'
                     ? 'Hanime1 (H站) 使用邮箱密码登录；国内网络必须在设置里配置 H站代理'
                     : site === 'xhamster' || site === 'pornhub'
-                      ? '推荐用上方 X 站 OAuth 登录；也可打开浏览器手动登录后用"一键抓取Cookie"'
+                      ? '点上方"打开浏览器登录"在弹窗内登录（邮箱或 X 授权皆可），登录后点"确认"自动抓取 Cookie'
                       : site === 'xvideos'
-                        ? '推荐用上方邮箱密码登录（人机验证自动弹窗）；也可打开浏览器手动登录后用"一键抓取Cookie"'
+                        ? '点上方"打开浏览器登录"在弹窗内登录（首次可能有人机验证），登录后点"确认"自动抓取 Cookie'
                         : site === 'javdb'
                           ? '推荐用上方邮箱密码登录（自动预填 + 弹窗内完成 Cloudflare 验证）；国内必须配置下方 JavDB 代理'
                           : '先在浏览器登录 exhentai.org，再点上方按钮自动抓取登录信息' }}
           </div>
-          <div v-if="site !== 'iwara' && site !== 'hanime' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
+          <div v-if="site !== 'iwara' && site !== 'hanime' && site !== 'twitter' && site !== 'xhamster' && site !== 'pornhub' && site !== 'xvideos' && site !== 'javdb'" class="login-hint">Chrome 新版加密抓取失败时，请右键管理员运行"抓取Cookie.bat"，结果在 cookies.txt</div>
         </div>
 
         <!-- 未登录但保存过账号档案：直接选择切换即可恢复登录（当前账号过期也能换） -->
@@ -2078,27 +2068,8 @@ function handleTwClearCache() {
 const loginUsername = ref('')
 const loginPassword = ref('')
 
-// X 登录：auth_token / ct0 分开填写（也兼容粘贴带名称的完整值）
-const twAuthTokenInput = ref('')
-const twCt0Input = ref('')
-
-// 提取值：去掉可能粘贴进来的 "name=" 前缀或整段 Cookie 字符串里的对应值
-function extractTwValue(raw, name) {
-  let text = (raw || '').trim()
-  if (!text) return ''
-  if (text.includes('=')) {
-    // 粘贴了整段 Cookie 或带名称的值：解析出目标键
-    for (const pair of text.split(';')) {
-      const [k, ...rest] = pair.trim().split('=')
-      if (k && k.trim() === name) return rest.join('=').trim()
-    }
-    // 不是目标键的 name=value：视为无效粘贴
-    const firstEq = text.indexOf('=')
-    if (text.slice(0, firstEq).trim() !== name) return ''
-    text = text.slice(firstEq + 1).trim()
-  }
-  return text
-}
+// X 登录：可选粘贴整段 Cookie（含 auth_token / ct0）
+const twCookieInput = ref('')
 
 // ExHentai cookie 登录表单
 const exCookieInput = ref('')
@@ -2130,21 +2101,6 @@ function handleAsmrLogin() {
   emit('asmr-login', asmrNameInput.value.trim(), asmrPasswordInput.value)
 }
 
-// XVideos 邮箱密码登录表单（触发 webview 弹窗由 App.vue 接管）
-const xvEmailInput = ref('')
-const xvPasswordInput = ref('')
-const xvRemember = ref(true)
-
-function handleXvLogin() {
-  if (!xvEmailInput.value.trim() || !xvPasswordInput.value) return
-  // 触发 App.vue 的 webview 登录弹窗（与 xhamster/pornhub OAuth 同入口，自动预填账号）
-  emit('site-oauth-login', 'xvideos', {
-    email: xvEmailInput.value.trim(),
-    password: xvPasswordInput.value,
-    remember: xvRemember.value,
-  })
-}
-
 // JavDB 邮箱密码登录表单（触发 webview 弹窗，登录页自动预填账号）
 const jdbEmailInput = ref('')
 const jdbPasswordInput = ref('')
@@ -2161,10 +2117,8 @@ function handleJdbLogin() {
 }
 
 function handleTwitterLogin() {
-  const authToken = extractTwValue(twAuthTokenInput.value, 'auth_token')
-  const ct0 = extractTwValue(twCt0Input.value, 'ct0')
-  if (!authToken || !ct0) return
-  emit('twitter-set-cookies', `auth_token=${authToken}; ct0=${ct0}`)
+  if (!twCookieInput.value.trim()) return
+  emit('twitter-set-cookies', twCookieInput.value.trim())
 }
 
 function handleExLogin() {

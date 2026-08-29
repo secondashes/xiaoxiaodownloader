@@ -57,10 +57,12 @@ protocol.registerSchemesAsPrivileged([
 // ExHentai webview 使用的独立会话（与主界面隔离，只走代理）
 const EX_SESSION_PARTITION = 'persist:exhentai'
 
-// 通用 webview OAuth 站点会话注册表（用于 xhamster/pornhub 等用 X 站 OAuth 登录的站点）
-// partition='persist:twitter' 共享 X 站 cookie：OAuth 跳转 x.com 时自动带 cookie 完成授权
+// 通用 webview 站点会话注册表（浏览器登录，登录后点"确认"抓取目标站 cookie）
+// xhamster/pornhub 的 partition 共享 persist:twitter：弹窗内用 X 授权登录时自动带 x.com cookie
 // domains 用于抓取目标站登录后的 cookie（不跨域注入 X cookie，仅共享会话）
 const SITE_SESSIONS = {
+  // X 站：弹窗内登录 x.com，抓取 .x.com 域的 auth_token / ct0（同 EX 站操作）
+  twitter:  { partition: 'persist:twitter', domains: ['.x.com', '.twitter.com'], authNames: ['auth_token'] },
   xhamster: { partition: 'persist:twitter', domains: ['.xhamster.com', '.xhcdn.com'] },
   pornhub:  { partition: 'persist:twitter', domains: ['.pornhub.com', '.phncdn.com'] },
   xvideos:  { partition: 'persist:xvideos', domains: ['.xvideos.com', '.xvideos-cdn.com'] },

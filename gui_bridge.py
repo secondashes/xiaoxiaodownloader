@@ -10031,17 +10031,30 @@ class DownloadManager:
                     (info or {}).get("screen_name") or "Twitter 下载"
                 album_id = task.get("album_id") or None
             else:
-                soup = await fetch_page(validated_url)
-                if soup is None:
-                    task["status"] = "failed"
-                    self._save(immediate=True)
-                    self.emit_snapshot(immediate=True)
-                    return
-                is_album = check_url_type(validated_url)
-                album_name = get_album_name(soup)
-                album_id = task.get("album_id") or (
-                    get_album_id(validated_url) if is_album else None
-                )
+                # 按文件所属站点分流：iwara/hanime/asmr/oreno3d/erommd/xhamster/
+                # pornhub/xvideos 等站点的下载走各自独立函数（_xxx_download_one），
+                # 无需抓取任务 URL 页面；且这些 URL 不在 Bunkr 的 URL_TYPE_MAPPING
+                # 中，check_url_type 会对它们报错（旧版甚至 sys.exit 杀死后端）。
+                task_site = str(
+                    (files[0].get("site") if files else "")
+                    or options.get("site") or "",
+                ).lower()
+                if task_site and task_site not in ("bunkr",):
+                    soup = None
+                    album_name = task.get("album") or task_site
+                    album_id = task.get("album_id") or None
+                else:
+                    soup = await fetch_page(validated_url)
+                    if soup is None:
+                        task["status"] = "failed"
+                        self._save(immediate=True)
+                        self.emit_snapshot(immediate=True)
+                        return
+                    is_album = check_url_type(validated_url)
+                    album_name = get_album_name(soup)
+                    album_id = task.get("album_id") or (
+                        get_album_id(validated_url) if is_album else None
+                    )
             # 批量下载母文件夹：非空时任务顶层目录 = 母文件夹名（各站子逻辑按画廊/番号分子文件夹）
             batch_parent = (options.get("batch_parent_folder") or "").strip()
             if batch_parent:
@@ -10102,6 +10115,12 @@ class DownloadManager:
             self._save(immediate=True)
             self.emit_snapshot(immediate=True)
             raise
+        except SystemExit as exc:
+            # src/ 残留的 sys.exit 不允许杀死后端：记为任务失败并继续存活
+            logging.exception("下载任务触发 SystemExit(%s)（src 模块调用了 sys.exit）: %s", exc, task_id)
+            task["status"] = "failed"
+            self._save(immediate=True)
+            self.emit_snapshot(immediate=True)
         except Exception as exc:
             logging.exception("下载任务出错: %s", task_id)
             task["status"] = "failed"
@@ -13857,6 +13876,11 @@ async def command_loop() -> None:
             else:
                 logging.warning("未知命令: %s", cmd)
 
+        except SystemExit as exc:
+            # src/ 模块残留的 sys.exit 绝不能杀死后端进程（表现为前端"无法发送命令"）
+            logging.exception("命令处理触发 SystemExit(%s)（src 模块调用了 sys.exit）", exc)
+            emit({"event": "log", "type": "错误",
+                  "message": f"命令处理内部退出({exc})，已拦截，后端继续运行"})
         except Exception as exc:
             logging.exception("命令处理出错: %s", exc)
             emit({"event": "log", "type": "错误", "message": f"命令处理出错: {exc}"})
@@ -13886,8 +13910,12 @@ def main() -> None:
         asyncio.run(command_loop())
     except KeyboardInterrupt:
         logging.info("用户中断，退出")
-    except Exception as exc:
-        logging.exception("致命错误: %s", exc)
+    except SystemExit as exc:
+        # src/ 模块残留的 sys.exit() 会以 SystemExit 穿透 except Exception，
+        # 静默杀死整个后端（前端表现为"无法发送命令"）。记录堆栈便于定位。
+        logging.exception("SystemExit 逃逸（src 模块调用了 sys.exit）: %s", exc)
+    except BaseException as exc:  # noqa: BLE001 —— GUI 后端绝不允许静默死亡
+        logging.exception("致命错误(BaseException): %s", exc)
 
 
 if __name__ == "__main__":

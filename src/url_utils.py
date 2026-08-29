@@ -64,20 +64,25 @@ def replace_domain_with_fallback(url: str) -> str:
 
 
 def check_url_type(url: str) -> bool:
-    """Determine whether the provided URL corresponds to an album or a single file."""
+    """Determine whether the provided URL corresponds to an album or a single file.
+
+    Raises:
+        ValueError: URL 类型无法识别（非 Bunkr 相册/文件路径）。
+            原实现调用 sys.exit(1)，在 GUI 后端的 asyncio 任务中 SystemExit 会
+            穿透事件循环静默杀死整个进程（表现为前端"无法发送命令"）。
+    """
     try:
         url_type = url.rstrip("/").split("/")[-2]
 
-    except IndexError:
-        log_message = f"Invalid URL format for: {url}"
-        logging.exception(log_message)
+    except IndexError as exc:
+        raise ValueError(f"Invalid URL format for: {url}") from exc
 
     if url_type in URL_TYPE_MAPPING:
         return URL_TYPE_MAPPING[url_type]
 
-    log_message = f"Invalid URL format for: {url}. Unexpected URL type '{url_type}'."
-    logging.warning(log_message)
-    sys.exit(1)
+    raise ValueError(
+        f"Invalid URL format for: {url}. Unexpected URL type '{url_type}'."
+    )
 
 
 def log_unavailable_url(live_manager: LiveManager, url: str) -> None:
@@ -115,14 +120,12 @@ def get_identifier(url: str, soup: BeautifulSoup | None = None) -> str:
 
 
 def get_album_id(url: str) -> str:
-    """Extract the album or video ID from the provided URL."""
+    """Extract the album or video ID from the URL."""
     try:
         return url.rstrip("/").split("/")[-1]
 
-    except IndexError:
-        log_message = f"Invalid URL format for: {url}"
-        logging.exception(log_message)
-        sys.exit(1)
+    except IndexError as exc:
+        raise ValueError(f"Invalid URL format for: {url}") from exc
 
 
 def get_media_slug(url: str, soup: BeautifulSoup) -> str:

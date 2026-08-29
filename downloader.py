@@ -296,6 +296,10 @@ async def main() -> None:
 
     except KeyboardInterrupt:
         sys.exit(1)
+    except ValueError as exc:
+        # 无效 URL（check_url_type 等改为抛 ValueError；CLI 保持非零退出）
+        live_manager.update_log(event="Invalid URL", details=str(exc))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -153,8 +153,8 @@ async function onNav(e) {
     // 等页面渲染稳定后抓 cookie（避免 cookie 还没 set 就抓）
     setTimeout(() => grabCookies(true), 800)
   }
-  // 3. 检测 OAuth 跳转到 x.com（X 站 cookie 自动授权中）
-  if (/twitter\.com|x\.com/i.test(url)) {
+  // 3. 检测 OAuth 跳转到 x.com（X 站 cookie 自动授权中；twitter 自身登录时不提示）
+  if (props.site !== 'twitter' && /twitter\.com|x\.com/i.test(url)) {
     status.value = 'oauth'
   }
 }

@@ -3243,7 +3243,7 @@ function handleOpenLoginPage(site) {
   const url = LOGIN_PAGE_URLS[site]
   if (url && window.api) {
     window.api.openExternal(url)
-    message.info('已打开登录页，登录后回到本工具点"一键抓取浏览器 Cookie"')
+    message.info('已打开登录页（推荐直接使用左侧"打开浏览器登录"按钮，登录后点"确认"自动抓取）')
   }
 }
 
@@ -3263,9 +3263,7 @@ async function handleFetchCookies(site) {
     }
     message.success(`已从 ${result.source || '浏览器'} 抓取到 Cookie，正在验证登录...`)
     addLog('系统', `Cookie 抓取成功（${site}，来源 ${result.source || '未知'}）`)
-    if (site === 'twitter') {
-      window.api.sendCommand({ cmd: 'twitter_set_cookies', cookies: result.cookie_str })
-    } else if (site === 'exhentai') {
+    if (site === 'exhentai') {
       window.api.sendCommand({ cmd: 'exhentai_set_cookies', cookies: result.cookie_str })
     } else if (site === 'pawchive') {
       window.api.sendCommand({ cmd: 'pawchive_set_cookies', cookies: result.cookie_str })
@@ -3881,19 +3879,28 @@ function handleReverseSetProxy(proxy) {
 }
 
 // ============================
-// 通用 webview OAuth 三站（xhamster/pornhub/xvideos）登录流程
+// 通用 webview 浏览器登录（twitter/xhamster/pornhub/xvideos 等与 EX 站相同的操作）
 // ============================
-// 触发 webview OAuth 登录弹窗（用户点"用 Twitter 登录"/XVideos 登录按钮调用）
-// xvideos 第二参数带邮箱密码/记住装置；xhamster/pornhub 仅 siteKey
+// 触发 webview 登录弹窗：弹出的浏览器内自行完成登录（邮箱/Twitter 授权皆可），
+// 登录后点弹窗下方"确认"自动抓取 Cookie（手动确认模式，同 EX 站）
 function handleSiteOAuthLogin(siteKey, creds) {
-  // 各站登录页 + 成功/captcha 模式（AP1 阶段先用通用配置，具体业务待用户给出要求后补全）
   const configs = {
+    // X 站：弹窗内登录 x.com，抓取 .x.com 域的 auth_token / ct0
+    twitter: {
+      loginUrl: 'https://x.com/login',
+      homeUrl: 'https://x.com/home',
+      partition: 'persist:twitter',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|login_challenge/i],
+      manualConfirm: true,
+    },
     xhamster: {
       loginUrl: 'https://jp.xhamster.com/login',
       homeUrl: 'https://jp.xhamster.com/',
       partition: 'persist:twitter',
       successPatterns: [/xhamster\.com\/(users|my|favorites)/i, /xhamster\.com\/?\?auth=1/i],
       captchaPatterns: [/challenge|captcha|areyouhuman|check\.xhamster/i],
+      manualConfirm: true,
     },
     pornhub: {
       loginUrl: 'https://jp.pornhub.com/login',
@@ -3901,14 +3908,15 @@ function handleSiteOAuthLogin(siteKey, creds) {
       partition: 'persist:twitter',
       successPatterns: [/pornhub\.com\/(users|my|user)/i, /pornhub\.com\/?\?login=/i],
       captchaPatterns: [/challenge|captcha|areyouhuman|cdn\.pornhub/i],
+      manualConfirm: true,
     },
     xvideos: {
-      // xvideos 邮箱密码登录，webview 内自动预填账号 + 处理人机验证
       loginUrl: 'https://www.xvideos.com/profile/login',
       homeUrl: 'https://www.xvideos.com/',
       partition: 'persist:xvideos',
       successPatterns: [/xvideos\.com\/(profiles|account|favorites)/i],
       captchaPatterns: [/challenge|captcha|areyouhuman|cdn\.xvideos/i],
+      manualConfirm: true,
     },
     javdb: {
       // JavDB 邮箱密码登录：webview 内完成 Cloudflare 人机验证；"记住此装置"后 cookie 约 7 天有效
@@ -3955,11 +3963,11 @@ function handleSiteOAuthLogin(siteKey, creds) {
 
 // WebviewLoginModal 抓取 cookie 成功 → 发后端持久化 + 验证
 // （javdb 附带 webview UA：cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需同 UA）
-// （exhentai 后端命令读 cookies 字段，其他站读 cookie_str）
+// （exhentai/twitter 后端命令读 cookies 字段，其他站读 cookie_str）
 function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   if (!window.api || !wvLogin.site) return
   const payload = { cmd: `${wvLogin.site}_set_cookies`, cookie_str: cookieStr }
-  if (wvLogin.site === 'exhentai') payload.cookies = cookieStr
+  if (wvLogin.site === 'exhentai' || wvLogin.site === 'twitter') payload.cookies = cookieStr
   if (wvLogin.site === 'javdb' && userAgent) payload.user_agent = userAgent
   window.api.sendCommand(payload)
   addLog('系统', `${wvLogin.site} 抓取到 ${count} 个 cookie，已发给后端保存`)
