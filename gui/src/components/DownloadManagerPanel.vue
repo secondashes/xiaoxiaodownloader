@@ -116,7 +116,7 @@
                     <button
                       class="dl-file-folder"
                       title="在文件管理器中定位该文件"
-                      @click.stop="$emit('locate-file', f)"
+                      @click.stop="$emit('locate-file', { file: f, task })"
                     >📂</button>
                   </span>
                 </div>

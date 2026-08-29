@@ -555,6 +555,21 @@ function createWindow() {
     handleCloseRequest(e)
   })
 
+  // 点"最小化"按钮 → 隐藏主窗口并显示托盘图标
+  // （此前最小化后窗口直接消失且无托盘图标，用户无法找回窗口）
+  mainWindow.on('minimize', (e) => {
+    try { e.preventDefault() } catch {}
+    quickMinimizeToTray()
+  })
+
+  // 窗口从托盘恢复显示时销毁托盘图标
+  mainWindow.on('restore', () => {
+    destroyTray()
+  })
+  mainWindow.on('show', () => {
+    destroyTray()
+  })
+
   mainWindow.on('closed', () => {
     debugLog('窗口已关闭')
     mainWindow = null
@@ -1090,18 +1105,29 @@ ipcMain.handle('fetch-cookies', async (event, siteKey) => {
 // ============================
 // P3 设置功能：托盘 / 全局快捷键 / 不息屏 / 拟态模式
 // ============================
-// 创建托盘图标（仅在"快速缩小到托盘"时创建，主界面显示时销毁）
+// 创建托盘图标（仅在"快速缩小到托盘"/最小化时创建，主界面显示时销毁）
 function createTray() {
   if (appTray && !appTray.isDestroyed()) return
-  // 用 Electron 内置图标（无自定义 png 时用 nativeImage 创建空白图标也行）
+  // 托盘图标查找顺序：打包资源里的"最小化图标.jpg" → 项目根目录"最小化图标.jpg"
+  // → 程序根目录 icon.png / icon.ico → 空图标兜底
   let icon
   try {
-    // 优先用程序根目录的 icon.png / icon.ico
-    const ico = path.join(getProjectRootSafe(), 'icon.png')
-    const ico2 = path.join(getProjectRootSafe(), 'icon.ico')
-    if (fs.existsSync(ico)) icon = nativeImage.createFromPath(ico)
-    else if (fs.existsSync(ico2)) icon = nativeImage.createFromPath(ico2)
-    else icon = nativeImage.createEmpty()
+    const candidates = []
+    try { candidates.push(path.join(process.resourcesPath || '', '最小化图标.jpg')) } catch {}
+    candidates.push(path.join(getProjectRootSafe(), '最小化图标.jpg'))
+    candidates.push(path.join(getProjectRootSafe(), 'icon.png'))
+    candidates.push(path.join(getProjectRootSafe(), 'icon.ico'))
+    for (const p of candidates) {
+      if (p && fs.existsSync(p)) {
+        const img = nativeImage.createFromPath(p)
+        if (!img.isEmpty()) {
+          // 托盘图标统一缩到 16px（jpg 原图过大时 Windows 会显示模糊/裁切）
+          icon = img.resize({ width: 16, height: 16 })
+          break
+        }
+      }
+    }
+    if (!icon) icon = nativeImage.createEmpty()
   } catch { icon = nativeImage.createEmpty() }
 
   appTray = new Tray(icon)
@@ -1450,10 +1476,30 @@ ipcMain.handle('select-folder', async () => {
   return result.filePaths[0]
 })
 
-// 打开文件（用系统默认程序）
+// 从给定路径逐级向上找到最近存在的祖先目录（历史任务的目录被改名/移动后仍能打开）
+function nearestExistingDir(p) {
+  let target = String(p || '')
+  while (target && !fs.existsSync(target)) {
+    const parent = path.dirname(target)
+    if (!parent || parent === target) return null
+    target = parent
+  }
+  return target && fs.existsSync(target) ? target : null
+}
+
+// 打开文件/文件夹（用系统默认程序）
+// 原路径不存在时自动回退到最近存在的上级目录（否则报"找不到文件"）
 ipcMain.handle('open-path', async (event, filePath) => {
   try {
-    const result = await shell.openPath(filePath)
+    const p = String(filePath || '')
+    if (!p) return { ok: false, error: '路径为空' }
+    if (!fs.existsSync(p)) {
+      const fallback = nearestExistingDir(p)
+      if (!fallback) return { ok: false, error: `路径不存在: ${p}` }
+      const r = await shell.openPath(fallback)
+      return { ok: r === '', error: r, opened: fallback, originalMissing: true }
+    }
+    const result = await shell.openPath(p)
     return { ok: result === '', error: result }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -1461,10 +1507,19 @@ ipcMain.handle('open-path', async (event, filePath) => {
 })
 
 // 在文件管理器中定位文件
+// 文件不存在（未下载完成/已被移动）时回退到最近存在的上级目录
 ipcMain.handle('show-in-folder', async (event, filePath) => {
   try {
-    shell.showItemInFolder(filePath)
-    return { ok: true }
+    const p = String(filePath || '')
+    if (!p) return { ok: false, error: '路径为空' }
+    if (fs.existsSync(p)) {
+      shell.showItemInFolder(p)
+      return { ok: true }
+    }
+    const fallback = nearestExistingDir(p)
+    if (!fallback) return { ok: false, error: `文件不存在: ${p}` }
+    const r = await shell.openPath(fallback)
+    return { ok: r === '', error: r, opened: fallback, originalMissing: true }
   } catch (err) {
     return { ok: false, error: err.message }
   }

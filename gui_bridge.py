@@ -382,6 +382,31 @@ def _unique_download_filename(download_path: str, filename: str) -> str:
         counter += 1
 
 
+def _atomic_stream_save(resp, final_path: Path, *, on_chunk, is_cancelled) -> None:
+    """流式下载到 .part 临时文件，完成后原子改名；中断/失败自动清理临时文件。
+
+    修复"残缺文件 + (2) 后缀"问题：此前流式下载直接写目标文件，
+    暂停/取消/网络中断会留下半截文件，重试时被迫使用"(2)"后缀另存，
+    导致文件夹里同时存在残缺原文件和完整 (2) 文件。
+    """
+    tmp_path = final_path.with_name(final_path.name + ".part")
+    try:
+        with open(tmp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                if is_cancelled():
+                    raise InterruptedError("任务已暂停/取消")
+                if chunk:
+                    f.write(chunk)
+                    on_chunk(chunk)
+        os.replace(tmp_path, final_path)
+    except BaseException:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def _resolve_duplicate(download_path: str, filename: str, expected_size,
                         options: dict) -> tuple[str, str]:
     """下载去重处理（skip_duplicates 设置）。
@@ -2366,7 +2391,7 @@ def _pawchive_subfolder(item: dict, options: dict) -> str:
       - none:       不建子文件夹
       - date:       按发布月份 YYYY-MM
       - post:       按帖子标题
-      - date_post:  YYYY-MM/帖子标题（默认）
+      - date_post:  "YYYY-MM-帖子标题"（默认，日期并入文件夹名，减少嵌套层级）
     自定义模板 pawchive_folder_template 非空时优先。
     """
     template = (options.get("pawchive_folder_template") or "").strip()
@@ -2387,9 +2412,11 @@ def _pawchive_subfolder(item: dict, options: dict) -> str:
     elif mode == "post" and title:
         parts.append(title)
     elif mode == "date_post":
-        if date:
+        if date and title:
+            parts.append(f"{date}-{title}")
+        elif date:
             parts.append(date)
-        if title:
+        elif title:
             parts.append(title)
     return str(Path(*parts)) if parts else ""
 
@@ -5148,7 +5175,7 @@ def _twitter_subfolder(item: dict, options: dict) -> str:
       - none:       不建子文件夹
       - date:       按发布月份 YYYY-MM
       - post:       按推文（推文id）
-      - date_post:  YYYY-MM/推文id（默认）
+      - date_post:  "YYYY-MM-推文id"（默认，日期并入文件夹名，减少嵌套层级）
     自定义模板 twitter_folder_template 非空时优先。
     """
     template = (options.get("twitter_folder_template") or "").strip()
@@ -5169,9 +5196,11 @@ def _twitter_subfolder(item: dict, options: dict) -> str:
     elif mode == "post" and title:
         parts.append(title)
     elif mode == "date_post":
-        if date:
+        if date and title:
+            parts.append(f"{date}-{title}")
+        elif date:
             parts.append(date)
-        if title:
+        elif title:
             parts.append(title)
     return str(Path(*parts)) if parts else ""
 
@@ -9200,11 +9229,13 @@ async def gui_download(url: str, selected_items: list[dict], options: dict) -> N
                         base_dir, filename, options,
                     )
                 else:
-                    # EX 批量下载：按画廊标题分子文件夹（母文件夹已作顶层目录）
+                    # EX 批量下载：按"YYYY-MM-画廊标题"分子文件夹（母文件夹已作顶层目录）
                     base_dir = album_path
                     g_title = (item.get("gallery_title") or "").strip()
                     if g_title and batch_parent:
-                        sub = str(Path(album_path) / sanitize_directory_name(g_title))
+                        g_date = (item.get("post_date") or "")[:7]
+                        g_name = sanitize_directory_name(g_title)
+                        sub = str(Path(album_path) / (f"{g_date}-{g_name}" if g_date else g_name))
                         Path(sub).mkdir(parents=True, exist_ok=True)
                         base_dir = sub
                     file_download_path = build_file_download_path(
@@ -10135,9 +10166,30 @@ class DownloadManager:
                 # 上次退出时仍在运行的任务，恢复为暂停，等待用户手动继续
                 if task.get("status") in ("running", "pending"):
                     task["status"] = "paused"
+                # 历史任务路径转绝对（前端"打开文件夹/定位文件"需要绝对路径）
+                if task.get("save_dir") and not Path(task["save_dir"]).is_absolute():
+                    task["save_dir"] = str(Path(task["save_dir"]).resolve())
+                phantom = 0
                 for item in task.get("files", []):
                     if item.get("status") == "downloading":
                         item["status"] = "pending"
+                    fp = item.get("_final_path")
+                    if fp and not Path(fp).is_absolute():
+                        item["_final_path"] = str(Path(fp).resolve())
+                    # 幽灵完成修复：标记 completed 但本地文件不存在
+                    # （非 Bunkr 子域名被误标离线后"离线跳过"却记成功的假完成）
+                    if item.get("status") == "completed" and fp and not Path(fp).exists():
+                        item["status"] = "pending"
+                        item["completed"] = 0
+                        task["done"] = max(0, task.get("done", 0) - 1)
+                        phantom += 1
+                if phantom and task.get("status") == "completed":
+                    # 完成任务里发现幽灵文件 → 回到暂停态，用户点"继续"即可补齐缺失文件
+                    task["status"] = "paused"
+                    logging.warning(
+                        "任务 %s 检测到 %d 个假完成文件（本地缺失），已重置待补下",
+                        task["id"], phantom,
+                    )
                 self.tasks[task["id"]] = task
         except (OSError, json.JSONDecodeError):
             pass
@@ -10467,8 +10519,9 @@ class DownloadManager:
                 album_path = build_album_directory(batch_parent, None, options)
             else:
                 album_path = build_album_directory(album_name, album_id, options)
-            # 记录任务实际保存目录（前端"打开对应文件夹"按钮使用）
-            task["save_dir"] = str(album_path)
+            # 记录任务实际保存目录（前端"打开对应文件夹"按钮使用；转绝对路径，
+            # 相对路径在 Electron 进程 cwd 下会"找不到文件"）
+            task["save_dir"] = str(Path(album_path).resolve())
 
             rate_limiter = RateLimiter(args.rate_limit * KB if args.rate_limit else None)
             session_info = SessionInfo(
@@ -10767,7 +10820,14 @@ class DownloadManager:
         if dup_action == "download":
             # 重复添加的文件自动重命名，避免覆盖已存在/已下载文件
             filename = _unique_download_filename(file_download_path, filename)
-        file_session_info = replace(session_info, download_path=file_download_path)
+        # 非 Bunkr 站点禁用"Bunkr 子域名离线"检测：
+        # file.pawchive.pw 等非 Bunkr 域名的一次 5xx/超时会触发 mark_subdomain_as_offline，
+        # 把整个子域名标记为离线，之后同域名的全部文件被"离线跳过"却返回成功（假完成）。
+        file_args = args
+        if str(item.get("site") or "").strip().lower() not in ("", "bunkr"):
+            file_args = Namespace(**vars(args))
+            file_args.disable_server_check = True
+        file_session_info = replace(session_info, download_path=file_download_path, args=file_args)
 
         internal_task = live_manager.add_task()
         live_manager.set_task_info(internal_task, filename, size)
@@ -10789,19 +10849,25 @@ class DownloadManager:
 
         failed = await asyncio.to_thread(media_downloader.download)
 
+        final_path = Path(file_download_path) / truncate_filename(filename)
         if failed:
+            item["status"] = "failed"
+            task["failed"] = task.get("failed", 0) + 1
+        elif not final_path.exists():
+            # 兜底校验：下载器报告成功但文件未落盘（离线跳过/异常路径）→ 记为失败，
+            # 防止"648/649 完成、实际只有几张图"的假完成问题
+            logging.warning("下载器返回成功但文件未落盘: %s", final_path)
             item["status"] = "failed"
             task["failed"] = task.get("failed", 0) + 1
         else:
             item["status"] = "completed"
             item["completed"] = 100
             task["done"] = task.get("done", 0) + 1
-            final_path = str(Path(file_download_path) / truncate_filename(filename))
-            item["_final_path"] = final_path  # 持久化最终路径（续传时校验本地文件是否存在）
+            item["_final_path"] = str(final_path)  # 持久化最终路径（续传时校验本地文件是否存在）
             _add_history_entry({
                 "id": f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
                 "filename": filename,
-                "path": final_path,
+                "path": str(final_path),
                 "size": item.get("size"),
                 "album": task.get("album") or "下载",
                 "time": datetime.now().isoformat(timespec="seconds"),
@@ -10891,7 +10957,7 @@ class DownloadManager:
                     if not download_link.startswith("http"):
                         raise PermissionError("无法解析图片直链（登录可能已失效）")
 
-                    # 2. 目录：画师名/画廊标题（自定义模板 exhentai_folder_template 优先）
+                    # 2. 目录：画师名/"YYYY-MM-画廊标题"（自定义模板 exhentai_folder_template 优先）
                     post_title = item.get("post_title") or ""
                     template = (options.get("exhentai_folder_template") or "").strip()
                     if template:
@@ -10899,7 +10965,9 @@ class DownloadManager:
                             template, item.get("post_date") or "", post_title, item.get("post_id") or "",
                         )
                     elif post_title:
-                        sub = sanitize_directory_name(post_title)
+                        g_date = (item.get("post_date") or "")[:7]
+                        g_title = sanitize_directory_name(post_title)
+                        sub = f"{g_date}-{g_title}" if g_date else g_title
                     else:
                         sub = ""
                     gallery_dir = str(Path(album_path) / sub) if sub else album_path
@@ -10958,18 +11026,22 @@ class DownloadManager:
 
                         downloaded = 0
                         last_pct = -1
-                        with open(final_path, "wb") as f:
-                            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                                if task.get("status") in ("paused", "cancelled"):
-                                    raise InterruptedError("任务已暂停/取消")
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if size:
-                                        pct = round(downloaded / size * 100, 1)
-                                        if pct != last_pct:
-                                            live_manager.update_task(internal_task, pct)
-                                            last_pct = pct
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        # 原子写入：.part 临时文件 + 完成后改名（中断不留半截文件）
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
 
                     item["_final_path"] = str(final_path)
                     item["_final_name"] = final_name
@@ -11148,18 +11220,22 @@ class DownloadManager:
 
                         downloaded = 0
                         last_pct = -1
-                        with open(final_path, "wb") as f:
-                            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                                if task.get("status") in ("paused", "cancelled"):
-                                    raise InterruptedError("任务已暂停/取消")
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if size:
-                                        pct = round(downloaded / size * 100, 1)
-                                        if pct != last_pct:
-                                            live_manager.update_task(internal_task, pct)
-                                            last_pct = pct
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        # 原子写入：.part 临时文件 + 完成后改名（中断不留半截文件）
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
 
                     item["_final_path"] = str(final_path)
                     item["_final_name"] = final_name
@@ -11242,7 +11318,7 @@ class DownloadManager:
         options = task.get("options", {})
         filename = _apply_rename_map(options, item, filename)
 
-        # 目录：下载根目录/作者名/YYYY-MM（可自定义模板 iwara_folder_template）
+        # 目录：下载根目录/作者名/"YYYY-MM-标题"（可自定义模板 iwara_folder_template）
         def _iwara_file_dir() -> str:
             template = (options.get("iwara_folder_template") or "").strip()
             sub = ""
@@ -11254,7 +11330,10 @@ class DownloadManager:
             else:
                 parts = []
                 date = (item.get("post_date") or "")[:7]  # YYYY-MM
-                if date:
+                title = sanitize_directory_name((item.get("post_title") or "").strip())[:60]
+                if date and title:
+                    parts.append(f"{date}-{title}")
+                elif date:
                     parts.append(date)
                 sub = str(Path(*parts)) if parts else ""
             return str(Path(album_path) / sub) if sub else album_path
@@ -11357,18 +11436,22 @@ class DownloadManager:
 
                         downloaded = 0
                         last_pct = -1
-                        with open(final_path, "wb") as f:
-                            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                                if task.get("status") in ("paused", "cancelled"):
-                                    raise InterruptedError("任务已暂停/取消")
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if size:
-                                        pct = round(downloaded / size * 100, 1)
-                                        if pct != last_pct:
-                                            live_manager.update_task(internal_task, pct)
-                                            last_pct = pct
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        # 原子写入：.part 临时文件 + 完成后改名（中断不留半截文件）
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
                     finally:
                         resp.close()
 
@@ -11456,14 +11539,16 @@ class DownloadManager:
         options = task.get("options", {})
         filename = _apply_rename_map(options, item, filename)
 
-        # 目录：下载根目录/上传者名/YYYY-MM（与其他站点逻辑一致）
+        # 目录：下载根目录/"YYYY-MM-上传者"（日期并入文件夹名，减少嵌套层级）
         def _hanime_file_dir() -> str:
             parts = []
             artist = sanitize_directory_name((item.get("artist") or "").strip())
-            if artist:
-                parts.append(artist)
             date = (item.get("post_date") or "")[:7]  # YYYY-MM
-            if date:
+            if date and artist:
+                parts.append(f"{date}-{artist}")
+            elif artist:
+                parts.append(artist)
+            elif date:
                 parts.append(date)
             sub = str(Path(*parts)) if parts else ""
             return str(Path(album_path) / sub) if sub else album_path
@@ -11531,18 +11616,22 @@ class DownloadManager:
 
                         downloaded = 0
                         last_pct = -1
-                        with open(final_path, "wb") as f:
-                            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                                if task.get("status") in ("paused", "cancelled"):
-                                    raise InterruptedError("任务已暂停/取消")
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if size:
-                                        pct = round(downloaded / size * 100, 1)
-                                        if pct != last_pct:
-                                            live_manager.update_task(internal_task, pct)
-                                            last_pct = pct
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        # 原子写入：.part 临时文件 + 完成后改名（中断不留半截文件）
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
 
                     item["_final_path"] = str(final_path)
                     item["_final_name"] = final_name
@@ -11655,18 +11744,22 @@ class DownloadManager:
                         downloaded = 0
                         last_pct = -1
                         final_path = Path(file_dir) / truncate_filename(final_name)
-                        with open(final_path, "wb") as f:
-                            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                                if task.get("status") in ("paused", "cancelled"):
-                                    raise InterruptedError("任务已暂停/取消")
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if size:
-                                        pct = round(downloaded / size * 100, 1)
-                                        if pct != last_pct:
-                                            live_manager.update_task(internal_task, pct)
-                                            last_pct = pct
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        # 原子写入：.part 临时文件 + 完成后改名（中断不留半截文件）
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
                         item["_final_path"] = str(final_path)
                         item["_final_name"] = final_name
                         item["size"] = size
@@ -11777,18 +11870,22 @@ class DownloadManager:
                         downloaded = 0
                         last_pct = -1
                         final_path = Path(file_dir) / truncate_filename(final_name)
-                        with open(final_path, "wb") as f:
-                            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                                if task.get("status") in ("paused", "cancelled"):
-                                    raise InterruptedError("任务已暂停/取消")
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-                                    if size:
-                                        pct = round(downloaded / size * 100, 1)
-                                        if pct != last_pct:
-                                            live_manager.update_task(internal_task, pct)
-                                            last_pct = pct
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        # 原子写入：.part 临时文件 + 完成后改名（中断不留半截文件）
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
                         item["_final_path"] = str(final_path)
                         item["_final_name"] = final_name
                         item["size"] = size

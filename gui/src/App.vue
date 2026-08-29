@@ -4778,20 +4778,38 @@ function handleOpenTaskFolder(task) {
     return
   }
   if (window.api && window.api.openPath) {
-    window.api.openPath(dir)
+    window.api.openPath(dir).then(r => {
+      if (r && r.ok === false) {
+        message.error(`打开文件夹失败: ${r.error || '未知错误'}`)
+      }
+    }).catch(() => {})
   }
 }
 
 // 在文件管理器中定位任务里的某个文件（文件下载后记录 _final_path）
-function handleLocateTaskFile(f) {
+// 文件尚未下载完成时回退到打开任务的保存文件夹，保证按钮始终有响应
+function handleLocateTaskFile(payload) {
+  const f = payload && payload.file
+  const task = payload && payload.task
   const fp = f && f._final_path
-  if (!fp) {
-    message.warning('文件尚未下载完成，暂无法定位')
+  if (fp && window.api && window.api.showInFolder) {
+    window.api.showInFolder(fp).then(r => {
+      if (r && r.ok === false) {
+        message.error(`定位文件失败: ${r.error || '未知错误'}`)
+      }
+    }).catch(() => {})
     return
   }
-  if (window.api && window.api.showInFolder) {
-    window.api.showInFolder(fp)
+  const dir = task && task.save_dir
+  if (dir && window.api && window.api.openPath) {
+    window.api.openPath(dir).then(r => {
+      if (r && r.ok === false) {
+        message.error(`打开文件夹失败: ${r.error || '未知错误'}`)
+      }
+    }).catch(() => {})
+    return
   }
+  message.warning('文件尚未下载完成，暂无保存位置')
 }
 
 // 在主窗口打开详细下载面板（聚焦指定任务）
