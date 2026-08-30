@@ -407,52 +407,20 @@
           </div>
         </div>
 
-        <!-- Pixiv 邮箱密码登录（P站；Cloudflare 站点；完整登录套件） -->
+        <!-- Pixiv 登录（P站；App API Refresh Token 方案：内置浏览器 OAuth 授权码换 Token） -->
         <div v-if="site === 'pixiv'" class="pawchive-login-form">
-          <div class="login-hint login-hint-warn">
-            ⚠ Pixiv 登录可能触发人机验证（reCAPTCHA）：登录被拦截或验证失败时，
-            点下方"打开内置浏览器登录"在弹窗内完成验证，会话自动保存
-          </div>
-          <n-input
-            v-model:value="pixivEmailInput"
-            size="small"
-            placeholder="Pixiv 登录邮箱 / Pixiv ID"
-            :disabled="pixivLoginLoading"
-            @keyup.enter="handlePixivLogin"
-          />
-          <n-input
-            v-model:value="pixivPasswordInput"
-            size="small"
-            type="password"
-            show-password-on="click"
-            placeholder="密码"
-            :disabled="pixivLoginLoading"
-            @keyup.enter="handlePixivLogin"
-          />
           <n-button
             size="small"
             type="primary"
             block
             :loading="pixivLoginLoading"
-            :disabled="!pixivEmailInput.trim() || !pixivPasswordInput"
             @click="handlePixivLogin"
           >
-            {{ pixivLoginLoading ? '登录中...' : '登录' }}
-          </n-button>
-          <n-button
-            size="small"
-            block
-            secondary
-            @click="emit('site-oauth-login', 'pixiv', { email: pixivEmailInput.trim(), password: pixivPasswordInput })"
-          >
-            打开内置浏览器登录（验证）
-          </n-button>
-          <n-button size="small" block @click="handleSiteSaveCred('pixiv', pixivEmailInput, pixivPasswordInput)">
-            仅保存账号密码（加密存本机）
+            {{ pixivLoginLoading ? '登录中...' : '打开内置浏览器登录（推荐）' }}
           </n-button>
           <div class="login-hint">
-            P站账号密码登录（会话失效自动用保存的密码重登）；遇到人机验证时点"内置浏览器登录"在弹窗内完成；
-            不登录也可搜索全年龄作品，登录可看 R-18、关注作者、收藏作品
+            在弹出的内置浏览器中完成 Pixiv 登录，程序自动提取授权码换取长期 Refresh Token（加密存本机）；
+            登录后可搜索/浏览 R-18、关注作者、收藏作品、发评论、发布作品；Token 失效需重新点按钮登录
           </div>
         </div>
 
@@ -2466,13 +2434,9 @@ function handleHanimeLogin() {
   emit('hanime-login', hanimeEmailInput.value.trim(), hanimePasswordInput.value)
 }
 
-// Pixiv 邮箱密码登录表单
-const pixivEmailInput = ref('')
-const pixivPasswordInput = ref('')
-
+// Pixiv 登录：内置浏览器 OAuth（Refresh Token 方案，无账号密码表单）
 function handlePixivLogin() {
-  if (!pixivEmailInput.value.trim() || !pixivPasswordInput.value) return
-  emit('pixiv-login', pixivEmailInput.value.trim(), pixivPasswordInput.value)
+  emit('pixiv-login')
 }
 
 // ASMR-100 用户名密码登录表单
@@ -2512,7 +2476,6 @@ watch(() => props.siteCreds, (creds) => {
   fill(exEmailInput, exPasswordInput, creds.exhentai)
   fill(iwaraEmailInput, iwaraPasswordInput, creds.iwara)
   fill(hanimeEmailInput, hanimePasswordInput, creds.hanime)
-  fill(pixivEmailInput, pixivPasswordInput, creds.pixiv)
   fill(asmrNameInput, asmrPasswordInput, creds.asmr)
   fill(jdbEmailInput, jdbPasswordInput, creds.javdb)
 }, { immediate: true })

@@ -245,6 +245,10 @@
             :reverse-active="reverseActive"
             :reverse-sites="reverseSites"
             :reverse-running="reverseRunning"
+            :pixiv-state="pixivState"
+            :pixiv-search-type="settings.pixiv_search_type || 'illust'"
+            :pixiv-active-feed="pixivActiveFeed"
+            @pixiv-command="handlePixivCommand"
             @reverse-search="handleReverseSearch"
             @reverse-reset="handleReverseReset"
             :javdb-detail="javdbDetail"
@@ -463,9 +467,12 @@
           :captcha-patterns="wvLogin.captchaPatterns"
           :credentials="wvLogin.credentials"
           :manual-confirm="wvLogin.manualConfirm"
+          :code-regex="wvLogin.codeRegex"
+          :watch-login-url="wvLogin.watchLoginUrl"
           :title="`${wvLogin.site} webview 登录`"
           @login-success="handleSiteLoginSuccess"
           @login-failed="err => message.error(err || '登录失败')"
+          @login-code="handleSiteLoginCode"
         />
       </n-dialog-provider>
     </n-message-provider>
@@ -516,6 +523,7 @@ const settings = reactive({
   // Pixiv 专属设置（国内必须代理；搜索模式：''=全部 / safe=全年龄 / r18=R-18）
   pixiv_proxy: 'http://127.0.0.1:10809',
   pixiv_mode: '',
+  pixiv_search_type: 'illust',   // 搜索三模式：illust=插画/漫画（默认） novel=小说 user=用户
   // O3D 列表排序（hot=人気 / favorites=お気に入り / latest=最新 / popularity=閲覧数）
   oreno_sort: '',
   // ASMR 音声站（asmr-100.com）专属设置
@@ -798,9 +806,29 @@ const iwBatchProgress = reactive({ done: 0, total: 0, message: '' })
 const haView = ref('')
 const hanimeUser = ref('')
 const hanimeLoginLoading = ref(false)
-// Pixiv 登录状态（P站：插画搜索/作品解析/用户主页下载）
+// Pixiv 登录状态（P站：Refresh Token 登录 + App API 全功能）
 const pixivUser = ref('')
 const pixivLoginLoading = ref(false)
+// Pixiv 全功能面板状态（PixivPanel 透传）：view=''/user/detail，userId 用于评论区"删除自己的发言"
+const pixivState = reactive({
+  view: '',           // ''=列表（搜索/feed） | 'user'=用户主页 | 'detail'=作品详情
+  detailFrom: '',     // 详情/用户页进入来源（back 时回上一层）
+  userId: '',         // 登录用户 id
+  userPage: null,     // 用户主页 {user, profile, illusts, manga, novels}
+  userLoading: false,
+  detail: null,       // 作品详情 {kind, item_id, detail, raw, comments, total_comments}
+  detailLoading: false,
+  related: null,      // 相关作品 {kind, item_id, items}（详情页点击后懒加载）
+  myTags: [],         // 常用标签（本地频次统计）
+  trending: [],       // 热门标签（trending tags）
+  notifications: null, // 消息/提醒 {items, unread, message}
+  bookmarkTags: null, // 书签收藏标签 {content, tags, message}
+  uploadResult: null, // 发布作品结果 {ok, message}
+})
+// 功能栏当前高亮 feed（home/illust/manga/novel/follow_*/bookmark/userlist_*）
+const pixivActiveFeed = ref('')
+// 列表翻页上下文：feed 翻页记住 kind/page（搜索模式走 doSearch，不走这里）
+const pixivListCtx = reactive({ mode: '', kind: 'home', content: 'illust', restrict: 'public', allow_r18: true, user_id: '', umode: 'following' })
 // 主页：分区列表 [{title, items}]（最新上市/最新上傳 + 每个分类）
 const haSections = ref([])
 const haHomeLoading = ref(false)
@@ -931,6 +959,8 @@ const wvLogin = reactive({
   captchaPatterns: [],
   credentials: null,          // 登录页自动预填账号（javdb 邮箱密码登录）
   manualConfirm: false,       // 手动确认模式（EX：底部提示+确认按钮，用户点确认才抓 cookie）
+  codeRegex: null,            // OAuth 授权码提取（pixiv://account/login?code=xxx 拦截）
+  watchLoginUrl: false,       // 登录 URL 动态更新模式（后端生成 OAuth URL 后推给弹窗重载）
 })
 
 // 谷歌邮箱凭据表单（设置区"登录谷歌邮箱"：保存账号密码 + 内置浏览器登录）
@@ -1239,6 +1269,12 @@ function handlePythonEvent(event) {
       searchTotalResults.value = event.total_results || 0
       // 翻页模式：每页替换结果（统一页码逻辑）
       searchResults.value = event.items || []
+      // Pixiv：列表数据到达 → 退出用户页/详情视图回到列表，记录功能栏高亮 feed
+      if (event.site === 'pixiv') {
+        pixivState.view = ''
+        if (event.feed_kind) pixivActiveFeed.value = event.feed_kind
+        else if (!pixivListCtx.mode) pixivActiveFeed.value = ''
+      }
       // EX 我的收藏模式（翻页走收藏命令而非搜索命令）
       exFavMode.value = event.query === '__ex_favorites__'
       const displayQuery = exFavMode.value ? '我的收藏' : event.query
@@ -1700,6 +1736,7 @@ function handlePythonEvent(event) {
         addLog('系统', 'Pixiv 已退出登录')
       } else if (event.success) {
         pixivUser.value = event.username || '已登录'
+        if (event.user_id) pixivState.userId = String(event.user_id)
         if (!event.silent) message.success(event.message || 'Pixiv 登录成功')
         addLog('系统', `Pixiv 登录成功: ${pixivUser.value}`)
       } else {
@@ -1713,6 +1750,103 @@ function handlePythonEvent(event) {
           addLog('系统', `Pixiv 未登录: ${event.message || ''}`)
         }
       }
+      break
+
+    case 'pixiv_oauth_url':
+      // 后端生成 PKCE 登录 URL → 推给已打开的 webview 弹窗（watchLoginUrl 模式自动重载）
+      if (event.url && wvLogin.site === 'pixiv' && wvLogin.visible) {
+        wvLogin.loginUrl = event.url
+        addLog('系统', 'Pixiv 登录页已生成（请在弹窗内完成登录与人机验证）')
+      }
+      break
+
+    case 'pixiv_user_loading':
+      pixivState.userLoading = !!event.loading
+      break
+
+    case 'pixiv_user_result':
+      // 用户主页（自己的/他人的）：信息 + 三类作品首屏
+      pixivState.userLoading = false
+      if (event.error) {
+        message.error(event.error)
+        addLog('P站', event.error)
+        break
+      }
+      pixivState.userPage = event
+      pixivState.view = 'user'
+      break
+
+    case 'pixiv_detail_loading':
+      pixivState.detailLoading = !!event.loading
+      break
+
+    case 'pixiv_detail_result':
+      // 作品详情（插画多页原图 / 小说正文 + 评论区）
+      pixivState.detailLoading = false
+      if (event.error) {
+        message.error(event.error)
+        addLog('P站', event.error)
+        break
+      }
+      pixivState.detail = event
+      pixivState.view = 'detail'
+      break
+
+    case 'pixiv_related_result':
+      // 相关作品（详情页点击后懒加载）
+      pixivState.related = { kind: event.kind, item_id: event.item_id, items: event.items || [] }
+      if (event.error) addLog('P站', event.error)
+      break
+
+    case 'pixiv_action_result':
+      // 互动结果：点赞/收藏/关注/评论
+      if (event.ok) {
+        message.success(event.message)
+        // 评论操作后刷新详情（重拉评论列表）
+        if ((event.action || '').startsWith('comment_') && pixivState.detail) {
+          window.api.sendCommand({
+            cmd: 'pixiv_detail', kind: pixivState.detail.kind, item_id: pixivState.detail.item_id,
+          })
+        }
+        // 收藏/取消后同步详情卡片状态
+        if (pixivState.detail && String(pixivState.detail.item_id) === String(event.item_id)) {
+          if (event.action === 'bookmark_add') pixivState.detail.detail.is_bookmarked = true
+          if (event.action === 'bookmark_delete') pixivState.detail.detail.is_bookmarked = false
+        }
+      } else {
+        message.error(event.message)
+      }
+      addLog('P站', `互动 ${event.action}: ${event.message}`)
+      break
+
+    case 'pixiv_tags_result':
+      // 常用标签（本地统计）+ 热门标签（置顶常显）
+      pixivState.myTags = event.my_tags || []
+      pixivState.trending = event.trending || []
+      break
+
+    case 'pixiv_notification_result':
+      // 消息/提醒
+      if (event.ok) {
+        pixivState.notifications = { items: event.items || [], unread: event.unread || 0, message: '' }
+      } else {
+        pixivState.notifications = { items: [], unread: 0, message: event.message || '加载失败' }
+      }
+      break
+
+    case 'pixiv_bookmark_tags_result':
+      // 书签：收藏标签列表
+      pixivState.bookmarkTags = event.ok
+        ? { content: event.content, tags: event.tags || [], message: '' }
+        : { content: '', tags: [], message: event.message || '加载失败' }
+      break
+
+    case 'pixiv_upload_result':
+      // 发布作品结果
+      pixivState.uploadResult = event
+      if (event.ok) message.success(event.message)
+      else message.error(event.message)
+      addLog('P站', `发布作品: ${event.message}`)
       break
 
     case 'pixiv_proxy_set':
@@ -2757,6 +2891,10 @@ function doSearch(query, page) {
   haView.value = ''
   orView.value = ''
   asmrView.value = ''
+  // Pixiv：搜索时退出用户页/详情视图，翻页走搜索命令（不走 feed 翻页）
+  pixivState.view = ''
+  pixivListCtx.mode = ''
+  pixivActiveFeed.value = ''
   exFavMode.value = false
   exGalleryDetail.value = null
   paPostDetail.value = null
@@ -2794,6 +2932,26 @@ function handleGoPage(page) {
   // PA 主页模式：翻页走主页命令（全站最新帖子流）
   if ((settings.site || 'bunkr') === 'pawchive' && paHomeMode.value && !lastSearchKeyword.value) {
     handlePawchiveHome(target)
+    return
+  }
+  // Pixiv feed/收藏/关注粉丝列表模式：翻页走对应命令（App API offset 分页）
+  if ((settings.site || 'bunkr') === 'pixiv' && pixivListCtx.mode) {
+    if (pixivListCtx.mode === 'feed') {
+      window.api.sendCommand({ cmd: 'pixiv_feed', kind: pixivListCtx.kind, page: target })
+    } else if (pixivListCtx.mode === 'bookmarks') {
+      window.api.sendCommand({
+        cmd: 'pixiv_bookmarks', content: pixivListCtx.content,
+        restrict: pixivListCtx.restrict, allow_r18: pixivListCtx.allow_r18,
+        page: target, user_id: pixivListCtx.user_id,
+      })
+    } else if (pixivListCtx.mode === 'userlist') {
+      window.api.sendCommand({
+        cmd: 'pixiv_user_list', mode: pixivListCtx.umode,
+        user_id: pixivListCtx.user_id, page: target,
+      })
+    } else {
+      pixivListCtx.mode = ''
+    }
     return
   }
   doSearch(lastSearchKeyword.value || searchQuery.value.trim(), target)
@@ -3843,11 +4001,28 @@ function handleHanimeSetProxy(proxy) {
   }
 }
 
-// Pixiv 登录/登出/代理（P站：账号密码登录，会话失效自动重登）
-function handlePixivLogin(email, password) {
-  if (!window.api || !email.trim() || !password) return
+// Pixiv 登录（Refresh Token 方案，PKCE OAuth）：发 pixiv_oauth_start → 后端回推 pixiv_oauth_url
+// → 打开 WebviewLoginModal（watchLoginUrl 动态加载 + codeRegex 拦截 pixiv://account/login?code=xxx）
+function handlePixivLogin() {
+  if (!window.api) return
   pixivLoginLoading.value = true
-  window.api.sendCommand({ cmd: 'pixiv_login', email: email.trim(), password })
+  // 先打开弹窗（等后端 pixiv_oauth_url 事件推 URL 进来重载）
+  wvLogin.site = 'pixiv'
+  wvLogin.loginUrl = ''
+  wvLogin.homeUrl = 'https://www.pixiv.net/'
+  wvLogin.partition = 'persist:pixiv'
+  wvLogin.successPatterns = []
+  wvLogin.captchaPatterns = [/challenge|captcha|recaptcha|turnstile|gotcha/i]
+  wvLogin.credentials = null
+  wvLogin.manualConfirm = false
+  wvLogin.codeRegex = /pixiv:\/\/account\/login\?code=([A-Za-z0-9]+)/
+  wvLogin.watchLoginUrl = true
+  wvLogin.visible = true
+  // webview 会话代理（国内必须走代理才能打开登录页）
+  if (settings.pixiv_proxy) {
+    window.api.siteSetProxy('pixiv', settings.pixiv_proxy)
+  }
+  window.api.sendCommand({ cmd: 'pixiv_oauth_start' })
 }
 
 function handlePixivLogout() {
@@ -3861,6 +4036,94 @@ function handlePixivSetProxy(proxy) {
   if (window.api) {
     window.api.sendCommand({ cmd: 'pixiv_set_proxy', proxy: proxy || '' })
   }
+}
+
+// Pixiv 面板统一命令出口（PixivPanel emit → RightPanel 透传到这里集中处理：
+// 视图切换在前端完成，数据命令发后端；返回时回上一层（用户页点进的作品回用户页））
+function handlePixivCommand(e) {
+  if (!window.api || !e || !e.cmd) return
+  const cmd = e.cmd
+  if (cmd === 'pixiv_set_search_type') {
+    // 搜索三模式切换：插画/漫画 → 小说 → 用户
+    settings.pixiv_search_type = e.type || 'illust'
+    saveSettings()
+    return
+  }
+  if (cmd === 'pixiv_tag_search') {
+    // 点常用标签：记录频次 + 用该标签搜索（搜索模式沿用当前三模式设置）
+    window.api.sendCommand({ cmd: 'pixiv_tag_click', tag: e.tag })
+    searchQuery.value = e.tag
+    searchPage.value = 1
+    doSearch(e.tag, 1)
+    return
+  }
+  if (cmd === 'pixiv_open_user') {
+    // 打开用户主页（记录进入来源：详情返回时回列表或用户页）
+    pixivState.detailFrom = pixivState.view
+    pixivState.view = 'user'
+    pixivState.userPage = null
+    pixivState.userLoading = true
+    window.api.sendCommand({ cmd: 'pixiv_user_page', user_id: e.user_id })
+    return
+  }
+  if (cmd === 'pixiv_detail') {
+    // 打开作品详情（插画多页原图 / 小说正文）
+    pixivState.detailFrom = pixivState.view
+    pixivState.view = 'detail'
+    pixivState.detail = null
+    pixivState.related = null
+    pixivState.detailLoading = true
+    window.api.sendCommand({ cmd: 'pixiv_detail', kind: e.kind, item_id: e.item_id })
+    return
+  }
+  if (cmd === 'pixiv_back') {
+    // 返回上一层：用户页点进的作品回用户页，否则回列表
+    pixivState.view = pixivState.detailFrom === 'user' && pixivState.userPage ? 'user' : ''
+    return
+  }
+  if (cmd === 'pixiv_feed') {
+    pixivListCtx.mode = 'feed'
+    pixivListCtx.kind = e.kind || 'home'
+    pixivActiveFeed.value = pixivListCtx.kind
+    window.api.sendCommand({ cmd: 'pixiv_feed', kind: pixivListCtx.kind, page: e.page || 1 })
+    return
+  }
+  if (cmd === 'pixiv_follow_feed') {
+    // 关注的人更新（断点更新 + 历史缓存，逻辑与 X 站浏览模式一致）
+    pixivListCtx.mode = ''
+    pixivListCtx.content = e.content || 'illust'
+    pixivActiveFeed.value = `follow_${pixivListCtx.content}`
+    window.api.sendCommand({ cmd: 'pixiv_follow_feed', content: pixivListCtx.content })
+    return
+  }
+  if (cmd === 'pixiv_bookmarks') {
+    pixivListCtx.mode = 'bookmarks'
+    pixivListCtx.content = e.content || 'illust'
+    pixivListCtx.restrict = e.restrict || 'public'
+    pixivListCtx.allow_r18 = e.allow_r18 !== false
+    pixivListCtx.user_id = e.user_id || ''
+    pixivActiveFeed.value = 'bookmark'
+    window.api.sendCommand({
+      cmd: 'pixiv_bookmarks', content: pixivListCtx.content,
+      restrict: pixivListCtx.restrict, allow_r18: pixivListCtx.allow_r18,
+      page: e.page || 1, user_id: pixivListCtx.user_id,
+    })
+    return
+  }
+  if (cmd === 'pixiv_user_list') {
+    pixivListCtx.mode = 'userlist'
+    pixivListCtx.umode = e.mode || 'following'
+    pixivListCtx.user_id = e.user_id || ''
+    pixivActiveFeed.value = `userlist_${pixivListCtx.umode}`
+    window.api.sendCommand({
+      cmd: 'pixiv_user_list', mode: pixivListCtx.umode,
+      user_id: pixivListCtx.user_id, page: e.page || 1,
+    })
+    return
+  }
+  // 其余命令直接透传后端（pixiv_related / pixiv_action / pixiv_notification / pixiv_bookmark_tags / pixiv_upload / pixiv_user_novels）
+  const { cmd: _c, ...payload } = e
+  window.api.sendCommand(payload)
 }
 
 // H站主页：各分区视频（进入站点时自动加载）
@@ -4291,15 +4554,9 @@ function handleSiteOAuthLogin(siteKey, creds) {
       captchaPatterns: [/challenge|captcha|recaptcha|hcaptcha|turnstile/i],
       manualConfirm: true,
     },
-    // Pixiv：弹窗内登录 accounts.pixiv.net（Cloudflare/人机验证在弹窗内完成），确认后保存会话 cookie + 账号密码
-    pixiv: {
-      loginUrl: 'https://accounts.pixiv.net/login',
-      homeUrl: 'https://www.pixiv.net/',
-      partition: 'persist:pixiv',
-      successPatterns: [],
-      captchaPatterns: [/challenge|captcha|recaptcha|turnstile|gotcha/i],
-      manualConfirm: true,
-    },
+    // Pixiv：Refresh Token 登录（PKCE OAuth）：先发 pixiv_oauth_start，后端回推 pixiv_oauth_url 再打开弹窗
+    // （登录页为 app-api.pixiv.net/web/v1/login，成功重定向 pixiv://account/login?code=xxx 由 webview 拦截）
+    // （pixiv 走 handlePixivLogin 单独入口，不在此配置）
     // ASMR-100：弹窗内登录 asmr-100.com，确认后保存表单账号密码供 token 失效自动重登
     asmr: {
       loginUrl: 'https://asmr-100.com/login',
@@ -4390,6 +4647,8 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
   wvLogin.manualConfirm = !!cfg.manualConfirm
+  wvLogin.codeRegex = null
+  wvLogin.watchLoginUrl = false
   // 账号密码登录站：webview 登录页自动预填（用户只需完成真人验证并点登录）
   wvLogin.credentials = (creds && creds.email) ? {
     email: creds.email,
@@ -4438,8 +4697,8 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
-  // O3D / E站 / Hanime1 / Pixiv：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
-  if (['oreno3d', 'erommdtube', 'hanime', 'pixiv'].includes(wvLogin.site) && wvLogin.credentials) {
+  // O3D / E站 / Hanime1：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
+  if (['oreno3d', 'erommdtube', 'hanime'].includes(wvLogin.site) && wvLogin.credentials) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
@@ -4449,6 +4708,21 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   }
   window.api.sendCommand(payload)
   addLog('系统', `${wvLogin.site} 抓取到 ${count} 个 cookie，已发给后端保存`)
+}
+
+// WebviewLoginModal 拦截到 OAuth 授权码（pixiv://account/login?code=xxx 无法在 webview 加载，
+// will-navigate/did-fail-load 事件提取 code）→ 抓取 webview cookie 一并发后端换 Refresh Token
+async function handleSiteLoginCode({ code, site }) {
+  if (!window.api || !code) return
+  addLog('系统', `${site} OAuth 授权码已提取，正在换取 Token...`)
+  let cookieStr = ''
+  try {
+    // 登录页 webview cookie（通知/提醒等 Web ajax 备用通道）
+    const res = await window.api.siteGetCookies(site)
+    cookieStr = res && res.cookieStr ? res.cookieStr : ''
+  } catch (e) { /* cookie 抓取失败不阻塞换 token */ }
+  window.api.sendCommand({ cmd: `${site}_oauth_complete`, code, cookie_str: cookieStr })
+  wvLogin.visible = false
 }
 
 // 谷歌邮箱账号密码保存（设置区"登录谷歌邮箱"表单）
@@ -4758,6 +5032,18 @@ watch(() => settings.site, (s) => {
     handleOrHome(1)
   } else if (s === 'asmr' && !asmrItems.value.length) {
     handleAsmrPopular(1)
+  } else if (s === 'pixiv') {
+    // 进入 P站：加载常用标签/热门标签（功能栏常显）+ 首页推荐 feed（需登录，未登录提示）
+    if (window.api) {
+      window.api.sendCommand({ cmd: 'pixiv_tags' })
+      if (!searchResults.value.length) {
+        handlePixivCommand({ cmd: 'pixiv_feed', kind: 'home', page: 1 })
+      }
+    }
+    if (!pixivUser.value && !humanVerifyPrompted.has('pixiv')) {
+      humanVerifyPrompted.add('pixiv')
+      message.warning('P站 (Pixiv) 推荐流/收藏/关注更新等功能需要登录：请点左侧「打开内置浏览器登录」完成 Refresh Token 登录', { duration: 6000 })
+    }
   }
   // Hanime1 真人验证提示：使用前告知用户（未登录时弹提示，推荐内置浏览器登录完成验证）
   if (s === 'hanime' && !humanVerifyPrompted.has('hanime')) {

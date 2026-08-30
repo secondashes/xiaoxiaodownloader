@@ -1407,6 +1407,26 @@
         </n-scrollbar>
       </div>
 
+      <!-- Pixiv 全功能面板：功能栏（常用标签/关注粉丝/首页插画漫画小说/关注更新/收藏书签/推荐/排行/消息提醒/发布作品）+
+           三模式搜索 + 三种卡片 + 用户主页 + 作品详情（解析下载时让位给"解析中"视图，文件列表让位给下载视图） -->
+      <PixivPanel
+        v-else-if="site === 'pixiv' && fileList.length === 0 && !inspecting"
+        :state="pixivState"
+        :search-query="searchQuery"
+        :search-results="searchResults"
+        :search-page="searchPage"
+        :search-total-pages="searchTotalPages"
+        :search-has-more="searchHasMore"
+        :search-total-results="searchTotalResults"
+        :searching="searching"
+        :active-feed="pixivActiveFeed"
+        :pixiv-search-type="pixivSearchType"
+        :media-proxy-port="mediaProxyPort"
+        @pixiv-command="$emit('pixiv-command', $event)"
+        @open-album="$emit('open-album', $event)"
+        @go-page="p => $emit('go-page', p)"
+      />
+
       <!-- X 关注视图：关注列表 / 关注我的人 / 我的分类（点用户查看 TA 的主页） -->
       <div v-else-if="site === 'twitter' && twFollowMode" class="tw-follow-view">
         <div class="tw-follow-toolbar">
@@ -3106,65 +3126,7 @@
           />
         </div>
 
-        <!-- Pixiv：插画卡片（搜索通用）+ 顶底分页，点击解析作品全部原图 -->
-        <div v-else-if="site === 'pixiv'" class="pa-results">
-          <div class="pa-toolbar">
-            <span class="pa-result-count">
-              {{ searchQuery ? `「${searchQuery}」` : 'Pixiv 作品' }} · 第 {{ searchPage }} 页
-              <template v-if="searchTotalResults > 0">（共 {{ formatCount(searchTotalResults) }} 个作品）</template>
-            </span>
-          </div>
-          <PaginationBar
-            :page="searchPage"
-            :total-pages="searchTotalPages"
-            :has-more="searchHasMore"
-            :searching="searching"
-            @go-page="p => $emit('go-page', p)"
-          />
-          <div class="search-grid">
-            <div
-              v-for="item in searchResults"
-              :key="item.album_url"
-              class="search-card iw-card"
-              :title="`${item.album_name}\n作者: ${item.author || '未知'}\n点击解析并下载全部原图`"
-              @click="$emit('open-album', item)"
-            >
-              <div class="thumb-wrapper">
-                <img
-                  :src="proxied(item.thumbnail)"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  :alt="item.album_name"
-                />
-                <div class="thumb-files" v-if="item.files != null">{{ item.files }}P</div>
-                <span v-if="item.r18" class="iw-thumb-duration" style="background: #d03050">R-18</span>
-                <span v-if="item.ugoira" class="asmr-thumb-sub" style="background: #722ed1">动图</span>
-                <button
-                  class="card-favorite-btn"
-                  title="快速收藏到本地"
-                  @click.stop="handleQuickFavorite(item)"
-                >♥</button>
-              </div>
-              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
-              <div class="iw-card-meta">
-                <span
-                  v-if="item.author"
-                  class="iw-card-author"
-                  title="点击解析该作者的全部作品"
-                  @click.stop="$emit('open-album', { album_url: item.author_url, album_name: item.author })"
-                >{{ item.author }}</span>
-                <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
-              </div>
-            </div>
-          </div>
-          <PaginationBar
-            :page="searchPage"
-            :total-pages="searchTotalPages"
-            :has-more="searchHasMore"
-            :searching="searching"
-            @go-page="p => $emit('go-page', p)"
-          />
-        </div>
+        <!-- Pixiv 卡片渲染已迁移到 PixivPanel.vue（功能栏 + 三模式搜索 + 用户页 + 详情页） -->
 
         <!-- Oreno3D / EroMMDTube：视频卡片（搜索通用）+ 顶底分页，点击进详情 -->
         <div v-else-if="isOrenoSite" class="pa-results">
@@ -3746,6 +3708,7 @@
 import { ref, computed, h, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { NTag, NButton } from 'naive-ui'
 import PaginationBar from './PaginationBar.vue'
+import PixivPanel from './PixivPanel.vue'
 
 const props = defineProps({
   settings: { type: Object, required: true },
@@ -3769,6 +3732,10 @@ const props = defineProps({
   history: { type: Array, required: true },
   // 本地媒体代理端口（在线播放：0=未就绪）
   mediaProxyPort: { type: Number, default: 0 },
+  // Pixiv 全功能面板状态（App.vue reactive 透传：view/userId/userPage/detail/related/myTags/trending/notifications/bookmarkTags/uploadResult）
+  pixivState: { type: Object, required: true },
+  pixivSearchType: { type: String, default: 'illust' },   // 搜索三模式：illust=插画/漫画 novel=小说 user=用户
+  pixivActiveFeed: { type: String, default: '' },          // 当前功能栏高亮 feed（home/illust/manga/novel/follow_*/bookmark/userlist_*）
   exhentaiUser: { type: String, default: '' },
   exGalleryDetail: { type: Object, default: null },   // EX 画廊详情（完整信息 + 分组标签）
   exDetailLoading: { type: Boolean, default: false }, // 详情加载中
@@ -4034,6 +4001,8 @@ const emit = defineEmits([
   // 识图（反向图片搜索）
   'reverse-search',        // 开始识图（参数：图片本地路径）
   'reverse-reset',         // 清空结果回到拖拽框
+  // Pixiv 事件（由 App.vue 集中处理：发后端命令 / 切视图 / 记录状态）
+  'pixiv-command',         // PixivPanel 统一命令出口（参数：{cmd, ...payload}）
 ])
 
 const checkedKeys = ref([])
@@ -5310,7 +5279,10 @@ const inputPlaceholder = computed(() => {
     return '搜索 H站（Hanime1）里番视频，或粘贴 hanime1.me/watch?v=... 链接'
   }
   if (props.site === 'pixiv') {
-    return '搜索 Pixiv 插画/漫画作品，或粘贴 pixiv.net/artworks/... 、/users/... 链接'
+    const modeHint = props.pixivSearchType === 'novel'
+      ? '小说'
+      : (props.pixivSearchType === 'user' ? '用户' : '插画/漫画')
+    return `搜索 Pixiv ${modeHint}（上方可切换模式），或粘贴 pixiv.net 链接`
   }
   if (props.site === 'oreno3d') {
     return '搜索 Oreno3D / EroMMDTube 3D 视频，或粘贴 oreno3d.com、erommdtube.com/movies/... 链接'

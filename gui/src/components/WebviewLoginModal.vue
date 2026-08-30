@@ -57,6 +57,8 @@
       class="login-webview"
       @did-navigate="onNav"
       @did-navigate-in-page="onNav"
+      @will-navigate="onWillNav"
+      @did-fail-load="onFailLoad"
       @did-start-loading="loading = true; status = 'loading'"
       @did-stop-loading="loading = false; onStop()"
     />
@@ -97,9 +99,14 @@ const props = defineProps({
   // 手动确认模式（EX 站）：不自动检测登录成功，底部显示提示 + 取消/确认按钮，
   // 用户点"确认"后才抓取 cookie（e-hentai 论坛登录成功后 URL 不确定，自动检测不可靠）
   manualConfirm: { type: Boolean, default: false },
+  // 自定义协议授权码提取（Pixiv OAuth）：URL 匹配该正则时提取第 1 个捕获组作为 code，
+  // emit('login-code', { code })（登录成功重定向 pixiv://account/login?code=xxx 无法加载，走 will-navigate/did-fail-load 拦截）
+  codeRegex: { type: RegExp, default: null },
+  // 登录页 URL 动态生成时（如 Pixiv PKCE OAuth 后端返回地址），变化后重新加载
+  watchLoginUrl: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:show', 'login-success', 'login-failed', 'close'])
+const emit = defineEmits(['update:show', 'login-success', 'login-failed', 'login-code', 'close'])
 
 const visible = ref(props.show)
 const address = ref('')
@@ -121,10 +128,48 @@ watch(() => props.show, (v) => {
 })
 watch(visible, (v) => emit('update:show', v))
 
+// 登录页 URL 动态更新（Pixiv PKCE OAuth：后端生成后回调设置）
+watch(() => props.loginUrl, (v) => {
+  if (props.watchLoginUrl && visible.value && v && v !== currentUrl.value) {
+    address.value = v
+    currentUrl.value = v
+  }
+})
+
+// 自定义协议授权码提取（Pixiv OAuth）：pixiv://account/login?code=xxx
+// 该协议 webview 无法加载（did-fail-load），但 URL 已出现在 will-navigate / did-fail-load 事件里
+let codeExtracted = false
+function tryExtractCode(url) {
+  if (codeExtracted || !props.codeRegex || !url) return false
+  const m = props.codeRegex.exec(url)
+  if (m && m[1]) {
+    codeExtracted = true
+    status.value = 'oauth'
+    emit('login-code', { code: m[1], site: props.site })
+    return true
+  }
+  return false
+}
+
+function onWillNav(e) {
+  const url = e.url || ''
+  if (!url) return
+  if (tryExtractCode(url)) return
+  // 非自定义协议正常交给 onNav 处理（去重：did-navigate 也会触发）
+  if (/^https?:/i.test(url)) onNav(e)
+}
+
+function onFailLoad(e) {
+  // pixiv:// 协议加载失败（ERR_UNKNOWN_URL_SCHEME）：从 URL 提取授权 code
+  const url = e && (e.validatedURL || e.url) || ''
+  tryExtractCode(url)
+}
+
 // 启动登录：加载登录页
 function startLogin() {
   status.value = 'loading'
   errorMsg.value = ''
+  codeExtracted = false
   address.value = props.loginUrl
   currentUrl.value = props.loginUrl
 }
