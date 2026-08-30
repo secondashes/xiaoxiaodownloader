@@ -7207,11 +7207,13 @@ PIXIV_BASE = "https://www.pixiv.net"
 PIXIV_ACCOUNTS = "https://accounts.pixiv.net"
 PIXIV_APP_BASE = "https://app-api.pixiv.net"
 PIXIV_OAUTH_URL = "https://oauth.secure.pixiv.net/auth/token"
-# Pixiv Android App 公开 OAuth 凭据（App API PKCE 登录业界通用）
-PIXIV_CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpTpa92e"
-PIXIV_CLIENT_SECRET = "lAS1wCK1PsOnmoUoBvNsc28MZ6ZtjxPAK71eiOT7"
+# Pixiv Android App 公开 OAuth 凭据（与 ZipFile/pixiv_auth、pixivpy 等开源实现一致）
+PIXIV_CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+PIXIV_CLIENT_SECRET = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+# OAuth 授权码换 token 必带的 redirect_uri（登录回跳 callback 页）
+PIXIV_OAUTH_REDIRECT_URI = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
 PIXIV_HASH_SECRET = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
-PIXIV_APP_UA = "PixivAndroidApp/5.0.234 (Android 14; Pixel 7)"
+PIXIV_APP_UA = "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)"
 PIXIV_DEFAULT_PROXY = "http://127.0.0.1:10809"
 # 用户主页解析的作品数上限（防止大触作者数千作品把解析卡死）
 PIXIV_USER_MAX_WORKS = 500
@@ -7341,12 +7343,15 @@ def pixiv_oauth_start() -> None:
 
 
 def _pixiv_oauth_post(extra: dict) -> dict:
-    """POST oauth.secure.pixiv.net/auth/token（换 token；出错抛异常）。"""
+    """POST oauth.secure.pixiv.net/auth/token（换 token；出错抛异常）。
+
+    参数结构对齐 ZipFile/pixiv_auth 权威实现：
+    授权码流程必须带 redirect_uri，否则返回 invalid_request。
+    """
     data = {
         "client_id": PIXIV_CLIENT_ID,
         "client_secret": PIXIV_CLIENT_SECRET,
         "include_policy": "true",
-        "get_secure_url": "true",
     }
     data.update(extra)
     resp = requests.post(
@@ -7391,6 +7396,7 @@ def pixiv_oauth_complete(code: str, cookie_str: str = "") -> None:
             "grant_type": "authorization_code",
             "code": code,
             "code_verifier": verifier,
+            "redirect_uri": PIXIV_OAUTH_REDIRECT_URI,
         })
         user = result.get("user") or {}
         uid = str(user.get("id") or "")

@@ -4015,9 +4015,10 @@ function handlePixivLogin() {
   wvLogin.captchaPatterns = [/challenge|captcha|recaptcha|turnstile|gotcha/i]
   wvLogin.credentials = null
   wvLogin.manualConfirm = false
-  // 匹配登录成功后的两种回跳 URL：authenticate 中间页（https 302，did-navigate 触发，首选）
-  // 和 pixiv:// 自定义协议（webview 事件不可靠，仅兜底）
-  wvLogin.codeRegex = /app-api\.pixiv\.net\/web\/v1\/login\/authenticate\?.*?\bcode=([A-Za-z0-9]+)|pixiv:\/\/account\/login\?code=([A-Za-z0-9]+)/
+  // 匹配登录成功后的两种回跳 URL（对齐 ZipFile/pixiv_auth 官方流程）：
+  // ① https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback?state=...&code=xxx（https 302，did-navigate 触发，首选）
+  // ② pixiv://account/login?code=xxx（callback 页 JS 深链跳转，协议已被主进程接管，兜底）
+  wvLogin.codeRegex = /app-api\.pixiv\.net\/web\/v1\/users\/auth\/pixiv\/callback\?.*?\bcode=([^&#\s]+)|pixiv:\/\/account\/login\?code=([^&#\s]+)/
   wvLogin.watchLoginUrl = true
   wvLogin.visible = true
   // webview 会话代理（国内必须走代理才能打开登录页）
@@ -4716,7 +4717,8 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
 // will-navigate/did-fail-load 事件提取 code）→ 抓取 webview cookie 一并发后端换 Refresh Token
 async function handleSiteLoginCode({ code, site }) {
   if (!window.api || !code) return
-  addLog('系统', `${site} OAuth 授权码已提取，正在换取 Token...`)
+  // 诊断日志：code 长度+前缀（换 token 失败时可据此排查截断/错码）
+  addLog('系统', `${site} OAuth 授权码已提取（长度 ${code.length}，前缀 ${code.slice(0, 6)}...），正在换取 Token...`)
   let cookieStr = ''
   try {
     // 登录页 webview cookie（通知/提醒等 Web ajax 备用通道）
