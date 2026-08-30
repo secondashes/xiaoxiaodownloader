@@ -162,9 +162,16 @@ function tryExtractCode(url) {
 function onWillNav(e) {
   const url = e.url || ''
   if (!url) return
+  // 非 http(s) 协议（如 pixiv:// OAuth 回跳）：阻止 webview 导航
+  // （即使主进程已接管协议，阻止导航也能避免多余加载），先尝试提取授权码
+  if (!/^https?:/i.test(url)) {
+    tryExtractCode(url)
+    try { e.preventDefault && e.preventDefault() } catch (err) { /* 忽略 */ }
+    return
+  }
   if (tryExtractCode(url)) return
-  // 非自定义协议正常交给 onNav 处理（去重：did-navigate 也会触发）
-  if (/^https?:/i.test(url)) onNav(e)
+  // 正常导航交给 onNav 处理（去重：did-navigate 也会触发）
+  onNav(e)
 }
 
 function onFailLoad(e) {

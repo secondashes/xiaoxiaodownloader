@@ -1526,6 +1526,30 @@ function registerThumbProtocol() {
   })
 }
 
+// 接管 pixiv:// 协议（Pixiv OAuth 登录回跳）：Pixiv 登录成功后回跳
+// pixiv://account/login?code=xxx，未接管时 Chromium 会交给系统处理 →
+// Windows 弹「需要使用新应用以打开此 pixiv 链接」对话框（模态，挡住登录弹窗无法操作）。
+// 注册空响应处理器后导航被应用内静默接管，授权码由前端 WebviewLoginModal
+// 从 will-navigate/did-fail-load 事件 URL 提取（did-navigate 已提取 authenticate 中间页）。
+function registerPixivProtocol() {
+  const handler = () => new Response('', { status: 204 })
+  try {
+    protocol.handle('pixiv', handler)
+    debugLog('pixiv:// 协议已接管（默认 session）')
+  } catch (err) {
+    debugLog(`pixiv:// 协议注册失败(默认): ${err.message}`)
+  }
+  // Pixiv 登录 webview 用独立 partition（persist:pixiv），协议处理器必须
+  // 在该 session 上注册，否则仍被视为外部协议弹系统「打开方式」对话框
+  try {
+    const ses = session.fromPartition('persist:pixiv')
+    ses.protocol.handle('pixiv', handler)
+    debugLog('pixiv:// 协议已接管（persist:pixiv session）')
+  } catch (err) {
+    debugLog(`pixiv:// 协议注册失败(persist:pixiv): ${err.message}`)
+  }
+}
+
 // ============================
 // 生命周期
 // ============================
@@ -1547,6 +1571,7 @@ app.whenReady().then(async () => {
   debugLog('=== Electron app ready ===')
   debugLog(`isDev=${isDev}, hasBuild=${hasBuild()}`)
   registerThumbProtocol()
+  registerPixivProtocol()
   createWindow()
   // 初始化 ExHentai webview 会话（代理 + 权限放行）
   await setupExSession(readExProxyFromSettings())
