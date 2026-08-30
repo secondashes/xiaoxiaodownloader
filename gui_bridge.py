@@ -7367,9 +7367,13 @@ def _pixiv_oauth_post(extra: dict) -> dict:
     except ValueError:
         raise PermissionError(f"Pixiv OAuth 返回非 JSON（HTTP {resp.status_code}）")
     if resp.status_code != 200 or result.get("error"):
-        msg = (result.get("error_description") or result.get("message")
-               or result.get("error") or f"HTTP {resp.status_code}")[:200]
-        raise PermissionError(f"Pixiv OAuth 失败: {msg}")
+        # Pixiv 的真实原因在 errors.system.message（如"不正なOAuthクライアントです"=凭据非法），
+        # 顶层只有 error=invalid_request，必须挖嵌套字段才能看到有效信息
+        sys_err = ((result.get("errors") or {}).get("system") or {})
+        msg = (sys_err.get("message") or result.get("error_description")
+               or result.get("message") or result.get("error")
+               or f"HTTP {resp.status_code}")[:200]
+        raise PermissionError(f"Pixiv OAuth 失败: {msg}（code {sys_err.get('code') or resp.status_code}）")
     if not result.get("access_token") or not result.get("refresh_token"):
         raise PermissionError("Pixiv OAuth 未返回 token")
     return result
