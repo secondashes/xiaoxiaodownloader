@@ -84,6 +84,17 @@
         </n-button>
         <n-button size="small" type="warning" title="上传作品发布到 Pixiv（标题/说明/标签）" @click="uploadVisible = true">✏️ 发布作品</n-button>
       </div>
+      <!-- 批量下载（多批次）进度条 -->
+      <div v-if="batchRunning" class="px-batch-progress">
+        <n-progress
+          type="line"
+          :percentage="batchProgress.total ? Math.round(batchProgress.done / batchProgress.total * 100) : 0"
+          :height="8"
+          :show-indicator="false"
+          processing
+        />
+        <span class="px-batch-text">{{ batchProgress.message || '准备中...' }}（{{ batchProgress.done }}/{{ batchProgress.total }}）</span>
+      </div>
     </div>
 
     <!-- ================= 列表视图（搜索结果 / feed / 列表） ================= -->
@@ -92,6 +103,12 @@
         <span class="pa-result-count">
           {{ searchQuery ? `「${searchQuery}」` : 'Pixiv' }} · 第 {{ searchPage }} 页
           <template v-if="searchTotalResults > 0">（共 {{ formatCount(searchTotalResults) }} 个）</template>
+        </span>
+        <!-- 用户列表批量下载（多批次：每个用户一个下载任务） -->
+        <span v-if="userCards.length" class="pa-batch-bar">
+          <span class="pa-batch-label">批量下载本页 {{ userCards.length }} 个用户：</span>
+          <n-button size="tiny" type="warning" @click="batchDownloadPageUsers('illust')">⬇ 插画/漫画</n-button>
+          <n-button size="tiny" type="warning" @click="batchDownloadPageUsers('novel')">⬇ 小说</n-button>
         </span>
       </div>
       <PaginationBar
@@ -136,6 +153,11 @@
             <div v-if="item.comment" class="px-user-comment" :title="item.comment">{{ item.comment }}</div>
             <div v-if="item.recent_thumbs && item.recent_thumbs.length" class="px-user-thumbs">
               <img v-for="(t, i) in item.recent_thumbs" :key="i" :src="proxied(t)" loading="lazy" referrerpolicy="no-referrer" />
+            </div>
+            <!-- 单个用户批量下载（直接后台任务，不经预览） -->
+            <div class="px-user-dl">
+              <n-button size="tiny" type="warning" secondary title="后台解析并下载 TA 的全部插画/漫画" @click.stop="batchDownloadUser(item, 'illust')">⬇ 插画/漫画</n-button>
+              <n-button size="tiny" type="warning" secondary title="后台解析并下载 TA 的全部小说（txt+封面）" @click.stop="batchDownloadUser(item, 'novel')">⬇ 小说</n-button>
             </div>
           </div>
           <!-- 插画/小说卡片：作者头像+名字 -->
@@ -450,7 +472,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { NTag, NButton, NButtonGroup, NDropdown, NPopover, NCheckbox, NInput, NModal, NSpin, NScrollbar } from 'naive-ui'
+import { NTag, NButton, NButtonGroup, NDropdown, NPopover, NCheckbox, NInput, NModal, NSpin, NScrollbar, NProgress } from 'naive-ui'
 import PaginationBar from './PaginationBar.vue'
 
 const props = defineProps({
@@ -466,6 +488,9 @@ const props = defineProps({
   // 当前 feed 高亮（feed/follow/bookmark/userlist）
   activeFeed: { type: String, default: '' },
   pixivSearchType: { type: String, default: 'illust' },
+  // 批量下载（多批次）进度
+  batchRunning: { type: Boolean, default: false },
+  batchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
   mediaProxyPort: { type: Number, default: 0 },
 })
 
@@ -574,17 +599,30 @@ const userSections = computed(() => {
     { key: 'novels', label: '小说', items: up.novels || [] },
   ]
 })
+// ---------- 批量下载（多批次：每个用户一个后台下载任务） ----------
+const userCards = computed(() => (props.searchResults || []).filter(i => i.kind === 'user'))
+function batchDownloadPageUsers(content) {
+  const ids = userCards.value.map(i => String(i.user_id)).filter(Boolean)
+  if (!ids.length) return
+  emitCmd({ cmd: 'pixiv_batch_download', user_ids: ids, content })
+}
+function batchDownloadUser(item, content) {
+  const uid = String(item.user_id || '').trim()
+  if (!uid) return
+  emitCmd({ cmd: 'pixiv_batch_download', user_ids: [uid], content })
+}
 function downloadUserAll(content) {
   const up = props.state.userPage
   if (!up) return
-  if (content === 'novel') {
-    emitCmd({ cmd: 'pixiv_user_novels', user_id: up.user.user_id })
-  } else {
-    $emitOpenAlbum({ album_url: `${'https://www.pixiv.net'}/users/${up.user.user_id}`, album_name: `${up.user.name} 的插画/漫画` })
-  }
+  // 直接后台批量任务（多批次下载），不经解析预览页
+  emitCmd({ cmd: 'pixiv_batch_download', user_ids: [String(up.user.user_id)], content })
 }
 function downloadSection(sec) {
-  for (const item of sec.items) $emitOpenAlbum(item)
+  // 本区作品合并为一个批量任务（插画/漫画按 illust_id，小说按 novel_id）
+  const illustIds = sec.items.map(i => i.illust_id).filter(Boolean).map(String)
+  const novelIds = sec.items.map(i => i.novel_id).filter(Boolean).map(String)
+  if (!illustIds.length && !novelIds.length) return
+  emitCmd({ cmd: 'pixiv_batch_download', illust_ids: illustIds, novel_ids: novelIds, content: sec.key === 'novels' ? 'novel' : 'illust' })
 }
 function $emitOpenAlbum(item) {
   emit('open-album', item)
@@ -870,6 +908,12 @@ html.light-mode .iw-card-meta { color: #8a8a93; }
 .px-user-sub { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 4px; min-width: 0; }
 .px-user-account { font-size: 11px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .px-user-comment { font-size: 11px; color: #999; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.px-user-dl { display: flex; gap: 6px; margin-top: 4px; }
+.pa-batch-bar { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+.pa-batch-label { font-size: 11px; color: #999; }
+.px-batch-progress { display: flex; align-items: center; gap: 8px; padding: 4px 2px 2px; }
+.px-batch-progress :deep(.n-progress) { flex: 1; min-width: 120px; }
+.px-batch-text { font-size: 11px; color: #d48806; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
 .px-user-thumbs { display: flex; gap: 4px; }
 .px-user-thumbs img { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; }
 

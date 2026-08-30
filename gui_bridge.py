@@ -8542,44 +8542,50 @@ async def pixiv_novel_items(novel_id: str, title: str = "", author: str = "") ->
         logging.exception("Pixiv 小说解析失败 %s", novel_id)
 
 
+async def _pixiv_user_novel_items(uid: str) -> tuple[list[dict], str]:
+    """解析用户全部小说 → 下载条目列表（不发 inspect 事件，供预览/批量下载复用）。"""
+    all_novels: list[dict] = []
+    offset = 0
+    while True:
+        params = {"user_id": uid, "offset": offset} if offset else {"user_id": uid}
+        result = await asyncio.to_thread(_pixiv_app_api, "GET", "/v1/user/novels", params)
+        batch = result.get("novels") or []
+        all_novels.extend(batch)
+        if len(batch) < PIXIV_APP_PER_PAGE or len(all_novels) >= PIXIV_USER_MAX_WORKS:
+            break
+        offset += PIXIV_APP_PER_PAGE
+    if not all_novels:
+        return [], ""
+    author = ((all_novels[0].get("user") or {}).get("name")) or f"pixiv用户_{uid}"
+    items = []
+    for d in all_novels:
+        title = d.get("title") or f"pixiv小说_{d.get('id')}"
+        create_date = (d.get("create_date") or "")[:10]
+        date_prefix = create_date[:7] if create_date else ""
+        sub = f"{date_prefix}-{title}" if date_prefix else title
+        items.append({
+            "filename": "",  # 下载时生成（标题.txt）
+            "size": None,
+            "item_page": f"{PIXIV_BASE}/novel/show.php?id={d.get('id')}",
+            "status": "ok",
+            "thumbnail": (d.get("image_urls") or {}).get("medium") or "",
+            "media_url": "",  # 下载时取 /v1/novel/text
+            "site": "pixiv", "kind": "novel", "novel_id": str(d.get("id") or ""),
+            "post_title": title, "post_date": create_date, "artist": author,
+            "subfolder": sanitize_directory_name(sub),
+        })
+    return items, author
+
+
 async def pixiv_user_novels(uid: str) -> None:
     """用户全部小说 → 下载条目列表（txt 全文，一键批量下载）。"""
     try:
         emit({"event": "inspect_progress", "current": 0, "total": 0,
               "filename": "获取小说列表..."})
-        all_novels: list[dict] = []
-        offset = 0
-        while True:
-            params = {"user_id": uid, "offset": offset} if offset else {"user_id": uid}
-            result = await asyncio.to_thread(_pixiv_app_api, "GET", "/v1/user/novels", params)
-            batch = result.get("novels") or []
-            all_novels.extend(batch)
-            emit({"event": "inspect_progress", "current": len(all_novels), "total": "?",
-                  "filename": f"已获取 {len(all_novels)} 篇小说..."})
-            if len(batch) < PIXIV_APP_PER_PAGE or len(all_novels) >= PIXIV_USER_MAX_WORKS:
-                break
-            offset += PIXIV_APP_PER_PAGE
-        if not all_novels:
+        items, author = await _pixiv_user_novel_items(uid)
+        if not items:
             emit({"event": "inspect_error", "message": "该用户没有小说"})
             return
-        author = ((all_novels[0].get("user") or {}).get("name")) or f"pixiv用户_{uid}"
-        items = []
-        for d in all_novels:
-            title = d.get("title") or f"pixiv小说_{d.get('id')}"
-            create_date = (d.get("create_date") or "")[:10]
-            date_prefix = create_date[:7] if create_date else ""
-            sub = f"{date_prefix}-{title}" if date_prefix else title
-            items.append({
-                "filename": "",  # 下载时生成（标题.txt）
-                "size": None,
-                "item_page": f"{PIXIV_BASE}/novel/show.php?id={d.get('id')}",
-                "status": "ok",
-                "thumbnail": (d.get("image_urls") or {}).get("medium") or "",
-                "media_url": "",  # 下载时取 /v1/novel/text
-                "site": "pixiv", "kind": "novel", "novel_id": str(d.get("id") or ""),
-                "post_title": title, "post_date": create_date, "artist": author,
-                "subfolder": sanitize_directory_name(sub),
-            })
         album_id = f"pixiv_user_novels_{uid}"
         _apply_cached_thumbnails(items)
         _mark_items_new(album_id, items)
@@ -8592,6 +8598,110 @@ async def pixiv_user_novels(uid: str) -> None:
     except Exception as exc:
         emit({"event": "inspect_error", "message": f"用户小说解析失败: {exc}"})
         logging.exception("Pixiv 用户小说解析失败 uid=%s", uid)
+
+
+async def pixiv_batch_download(user_ids: list, content: str,
+                               illust_ids: list, novel_ids: list, options: dict) -> None:
+    """Pixiv 批量解析下载（多批次）：关注/粉丝列表勾选多个用户或列表勾选多个作品，
+    逐个解析并直接提交下载任务（不经解析预览页）。
+
+    - user_ids + content（illust|novel）：每个用户单独一个下载任务（多批次，
+      目录 = 作者名/...，与其他站点批量下载逻辑一致）
+    - illust_ids / novel_ids：勾选的作品合并为一个任务
+    """
+    user_ids = [str(u).strip() for u in (user_ids or []) if str(u).strip()]
+    illust_ids = [str(v).strip() for v in (illust_ids or []) if str(v).strip()]
+    novel_ids = [str(v).strip() for v in (novel_ids or []) if str(v).strip()]
+    content = "novel" if content == "novel" else "illust"
+    works_total = 1 if (illust_ids or novel_ids) else 0
+    total = len(user_ids) + works_total
+    done = 0
+    failed: list[str] = []
+
+    def _progress(done_: int, msg: str) -> None:
+        emit({"event": "pixiv_batch_progress", "done": done_, "total": total, "message": msg})
+
+    if not total:
+        emit({"event": "pixiv_batch_done", "done": 0, "total": 0, "failed": [],
+              "message": "没有可批量下载的内容"})
+        return
+
+    try:
+        for uid in user_ids:
+            label = f"用户 {uid}"
+            _progress(done, f"正在解析 {label} 的全部{'小说' if content == 'novel' else '插画/漫画'}...")
+            try:
+                if content == "novel":
+                    items, author = await _pixiv_user_novel_items(uid)
+                    album_name = f"{author}的小说" if author else f"pixiv用户_{uid}的小说"
+                    album_id = f"pixiv_user_novels_{uid}"
+                    src_url = f"{PIXIV_BASE}/users/{uid}/novels"
+                else:
+                    items, user_name = await _pixiv_user_items(uid)
+                    album_name = f"{user_name}的插画漫画" if user_name else f"pixiv用户_{uid}"
+                    album_id = f"pixiv_user_{uid}"
+                    src_url = f"{PIXIV_BASE}/users/{uid}"
+                    label = f"@{user_name or uid}"
+                if not items:
+                    failed.append(f"{label}（无{'小说' if content == 'novel' else '作品'}）")
+                else:
+                    _apply_cached_thumbnails(items)
+                    task_id = download_manager.submit(src_url, items, options, album_name, album_id)
+                    download_manager.start(task_id)
+                    logging.info("Pixiv 批量下载：%s 已提交 %d 个文件", label, len(items))
+            except Exception as exc:
+                failed.append(f"{label}（{exc}）")
+                logging.exception("Pixiv 批量下载解析失败 uid=%s", uid)
+            done += 1
+            _progress(done, f"{label} 完成（{done}/{total}）")
+
+        if illust_ids or novel_ids:
+            _progress(done, f"正在解析勾选的 {len(illust_ids) + len(novel_ids)} 个作品...")
+            items: list[dict] = []
+            try:
+                for iid in illust_ids:
+                    w_items, _meta = await _pixiv_build_illust_items(iid)
+                    items.extend(w_items)
+                for nid in novel_ids:
+                    # 小说批量：单篇 detail 仅取标题/日期/封面（正文下载时取 /v1/novel/text）
+                    detail = (await asyncio.to_thread(
+                        _pixiv_app_api, "GET", "/v1/novel/detail", {"novel_id": nid})).get("novel") or {}
+                    title = detail.get("title") or f"pixiv小说_{nid}"
+                    create_date = (detail.get("create_date") or "")[:10]
+                    date_prefix = create_date[:7] if create_date else ""
+                    sub = f"{date_prefix}-{title}" if date_prefix else title
+                    cover = (detail.get("image_urls") or {}).get("large") or ""
+                    items.append({
+                        "filename": "", "size": None,
+                        "item_page": f"{PIXIV_BASE}/novel/show.php?id={nid}", "status": "ok",
+                        "thumbnail": cover, "media_url": "",
+                        "site": "pixiv", "kind": "novel", "novel_id": str(nid),
+                        "post_title": title, "post_date": create_date,
+                        "artist": (detail.get("user") or {}).get("name") or "",
+                        "subfolder": sanitize_directory_name(sub),
+                    })
+                if not items:
+                    failed.append("勾选的作品（全部解析失败）")
+                else:
+                    task_id = download_manager.submit(
+                        "https://www.pixiv.net/", items, options, "Pixiv 批量下载", "pixiv_batch")
+                    download_manager.start(task_id)
+                    logging.info("Pixiv 批量下载：已提交 %d 个作品", len(items))
+            except Exception as exc:
+                failed.append(f"勾选的作品（{exc}）")
+                logging.exception("Pixiv 批量下载作品解析失败")
+            done += 1
+            _progress(done, f"作品解析完成（{done}/{total}）")
+
+        summary = f"Pixiv 批量下载已提交：{done}/{total}"
+        if failed:
+            summary += f"；失败：{'、'.join(failed)}"
+        emit({"event": "pixiv_batch_done", "done": done, "total": total,
+              "failed": failed, "message": summary})
+    except Exception as exc:
+        emit({"event": "pixiv_batch_done", "done": done, "total": total, "failed": failed,
+              "message": f"Pixiv 批量下载中断: {exc}"})
+        logging.exception("Pixiv 批量下载出错")
 
 
 def is_pixiv_novel_url(url: str) -> bool:
@@ -16918,6 +17028,12 @@ async def command_loop() -> None:
 
             elif cmd == "pixiv_user_novels":
                 await pixiv_user_novels(command.get("user_id", ""))
+
+            elif cmd == "pixiv_batch_download":
+                await pixiv_batch_download(
+                    command.get("user_ids") or [], command.get("content", "illust"),
+                    command.get("illust_ids") or [], command.get("novel_ids") or [],
+                    command.get("options") or {})
 
             elif cmd == "hanime_home":
                 await hanime_home()

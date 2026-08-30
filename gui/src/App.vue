@@ -248,6 +248,8 @@
             :pixiv-state="pixivState"
             :pixiv-search-type="settings.pixiv_search_type || 'illust'"
             :pixiv-active-feed="pixivActiveFeed"
+            :pixiv-batch-running="pixivBatchRunning"
+            :pixiv-batch-progress="pixivBatchProgress"
             @pixiv-command="handlePixivCommand"
             @reverse-search="handleReverseSearch"
             @reverse-reset="handleReverseReset"
@@ -827,6 +829,9 @@ const pixivState = reactive({
 })
 // 功能栏当前高亮 feed（home/illust/manga/novel/follow_*/bookmark/userlist_*）
 const pixivActiveFeed = ref('')
+// Pixiv 批量下载（多批次：每个用户一个后台任务）进度
+const pixivBatchRunning = ref(false)
+const pixivBatchProgress = reactive({ done: 0, total: 0, message: '' })
 // 列表翻页上下文：feed 翻页记住 kind/page（搜索模式走 doSearch，不走这里）
 const pixivListCtx = reactive({ mode: '', kind: 'home', content: 'illust', restrict: 'public', allow_r18: true, user_id: '', umode: 'following' })
 // 主页：分区列表 [{title, items}]（最新上市/最新上傳 + 每个分类）
@@ -1847,6 +1852,25 @@ function handlePythonEvent(event) {
       if (event.ok) message.success(event.message)
       else message.error(event.message)
       addLog('P站', `发布作品: ${event.message}`)
+      break
+
+    case 'pixiv_batch_progress':
+      // 批量下载进度：逐个用户/作品解析并提交任务（多批次）
+      pixivBatchProgress.done = event.done || 0
+      pixivBatchProgress.total = event.total || 0
+      pixivBatchProgress.message = event.message || ''
+      addLog('P站', `批量下载 ${event.done || 0}/${event.total || 0}: ${event.message || ''}`)
+      break
+
+    case 'pixiv_batch_done':
+      // 批量下载完成（含失败明细）
+      pixivBatchRunning.value = false
+      if (event.failed && event.failed.length) {
+        message.warning(event.message || '批量下载部分失败')
+      } else {
+        message.success(event.message || '批量下载已提交')
+      }
+      addLog('P站', `批量下载完成: ${event.message || ''}`)
       break
 
     case 'pixiv_proxy_set':
@@ -4122,6 +4146,27 @@ function handlePixivCommand(e) {
       cmd: 'pixiv_user_list', mode: pixivListCtx.umode,
       user_id: pixivListCtx.user_id, page: e.page || 1,
     })
+    return
+  }
+  if (cmd === 'pixiv_batch_download') {
+    // 批量解析下载（多批次：每个用户一个后台任务；勾选作品合并为一个任务）
+    const userIds = (e.user_ids || []).map(String).filter(Boolean)
+    const illustIds = (e.illust_ids || []).map(String).filter(Boolean)
+    const novelIds = (e.novel_ids || []).map(String).filter(Boolean)
+    if (!userIds.length && !illustIds.length && !novelIds.length) return
+    pixivBatchRunning.value = true
+    pixivBatchProgress.done = 0
+    pixivBatchProgress.total = userIds.length + ((illustIds.length || novelIds.length) ? 1 : 0)
+    pixivBatchProgress.message = '准备中...'
+    window.api.sendCommand({
+      cmd: 'pixiv_batch_download',
+      user_ids: userIds,
+      content: e.content || 'illust',
+      illust_ids: illustIds,
+      novel_ids: novelIds,
+      options: JSON.parse(JSON.stringify(settings)),
+    })
+    addLog('下载', `Pixiv 批量下载：${userIds.length} 个用户、${illustIds.length + novelIds.length} 个作品`)
     return
   }
   // 其余命令直接透传后端（pixiv_related / pixiv_action / pixiv_notification / pixiv_bookmark_tags / pixiv_upload / pixiv_user_novels）

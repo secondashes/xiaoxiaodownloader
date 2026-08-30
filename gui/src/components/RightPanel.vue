@@ -1421,6 +1421,8 @@
         :searching="searching"
         :active-feed="pixivActiveFeed"
         :pixiv-search-type="pixivSearchType"
+        :batch-running="pixivBatchRunning"
+        :batch-progress="pixivBatchProgress"
         :media-proxy-port="mediaProxyPort"
         @pixiv-command="$emit('pixiv-command', $event)"
         @open-album="$emit('open-album', $event)"
@@ -3736,6 +3738,8 @@ const props = defineProps({
   pixivState: { type: Object, required: true },
   pixivSearchType: { type: String, default: 'illust' },   // 搜索三模式：illust=插画/漫画 novel=小说 user=用户
   pixivActiveFeed: { type: String, default: '' },          // 当前功能栏高亮 feed（home/illust/manga/novel/follow_*/bookmark/userlist_*）
+  pixivBatchRunning: { type: Boolean, default: false },    // Pixiv 批量下载进行中
+  pixivBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) }, // 批量下载进度
   exhentaiUser: { type: String, default: '' },
   exGalleryDetail: { type: Object, default: null },   // EX 画廊详情（完整信息 + 分组标签）
   exDetailLoading: { type: Boolean, default: false }, // 详情加载中
