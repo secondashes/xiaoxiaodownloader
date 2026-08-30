@@ -18,6 +18,11 @@
             @hanime-login="handleHanimeLogin"
             @hanime-logout="handleHanimeLogout"
             @hanime-set-proxy="handleHanimeSetProxy"
+            :pixiv-user="pixivUser"
+            :pixiv-login-loading="pixivLoginLoading"
+            @pixiv-login="handlePixivLogin"
+            @pixiv-logout="handlePixivLogout"
+            @pixiv-set-proxy="handlePixivSetProxy"
             :asmr-user="asmrUser"
             :asmr-login-loading="asmrLoginLoading"
             @asmr-login="handleAsmrLogin"
@@ -90,9 +95,10 @@
             @translate-youdao="handleTranslateYoudao"
             @translate-free="handleTranslateFree"
             :translate-result="translateResult"
-            @check-github-update="handleCheckGithubUpdate"
+            @check-github-update="handleFetchChangelog"
             :github-update-info="githubUpdateInfo"
             :github-checking="githubChecking"
+            :changelog-loading="changelogLoading"
             :app-version="appVersion"
             :update-download="updateDownload"
             @download-update="handleDownloadUpdate"
@@ -423,6 +429,28 @@
           </template>
         </n-modal>
 
+        <!-- 更新日志弹窗（点"检查更新"先弹：多版本更新说明，可下滑浏览，底部取消/更新） -->
+        <n-modal v-model:show="changelogModalVisible" preset="dialog" :title="changelogInfo?.has_new ? `发现新版本 ${changelogInfo.latest_version}` : '更新说明'" style="width: 640px">
+          <div class="changelog-modal">
+            <div v-if="changelogInfo?.has_new" class="changelog-tip">
+              当前版本 v{{ changelogInfo.current_version || appVersion }} → 最新版本 {{ changelogInfo.latest_version }}，以下是本次更新内容：
+            </div>
+            <div v-else class="changelog-tip changelog-tip-latest">当前已是最新版本，以下为历史版本更新记录：</div>
+            <n-scrollbar class="changelog-scroll">
+              <div v-for="sec in (changelogInfo?.versions || [])" :key="sec.version" class="changelog-section">
+                <div class="changelog-section-title">{{ sec.version }}<span v-if="sec.date" class="changelog-section-date">{{ sec.date }}</span></div>
+                <ul class="changelog-lines">
+                  <li v-for="(line, i) in sec.lines" :key="i">{{ line }}</li>
+                </ul>
+              </div>
+            </n-scrollbar>
+          </div>
+          <template #action>
+            <n-button size="small" @click="changelogModalVisible = false">取消</n-button>
+            <n-button size="small" type="primary" @click="handleChangelogConfirmUpdate">更新</n-button>
+          </template>
+        </n-modal>
+
         <!-- 通用 webview OAuth 登录弹窗（xhamster/pornhub/xvideos 共用） -->
         <WebviewLoginModal
           :show="wvLogin.visible"
@@ -485,6 +513,9 @@ const settings = reactive({
   // H站搜索过滤（分类/排序，随搜索选项发送并长期保存）
   hanime_genre: '',
   hanime_sort: '',
+  // Pixiv 专属设置（国内必须代理；搜索模式：''=全部 / safe=全年龄 / r18=R-18）
+  pixiv_proxy: 'http://127.0.0.1:10809',
+  pixiv_mode: '',
   // O3D 列表排序（hot=人気 / favorites=お気に入り / latest=最新 / popularity=閲覧数）
   oreno_sort: '',
   // ASMR 音声站（asmr-100.com）专属设置
@@ -677,6 +708,11 @@ const githubChecking = ref(false)
 const appVersion = ref('')
 // 更新安装包下载状态：{ downloading, received, total, percent, speed, fileName, path, done, error }
 const updateDownload = reactive({ downloading: false, received: 0, total: 0, percent: 0, speed: 0, fileName: '', path: '', done: false, error: '' })
+// 更新日志弹窗：点"检查更新"时先从发布仓库拉取更新日志展示（多版本可下滑浏览）
+// changelogInfo = { ok, current_version, has_new, latest_version, versions: [{version, date, lines: []}] }
+const changelogInfo = ref(null)
+const changelogLoading = ref(false)
+const changelogModalVisible = ref(false)
 // 后台批量收集锁定：批量解析收集过文件后不自动切换到文件列表视图（静默后台下载），
 // 用户点"返回"/新搜索/导航切换时解锁
 const batchFileCollected = ref(false)
@@ -762,6 +798,9 @@ const iwBatchProgress = reactive({ done: 0, total: 0, message: '' })
 const haView = ref('')
 const hanimeUser = ref('')
 const hanimeLoginLoading = ref(false)
+// Pixiv 登录状态（P站：插画搜索/作品解析/用户主页下载）
+const pixivUser = ref('')
+const pixivLoginLoading = ref(false)
 // 主页：分区列表 [{title, items}]（最新上市/最新上傳 + 每个分类）
 const haSections = ref([])
 const haHomeLoading = ref(false)
@@ -1653,6 +1692,37 @@ function handlePythonEvent(event) {
       }
       break
 
+    case 'pixiv_login_result':
+      pixivLoginLoading.value = false
+      if (event.logout) {
+        pixivUser.value = ''
+        if (!event.silent) message.info(event.message || '已退出 Pixiv 登录')
+        addLog('系统', 'Pixiv 已退出登录')
+      } else if (event.success) {
+        pixivUser.value = event.username || '已登录'
+        if (!event.silent) message.success(event.message || 'Pixiv 登录成功')
+        addLog('系统', `Pixiv 登录成功: ${pixivUser.value}`)
+      } else {
+        if (event.network_issue) {
+          // 网络问题：保留当前登录显示
+          if (!event.silent) message.warning(event.message || 'Pixiv 连接失败（网络问题），登录状态已保留')
+          addLog('系统', `Pixiv 连接失败（网络）: ${event.message || ''}`)
+        } else {
+          pixivUser.value = ''
+          if (!event.silent) message.error(event.message || 'Pixiv 未登录')
+          addLog('系统', `Pixiv 未登录: ${event.message || ''}`)
+        }
+      }
+      break
+
+    case 'pixiv_proxy_set':
+      // 后端确认 Pixiv 代理设置（含自动补 http:// 前缀）
+      if ((event.proxy || '') !== settings.pixiv_proxy) {
+        settings.pixiv_proxy = event.proxy || ''
+        saveSettings()
+      }
+      break
+
     case 'hanime_home':
       haHomeLoading.value = false
       haHomeError.value = event.error || ''
@@ -2264,6 +2334,19 @@ function handlePythonEvent(event) {
       githubUpdateInfo.value = event
       break
 
+    case 'changelog_info':
+      // 更新日志拉取结果（点"检查更新"时先弹更新说明）
+      changelogLoading.value = false
+      if (event.ok) {
+        changelogInfo.value = event
+        changelogModalVisible.value = true
+      } else {
+        message.error(event.error || '更新日志获取失败，请检查网络')
+        // 更新日志拉取失败时仍走原更新检查流程，保证功能可用
+        handleCheckGithubUpdate()
+      }
+      break
+
     case 'update_download_progress':
       // 更新安装包下载进度（后端流式推送，限频 0.5s）
       updateDownload.downloading = true
@@ -2585,6 +2668,11 @@ function isHanimeUrl(text) {
   return /^https?:\/\/(www\.)?hanime1\.me\/watch\?v=\w+/i.test((text || '').trim())
 }
 
+// 判断输入是否为 Pixiv 链接（作品页 /artworks/{id} 或用户主页 /users/{id}）
+function isPixivUrl(text) {
+  return /^https?:\/\/(www\.)?pixiv\.net\/(?:en\/)?(artworks\/\d+|users\/\d+|member_illust\.php\?.*illust_id=\d+)/i.test((text || '').trim())
+}
+
 // 判断输入是否为 Oreno3D / EroMMDTube 视频链接（oreno3d.com/movies/xxx、erommdtube.com/movies/xxx）
 function isOrenoUrl(text) {
   return /^https?:\/\/(www\.)?(oreno3d|erommdtube)\.com\/movies\/\d+/i.test((text || '').trim())
@@ -2595,7 +2683,7 @@ function isAsmrUrl(text) {
   return /^https?:\/\/(www\.)?(asmr-100|asmr)\.\w+\/work\/\d+/i.test((text || '').trim())
 }
 
-const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站', asmr: '音声' }
+const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', pixiv: 'P站', oreno3d: 'O3D', erommdtube: 'E站', asmr: '音声' }
 function siteNameOf(s) {
   return siteNames[s] || (s ? String(s) : '未知')
 }
@@ -2631,7 +2719,7 @@ function updateSite(site) {
 function handleSearch() {
   const text = searchQuery.value.trim()
   if (!text) return
-  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isOrenoUrl(text) || isAsmrUrl(text) || isJavdbUrl(text)) {
+  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isPixivUrl(text) || isOrenoUrl(text) || isAsmrUrl(text) || isJavdbUrl(text)) {
     // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR / JavDB 链接，直接解析（后端按链接自动路由）
     url.value = text
     cameFromSearch.value = false
@@ -2993,7 +3081,7 @@ function handleUseHistory(h) {
       saveSettings()
     }
     searchQuery.value = query
-    if (isBunkrUrl(query) || isCoomerUrl(query) || isPawchiveUrl(query) || isExhentaiUrl(query) || isTwitterUrl(query) || isIwaraUrl(query) || isHanimeUrl(query) || isOrenoUrl(query) || isAsmrUrl(query)) {
+    if (isBunkrUrl(query) || isCoomerUrl(query) || isPawchiveUrl(query) || isExhentaiUrl(query) || isTwitterUrl(query) || isIwaraUrl(query) || isHanimeUrl(query) || isPixivUrl(query) || isOrenoUrl(query) || isAsmrUrl(query)) {
       // 历史记录是链接：直接解析
       url.value = query
       cameFromSearch.value = false
@@ -3241,6 +3329,24 @@ function handleCheckGithubUpdate() {
   githubChecking.value = true       // 显式 loading（请求失败/超时由后端事件复位）
   githubUpdateInfo.value = null    // 清空旧结果
   window.api.sendCommand({ cmd: 'check_github_update', current_version: appVersion.value || '' })
+}
+
+// 检查更新入口：先拉取发布仓库的更新日志弹窗展示（多版本可下滑浏览），用户点"更新"后再走下载流程
+function handleFetchChangelog() {
+  if (!window.api || changelogLoading.value) return
+  changelogLoading.value = true
+  changelogInfo.value = null
+  window.api.sendCommand({ cmd: 'fetch_changelog', current_version: appVersion.value || '' })
+}
+
+// 更新日志弹窗"更新"按钮：有新版时走原更新检查+下载流程，无新版时仅提示
+function handleChangelogConfirmUpdate() {
+  changelogModalVisible.value = false
+  if (changelogInfo.value?.has_new) {
+    handleCheckGithubUpdate()
+  } else {
+    message.info(`当前已是最新版本 v${appVersion.value || changelogInfo.value?.current_version || ''}`)
+  }
 }
 
 // 下载最新版安装包（后端流式下载到系统「下载」文件夹，进度通过 update_download_progress 事件推送）
@@ -3737,6 +3843,26 @@ function handleHanimeSetProxy(proxy) {
   }
 }
 
+// Pixiv 登录/登出/代理（P站：账号密码登录，会话失效自动重登）
+function handlePixivLogin(email, password) {
+  if (!window.api || !email.trim() || !password) return
+  pixivLoginLoading.value = true
+  window.api.sendCommand({ cmd: 'pixiv_login', email: email.trim(), password })
+}
+
+function handlePixivLogout() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'pixiv_logout' })
+}
+
+// Pixiv 代理修改：保存设置 + 通知后端（国内必须走代理）
+function handlePixivSetProxy(proxy) {
+  updateSettings({ pixiv_proxy: proxy })
+  if (window.api) {
+    window.api.sendCommand({ cmd: 'pixiv_set_proxy', proxy: proxy || '' })
+  }
+}
+
 // H站主页：各分区视频（进入站点时自动加载）
 function handleHaHome() {
   if (!window.api) return
@@ -4165,6 +4291,15 @@ function handleSiteOAuthLogin(siteKey, creds) {
       captchaPatterns: [/challenge|captcha|recaptcha|hcaptcha|turnstile/i],
       manualConfirm: true,
     },
+    // Pixiv：弹窗内登录 accounts.pixiv.net（Cloudflare/人机验证在弹窗内完成），确认后保存会话 cookie + 账号密码
+    pixiv: {
+      loginUrl: 'https://accounts.pixiv.net/login',
+      homeUrl: 'https://www.pixiv.net/',
+      partition: 'persist:pixiv',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|recaptcha|turnstile|gotcha/i],
+      manualConfirm: true,
+    },
     // ASMR-100：弹窗内登录 asmr-100.com，确认后保存表单账号密码供 token 失效自动重登
     asmr: {
       loginUrl: 'https://asmr-100.com/login',
@@ -4303,8 +4438,8 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
-  // O3D / E站 / Hanime1：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
-  if (['oreno3d', 'erommdtube', 'hanime'].includes(wvLogin.site) && wvLogin.credentials) {
+  // O3D / E站 / Hanime1 / Pixiv：登录表单的账号密码随 cookie 一起保存（下次登录自动预填）
+  if (['oreno3d', 'erommdtube', 'hanime', 'pixiv'].includes(wvLogin.site) && wvLogin.credentials) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
   }
@@ -5357,6 +5492,56 @@ html, body, #app {
   gap: 10px;
   font-size: 13px;
 }
+
+/* 更新日志弹窗：内容区可下滑浏览多版本更新说明 */
+.changelog-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.changelog-tip {
+  color: #f2c97d;
+}
+
+.changelog-tip-latest {
+  color: #63e2b7;
+}
+
+.changelog-scroll {
+  max-height: 420px;
+  padding-right: 6px;
+}
+
+.changelog-section {
+  margin-bottom: 14px;
+}
+
+.changelog-section-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #63e2b7;
+  margin-bottom: 6px;
+}
+
+.changelog-section-date {
+  font-weight: 400;
+  font-size: 12px;
+  color: #909090;
+  margin-left: 8px;
+}
+
+.changelog-lines {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #d8d8d8;
+  line-height: 1.5;
+}
+
 
 .rename-tip {
   color: #f2c97d;

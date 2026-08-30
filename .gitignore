@@ -29,9 +29,25 @@ _oreno_*.html
 _asmr_*.json
 _asmr_*.html
 tmp_*
+_probe_*.py
+_tmp_*.py
+_hanime_*.js
+_hanime_*.txt
+_iwara_*.js
+_t.py
+debug_*.py
+*.html
+!gui/dist/index.html
+test.bat
+事件任务对话压缩上下文.md
 
-# 敏感运行时数据
+# 敏感运行时数据（账号 cookie / 会话 / 用户数据，绝不上传）
 theme_cache.dat
+cookies.txt
+history.json
+settings.json
+downloads_tasks.json
+.release_stage/
 
 # IDE
 .idea/

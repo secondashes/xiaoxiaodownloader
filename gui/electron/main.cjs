@@ -27,6 +27,13 @@ const isStub = !!stubEnv                         // 单文件模式（从临时�
 const isReleased = !isStub && fs.existsSync(path.join(exeDir, STUB_MARKER))  // 文件夹完整程序模式
 const PORTABLE_MODE = isStub || isReleased
 
+// 单实例锁（跳过单文件自解压引导模式：stub 会拉起正式程序后自行退出，抢锁会误杀正式程序）
+// 防止双实例并行：两个实例同时运行时关掉一个、另一个还在托盘，用户看来就是"点了退出却缩到托盘"
+if (!isStub && !app.requestSingleInstanceLock()) {
+  // 已有实例在运行：本实例直接退出（已有实例会收到 second-instance 并把主窗口弹回前台）
+  process.exit(0)
+}
+
 // 单文件所在目录（stubEnv）里已释放的文件夹程序；exe 已在名为“小小下载器”的文件夹里时不嵌套
 function getReleaseDir() {
   if (fs.existsSync(path.join(stubEnv, STUB_MARKER))) return stubEnv  // 单文件被移进程序文件夹内运行
@@ -79,6 +86,8 @@ const SITE_SESSIONS = {
   oreno3d:  { partition: 'persist:oreno3d', domains: ['.oreno3d.com'] },
   // EroMMDTube：与 Oreno3D 同架构（无账号体系），保存站点会话 cookie（Cloudflare 验证后免重复验证）
   erommdtube: { partition: 'persist:erommdtube', domains: ['.erommdtube.com'] },
+  // Pixiv：独立会话（webview 内完成邮箱密码登录 + Cloudflare/人机验证），抓取 PHPSESSID
+  pixiv:    { partition: 'persist:pixiv', domains: ['.pixiv.net', '.pximg.net'], authNames: ['PHPSESSID'] },
   // ExHentai：与右侧浏览器视图共用 persist:exhentai 会话（cookie 互通）；
   // 登录走 e-hentai 论坛账号（forums.e-hentai.org），登录后自动下发 exhentai.org 的 ipb cookie
   exhentai: { partition: 'persist:exhentai', domains: ['.e-hentai.org', '.exhentai.org'], authNames: ['ipb_member_id', 'ipb_pass_hash'] },
@@ -1113,6 +1122,7 @@ function rebuildTrayMenu() {
       click: () => {
         destroyTray()
         app.quit()
+        forceQuitSoon()   // 兜底：quit 被拦截时 2 秒后强制退出
       },
     },
   ])
@@ -1132,6 +1142,17 @@ function destroyTray() {
     try { appTray.destroy() } catch {}
   }
   appTray = null
+}
+
+// 强制退出兜底：app.quit() 可能被残留窗口/模态对话框/嵌套 quit 拦截
+// （实测出现过 before-quit 触发后进程仍存活、后端进程不退出的情况）
+// 2 秒后仍未退出则 app.exit(0) 直接终结进程，并确保杀掉 Python 后端
+function forceQuitSoon() {
+  setTimeout(() => {
+    debugLog('quit 未完成，强制退出进程')
+    try { if (pythonProcess) pythonProcess.kill() } catch (e) {}
+    app.exit(0)
+  }, 2000)
 }
 
 // 快速缩小：隐藏主窗口 + 关闭悬浮窗 + 显示托盘
@@ -1552,6 +1573,18 @@ app.on('window-all-closed', () => {
   }
   if (process.platform !== 'darwin') {
     app.quit()
+    forceQuitSoon()   // 兜底：quit 被拦截时 2 秒后强制退出
+  }
+})
+
+// 单实例锁：再次点击程序图标时恢复已有实例的主窗口（可能藏在托盘/后台）
+app.on('second-instance', () => {
+  debugLog('second-instance: 恢复已有实例的主窗口')
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    destroyTray()
   }
 })
 
@@ -1561,6 +1594,12 @@ app.on('before-quit', () => {
     try { pythonProcess.kill() } catch (e) {}
     pythonProcess = null
   }
+})
+
+// will-quit：进程即将退出前的最后清理，确保 Python 后端不残留
+app.on('will-quit', () => {
+  debugLog('--- will-quit ---')
+  try { if (pythonProcess) pythonProcess.kill() } catch (e) {}
 })
 
 process.on('uncaughtException', (err) => {

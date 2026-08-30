@@ -407,6 +407,55 @@
           </div>
         </div>
 
+        <!-- Pixiv 邮箱密码登录（P站；Cloudflare 站点；完整登录套件） -->
+        <div v-if="site === 'pixiv'" class="pawchive-login-form">
+          <div class="login-hint login-hint-warn">
+            ⚠ Pixiv 登录可能触发人机验证（reCAPTCHA）：登录被拦截或验证失败时，
+            点下方"打开内置浏览器登录"在弹窗内完成验证，会话自动保存
+          </div>
+          <n-input
+            v-model:value="pixivEmailInput"
+            size="small"
+            placeholder="Pixiv 登录邮箱 / Pixiv ID"
+            :disabled="pixivLoginLoading"
+            @keyup.enter="handlePixivLogin"
+          />
+          <n-input
+            v-model:value="pixivPasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+            :disabled="pixivLoginLoading"
+            @keyup.enter="handlePixivLogin"
+          />
+          <n-button
+            size="small"
+            type="primary"
+            block
+            :loading="pixivLoginLoading"
+            :disabled="!pixivEmailInput.trim() || !pixivPasswordInput"
+            @click="handlePixivLogin"
+          >
+            {{ pixivLoginLoading ? '登录中...' : '登录' }}
+          </n-button>
+          <n-button
+            size="small"
+            block
+            secondary
+            @click="emit('site-oauth-login', 'pixiv', { email: pixivEmailInput.trim(), password: pixivPasswordInput })"
+          >
+            打开内置浏览器登录（验证）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('pixiv', pixivEmailInput, pixivPasswordInput)">
+            仅保存账号密码（加密存本机）
+          </n-button>
+          <div class="login-hint">
+            P站账号密码登录（会话失效自动用保存的密码重登）；遇到人机验证时点"内置浏览器登录"在弹窗内完成；
+            不登录也可搜索全年龄作品，登录可看 R-18、关注作者、收藏作品
+          </div>
+        </div>
+
         <!-- ASMR-100 用户名密码登录（音声站；登录后可同步收藏；完整登录套件） -->
         <div v-if="site === 'asmr'" class="pawchive-login-form">
           <n-input
@@ -1233,6 +1282,34 @@
             </div>
           </template>
 
+          <!-- Pixiv 专属设置（代理 + 搜索模式） -->
+          <template v-if="site === 'pixiv'">
+            <div class="setting-item">
+              <div class="setting-label">Pixiv (P站) 代理地址（搜索/解析/下载都走此代理）</div>
+              <n-input
+                :value="settings.pixiv_proxy"
+                placeholder="如 http://127.0.0.1:10809"
+                size="small"
+                @change="v => $emit('pixiv-set-proxy', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">国内必须配置代理才能访问 pixiv.net；下载取原图（original，多页作品全下）</div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-label">Pixiv 搜索内容过滤</div>
+              <n-select
+                :value="settings.pixiv_mode || ''"
+                :options="[
+                  { label: '全部（含R-18，需登录）', value: '' },
+                  { label: '全年龄（safe）', value: 'safe' },
+                  { label: '仅R-18（需登录）', value: 'r18' },
+                ]"
+                size="small"
+                @update:value="v => update('pixiv_mode', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">R-18 内容需要登录账号才能搜索到；未登录只能看全年龄作品</div>
+            </div>
+          </template>
+
           <!-- ASMR-100 专属设置（代理，默认直连） -->
           <template v-if="site === 'asmr'">
             <div class="setting-item">
@@ -1501,10 +1578,10 @@
               block
               secondary
               type="info"
-              :loading="githubChecking"
+              :loading="githubChecking || changelogLoading"
               @click="emit('check-github-update')"
             >
-              {{ githubChecking ? '检查中...' : '检查更新' }}
+              {{ githubChecking || changelogLoading ? '检查中...' : '检查更新' }}
             </n-button>
           </div>
           <!-- 更新信息 -->
@@ -1823,6 +1900,9 @@ const props = defineProps({
   // Hanime1 登录用户名（H站，邮箱密码登录）
   hanimeUser: { type: String, default: '' },
   hanimeLoginLoading: { type: Boolean, default: false },
+  // Pixiv 登录用户名（P站，邮箱密码登录）
+  pixivUser: { type: String, default: '' },
+  pixivLoginLoading: { type: Boolean, default: false },
   // ASMR-100 登录用户名（音声站，用户名+密码登录）
   asmrUser: { type: String, default: '' },
   asmrLoginLoading: { type: Boolean, default: false },
@@ -1867,6 +1947,8 @@ const props = defineProps({
   githubUpdateInfo: { type: Object, default: null },
   // 检查进行中（仅手动点击"检查更新"时为 true；启动后不发任何 GitHub 请求）
   githubChecking: { type: Boolean, default: false },
+  // 更新日志拉取中（点"检查更新"先拉更新日志弹窗）
+  changelogLoading: { type: Boolean, default: false },
   // 当前程序版本号（Electron app.getVersion()）
   appVersion: { type: String, default: '' },
   // 更新安装包下载状态 { downloading, received, total, percent, speed, fileName, path, done, error }
@@ -1894,6 +1976,10 @@ const emit = defineEmits([
   'hanime-login',          // 邮箱密码登录（参数：邮箱, 密码）
   'hanime-logout',         // 退出 Hanime1 登录
   'hanime-set-proxy',      // 修改 Hanime1 代理（参数：代理地址，国内必须）
+  // Pixiv（P站）
+  'pixiv-login',           // 邮箱密码登录（参数：邮箱, 密码）
+  'pixiv-logout',          // 退出 Pixiv 登录
+  'pixiv-set-proxy',       // 修改 Pixiv 代理（参数：代理地址，国内必须）
   // ASMR-100（音声站）
   'asmr-login',            // 用户名密码登录（参数：用户名, 密码）
   'asmr-logout',           // 退出 ASMR 登录
@@ -1965,7 +2051,7 @@ watch(() => props.reversePaste, (v) => {
 // ============================
 // 登录状态（账号卡片）
 // ============================
-const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube'].includes(props.site))
+const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'pixiv', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube'].includes(props.site))
 
 // O3D / E站（Oreno3D / EroMMDTube）：无账号体系，登录 = 保存站点会话（Cloudflare 免重复验证）
 const isOrenoSite = computed(() => props.site === 'oreno3d' || props.site === 'erommdtube')
@@ -1976,6 +2062,7 @@ const siteLoggedIn = computed(() => {
   if (props.site === 'exhentai') return !!props.exhentaiUser
   if (props.site === 'iwara') return !!props.iwaraUser
   if (props.site === 'hanime') return !!props.hanimeUser
+  if (props.site === 'pixiv') return !!props.pixivUser
   if (props.site === 'asmr') return !!props.asmrUser
   if (props.site === 'xhamster') return !!props.xhamsterUser
   if (props.site === 'pornhub') return !!props.pornhubUser
@@ -1993,6 +2080,7 @@ const loginSubtitle = computed(() => {
   if (props.site === 'exhentai') return props.exhentaiUser ? 'ExHentai 已登录' : 'ExHentai 未登录'
   if (props.site === 'iwara') return props.iwaraUser ? `Iwara 已登录: ${props.iwaraUser}` : 'Iwara 未登录'
   if (props.site === 'hanime') return props.hanimeUser ? `H站已登录: ${props.hanimeUser}` : 'Hanime1 未登录'
+  if (props.site === 'pixiv') return props.pixivUser ? `P站已登录: ${props.pixivUser}` : 'Pixiv 未登录'
   if (props.site === 'asmr') return props.asmrUser ? `音声站已登录: ${props.asmrUser}` : 'ASMR-100 未登录'
   if (props.site === 'xhamster') return props.xhamsterUser ? `xHamster 已登录: ${props.xhamsterUser}` : 'xHamster 未登录'
   if (props.site === 'pornhub') return props.pornhubUser ? `Pornhub 已登录: ${props.pornhubUser}` : 'Pornhub 未登录'
@@ -2378,6 +2466,15 @@ function handleHanimeLogin() {
   emit('hanime-login', hanimeEmailInput.value.trim(), hanimePasswordInput.value)
 }
 
+// Pixiv 邮箱密码登录表单
+const pixivEmailInput = ref('')
+const pixivPasswordInput = ref('')
+
+function handlePixivLogin() {
+  if (!pixivEmailInput.value.trim() || !pixivPasswordInput.value) return
+  emit('pixiv-login', pixivEmailInput.value.trim(), pixivPasswordInput.value)
+}
+
 // ASMR-100 用户名密码登录表单
 const asmrNameInput = ref('')
 const asmrPasswordInput = ref('')
@@ -2415,6 +2512,7 @@ watch(() => props.siteCreds, (creds) => {
   fill(exEmailInput, exPasswordInput, creds.exhentai)
   fill(iwaraEmailInput, iwaraPasswordInput, creds.iwara)
   fill(hanimeEmailInput, hanimePasswordInput, creds.hanime)
+  fill(pixivEmailInput, pixivPasswordInput, creds.pixiv)
   fill(asmrNameInput, asmrPasswordInput, creds.asmr)
   fill(jdbEmailInput, jdbPasswordInput, creds.javdb)
 }, { immediate: true })

@@ -20,7 +20,7 @@
           <span class="site-group-label">二次元</span>
           <div class="site-group-btns">
             <button
-              v-for="s in ['pawchive', 'exhentai', 'iwara', 'hanime', 'oreno3d', 'erommdtube', 'asmr']"
+              v-for="s in ['pawchive', 'exhentai', 'iwara', 'hanime', 'pixiv', 'oreno3d', 'erommdtube', 'asmr']"
               :key="s"
               class="site-chip"
               :class="{ on: site === s }"
@@ -1415,8 +1415,17 @@
             {{ twFollowLabel || (twFollowMode === 'follows' ? '我的分类（已归类的关注）' : (twFollowMode === 'followers' ? '关注我的人' : '关注列表')) }}
           </span>
           <span v-if="twFollowItems.length" class="tw-follow-count">
-            {{ twFollowItems.length }} 人<template v-if="twFollowHasMore">（可继续加载）</template>
+            {{ followSearch ? `${filteredFollowItems.length}/${twFollowItems.length}` : twFollowItems.length }} 人<template v-if="twFollowHasMore">（可继续加载）</template>
           </span>
+          <!-- 本地搜索：快速检索已缓存的关注/粉丝（昵称 / @推特号 / 简介 / 分类） -->
+          <n-input
+            v-model:value="followSearch"
+            size="tiny"
+            clearable
+            round
+            placeholder="🔍 搜本地缓存：昵称 / @推特号"
+            class="tw-follow-search"
+          />
           <n-button
             v-if="twFollowMode !== 'follows' && twFollowHasMore"
             size="tiny"
@@ -1440,8 +1449,11 @@
           <div v-else-if="twFollowItems.length === 0" class="tw-follow-empty">
             {{ twFollowMode === 'follows' ? '还没有归类任何关注，去"关注列表"给用户点"分类"吧' : '暂无数据' }}
           </div>
+          <div v-else-if="filteredFollowItems.length === 0" class="tw-follow-empty">
+            没有匹配「{{ followSearch }}」的人（试试加载更多，或清空搜索）
+          </div>
           <div
-            v-for="u in twFollowItems"
+            v-for="u in filteredFollowItems"
             :key="u.user_id"
             class="tw-user-card"
             title="点击查看 TA 的主页（关注/粉丝列表 + 全部媒体）"
@@ -3094,6 +3106,66 @@
           />
         </div>
 
+        <!-- Pixiv：插画卡片（搜索通用）+ 顶底分页，点击解析作品全部原图 -->
+        <div v-else-if="site === 'pixiv'" class="pa-results">
+          <div class="pa-toolbar">
+            <span class="pa-result-count">
+              {{ searchQuery ? `「${searchQuery}」` : 'Pixiv 作品' }} · 第 {{ searchPage }} 页
+              <template v-if="searchTotalResults > 0">（共 {{ formatCount(searchTotalResults) }} 个作品）</template>
+            </span>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+          <div class="search-grid">
+            <div
+              v-for="item in searchResults"
+              :key="item.album_url"
+              class="search-card iw-card"
+              :title="`${item.album_name}\n作者: ${item.author || '未知'}\n点击解析并下载全部原图`"
+              @click="$emit('open-album', item)"
+            >
+              <div class="thumb-wrapper">
+                <img
+                  :src="proxied(item.thumbnail)"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  :alt="item.album_name"
+                />
+                <div class="thumb-files" v-if="item.files != null">{{ item.files }}P</div>
+                <span v-if="item.r18" class="iw-thumb-duration" style="background: #d03050">R-18</span>
+                <span v-if="item.ugoira" class="asmr-thumb-sub" style="background: #722ed1">动图</span>
+                <button
+                  class="card-favorite-btn"
+                  title="快速收藏到本地"
+                  @click.stop="handleQuickFavorite(item)"
+                >♥</button>
+              </div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
+              <div class="iw-card-meta">
+                <span
+                  v-if="item.author"
+                  class="iw-card-author"
+                  title="点击解析该作者的全部作品"
+                  @click.stop="$emit('open-album', { album_url: item.author_url, album_name: item.author })"
+                >{{ item.author }}</span>
+                <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
+              </div>
+            </div>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+        </div>
+
         <!-- Oreno3D / EroMMDTube：视频卡片（搜索通用）+ 顶底分页，点击进详情 -->
         <div v-else-if="isOrenoSite" class="pa-results">
           <div class="pa-toolbar">
@@ -4452,6 +4524,28 @@ function formatCount(n) {
   return Number(n).toLocaleString('zh-CN')
 }
 
+// ============================
+// X 关注名单本地搜索（快速检索已缓存的人）
+// ============================
+const followSearch = ref('')
+// 按昵称 / @推特号 / 简介 / 分类过滤当前列表（纯前端过滤已加载的条目）
+const filteredFollowItems = computed(() => {
+  const kw = (followSearch.value || '').trim().toLowerCase()
+  if (!kw) return props.twFollowItems
+  return props.twFollowItems.filter(u => {
+    const fields = [
+      u.name || '',
+      u.screen_name || '',
+      u.description || '',
+      u.follow_tag || '',
+      u.tag || '',
+    ]
+    return fields.some(f => (f || '').toLowerCase().includes(kw))
+  })
+})
+// 切换列表模式时清空搜索（不同列表共用一个搜索框）
+watch(() => props.twFollowMode, () => { followSearch.value = '' })
+
 // 浏览模式缓存时间戳 → 可读文本
 function formatTwTime(ts) {
   if (!ts) return ''
@@ -5215,6 +5309,9 @@ const inputPlaceholder = computed(() => {
   if (props.site === 'hanime') {
     return '搜索 H站（Hanime1）里番视频，或粘贴 hanime1.me/watch?v=... 链接'
   }
+  if (props.site === 'pixiv') {
+    return '搜索 Pixiv 插画/漫画作品，或粘贴 pixiv.net/artworks/... 、/users/... 链接'
+  }
   if (props.site === 'oreno3d') {
     return '搜索 Oreno3D / EroMMDTube 3D 视频，或粘贴 oreno3d.com、erommdtube.com/movies/... 链接'
   }
@@ -5240,6 +5337,7 @@ function siteChipName(s) {
     exhentai: 'EX站',
     iwara: 'Iwara',
     hanime: 'H站',
+    pixiv: 'P站',
     oreno3d: 'O3D',
     erommdtube: 'E站',
     asmr: '音声',
@@ -8158,6 +8256,16 @@ html.light-mode .preview-volume-text {
   padding: 8px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
+}
+
+/* 关注名单本地搜索框：靠右伸展，快速检索已缓存的人 */
+.tw-follow-search {
+  margin-left: auto;
+  width: 220px;
+  flex-shrink: 1;
+}
+.tw-follow-search + .n-button {
+  margin-left: 0;
 }
 
 .tw-follow-title {

@@ -46,6 +46,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+import urllib.parse
 import urllib.request
 
 import aiohttp
@@ -733,6 +734,11 @@ async def gui_inspect(url: str, options: dict) -> None:
     # Hanime1 站点（hanime1.me）视频页，走独立解析流程
     if is_hanime_url(url):
         await hanime_inspect(url, options)
+        return
+
+    # Pixiv 站点（pixiv.net）作品页/用户主页，走独立解析流程
+    if is_pixiv_url(url):
+        await pixiv_inspect(url, options)
         return
 
     # Oreno3D / EroMMDTube 站点视频页，走独立解析流程
@@ -7165,6 +7171,581 @@ async def hanime_batch_download(video_ids: list, options: dict) -> None:
 
 
 # ============================
+# Pixiv 站点支持 (pixiv.net，插画站，X站类型：账号密码 + 内置浏览器登录)
+# ============================
+# - 登录: GET accounts.pixiv.net/login 取 post_key → POST /api/login {pixiv_id,password,post_key}
+#   会话 cookie（PHPSESSID，格式 "用户ID_哈希"，"0_" 开头 = 未登录）加密保存 + 密码一并保存供自动重登
+#   也可用内置浏览器登录（Cloudflare/验证在 webview 内完成后抓取 cookie）
+# - 搜索: GET /ajax/search/artworks/{关键词}?word=&order=date_d&mode=all|safe|r18&p=N&type=all&s_mode=s_tag
+#   返回 body.illustManga.data（卡片数据）+ total（每页 60 条）
+# - 作品详情: GET /ajax/illust/{id}（标题/作者/页数/urls.original）+ /ajax/illust/{id}/pages（多页原图）
+# - 用户主页: GET /ajax/user/{uid}/profile/all（全部作品 id）+ /ajax/user/{uid}/profile/illusts?ids[]=（卡片数据，每批最多约 30 个）
+# - 下载: i.pximg.net 原图直链永久有效，但必须带 Referer: https://www.pixiv.net/（否则 403）
+# - 动图(ugoira): /ajax/illust/{id}/ugoira_meta → originalSrc（zip 压缩包，同 Referer 规则）
+# - 国内必须代理（默认 http://127.0.0.1:10809）
+
+PIXIV_BASE = "https://www.pixiv.net"
+PIXIV_ACCOUNTS = "https://accounts.pixiv.net"
+PIXIV_DEFAULT_PROXY = "http://127.0.0.1:10809"
+# 用户主页解析的作品数上限（防止大触作者数千作品把解析卡死）
+PIXIV_USER_MAX_WORKS = 500
+# profile/illusts 批量取详情的单批 id 数
+PIXIV_DETAIL_CHUNK = 30
+
+_pixiv_proxy = PIXIV_DEFAULT_PROXY
+_pixiv_last_req = 0.0
+_pixiv_username = ""
+_pixiv_user_id = ""
+
+_pixiv_session = requests.Session()
+_pixiv_session.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+})
+
+
+def pixiv_set_proxy(proxy: str) -> None:
+    """设置 Pixiv 代理（空 = 直连；国内默认走代理）。"""
+    global _pixiv_proxy
+    _pixiv_proxy = (proxy or "").strip()
+    if _pixiv_proxy and not _pixiv_proxy.startswith(("http://", "https://", "socks5://")):
+        _pixiv_proxy = "http://" + _pixiv_proxy
+    proxies = {"http": _pixiv_proxy, "https": _pixiv_proxy} if _pixiv_proxy else {}
+    _pixiv_session.proxies = proxies
+    emit({"event": "pixiv_proxy_set", "proxy": _pixiv_proxy})
+
+
+def _pixiv_throttle(min_interval: float = 1.0) -> None:
+    """请求节流：连续请求过快会被 Cloudflare / pixiv 风控拦截。"""
+    global _pixiv_last_req
+    wait = _pixiv_last_req + min_interval - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    _pixiv_last_req = time.time()
+
+
+def _pixiv_load_cred() -> dict:
+    """读取已保存的 Pixiv 登录信息（加密存储：cookies + 邮箱 + 密码）。"""
+    return _secure_store_read_cred("pixiv")
+
+
+def _pixiv_save_cred(data: dict) -> None:
+    _secure_store_write_cred("pixiv", dict(data))
+
+
+def _pixiv_restore_session() -> None:
+    """启动时从加密存储恢复会话 cookie。"""
+    global _pixiv_username, _pixiv_user_id
+    cred = _pixiv_load_cred()
+    cookies = cred.get("cookies") or {}
+    for name, value in cookies.items():
+        try:
+            _pixiv_session.cookies.set(name, value, domain=".pixiv.net")
+        except Exception:
+            pass
+    _pixiv_username = cred.get("username") or ""
+    _pixiv_user_id = cred.get("user_id") or ""
+
+
+def _pixiv_sync_cookies(cred: dict) -> dict:
+    """把当前会话 cookie 写回凭据（PHPSESSID 等会刷新）。"""
+    cred["cookies"] = {c.name: c.value for c in _pixiv_session.cookies}
+    return cred
+
+
+def _pixiv_phpsessid_uid() -> str:
+    """从会话 PHPSESSID 提取用户 ID（格式 "用户ID_哈希"；"0_" = 未登录）。"""
+    for c in _pixiv_session.cookies:
+        if c.name == "PHPSESSID":
+            return (c.value.split("_", 1)[0] or "0").strip()
+    return ""
+
+
+def _pixiv_api_get(path: str, params: dict | None = None) -> dict:
+    """带节流的 AJAX GET（返回 JSON 的 body 部分；出错抛异常）。"""
+    _pixiv_throttle()
+    resp = _pixiv_session.get(
+        f"{PIXIV_BASE}{path}", params=params, timeout=25,
+        headers={
+            "Referer": f"{PIXIV_BASE}/",
+            "Accept": "application/json",
+            "x-user-id": _pixiv_user_id or "",
+        },
+    )
+    if resp.status_code != 200:
+        raise PermissionError(f"Pixiv 返回 HTTP {resp.status_code}")
+    data = resp.json()
+    if data.get("error"):
+        msg = (data.get("message") or "")[:200]
+        raise PermissionError(f"Pixiv API 错误: {msg or '未知错误'}")
+    return data.get("body") or {}
+
+
+def pixiv_login(email: str, password: str) -> None:
+    """Pixiv 账号密码登录（post_key 表单；会话 cookie 与密码一起加密保存）。"""
+    global _pixiv_username, _pixiv_user_id
+    try:
+        # 1. 打开登录页拿 post_key + 预置 cookie（device_token 等）
+        _pixiv_throttle()
+        page = _pixiv_session.get(
+            f"{PIXIV_ACCOUNTS}/login",
+            params={"return_to": f"{PIXIV_BASE}/"},
+            timeout=25,
+        )
+        if page.status_code != 200:
+            emit({"event": "pixiv_login_result", "success": False,
+                  "message": f"登录页打不开（HTTP {page.status_code}），请检查 Pixiv 代理设置"})
+            return
+        m = re.search(r'name="post_key"\s+value="([^"]+)"', page.text)
+        if not m:
+            m = re.search(r'"post_key"\s*:\s*"([^"]+)"', page.text)
+        if not m:
+            emit({"event": "pixiv_login_result", "success": False,
+                  "message": "登录页解析失败（post_key 未找到），请改用内置浏览器登录"})
+            return
+        post_key = m.group(1)
+
+        # 2. 提交登录（成功后 PHPSESSID 落到会话）
+        _pixiv_throttle()
+        resp = _pixiv_session.post(
+            f"{PIXIV_ACCOUNTS}/api/login",
+            params={"return_to": f"{PIXIV_BASE}/"},
+            data={
+                "pixiv_id": email, "password": password, "post_key": post_key,
+                "source": "pc", "ref": "wwwtop_accounts_index",
+                "captcha": "", "g_recaptcha_response": "",
+            },
+            timeout=25,
+            headers={"Referer": f"{PIXIV_ACCOUNTS}/login"},
+        )
+        try:
+            result = resp.json()
+        except ValueError:
+            result = {}
+        if result.get("error"):
+            msg = (result.get("message") or "邮箱或密码错误")[:200]
+            emit({"event": "pixiv_login_result", "success": False,
+                  "message": f"登录失败: {msg}（多次失败会触发验证，可改用内置浏览器登录）"})
+            return
+        # 3. 校验登录态（PHPSESSID 用户 ID != 0）
+        uid = _pixiv_phpsessid_uid()
+        if not uid or uid == "0":
+            emit({"event": "pixiv_login_result", "success": False,
+                  "message": "登录失败（会话未建立，可能触发人机验证，请改用内置浏览器登录）"})
+            return
+        username = _pixiv_fetch_username(uid) or email
+        _pixiv_username = username
+        _pixiv_user_id = uid
+        cred = {"email": email, "password": password, "username": username, "user_id": uid}
+        _pixiv_save_cred(_pixiv_sync_cookies(cred))
+        _emit_login_info()
+        emit({"event": "pixiv_login_result", "success": True, "username": username,
+              "message": "Pixiv 登录成功"})
+    except requests.RequestException as exc:
+        emit({"event": "pixiv_login_result", "success": False,
+              "message": f"连接失败: {exc}（国内必须在设置里配置 Pixiv 代理）",
+              "network_issue": True})
+    except Exception as exc:
+        emit({"event": "pixiv_login_result", "success": False, "message": f"登录失败: {exc}"})
+
+
+def _pixiv_fetch_username(uid: str) -> str:
+    """拉取用户显示名（ajax/user/{uid}；失败返回空）。"""
+    try:
+        body = _pixiv_api_get(f"/ajax/user/{uid}")
+        return (body.get("name") or "").strip()
+    except Exception:
+        return ""
+
+
+def pixiv_set_cookies(cookie_str: str, email: str = "", password: str = "") -> None:
+    """内置浏览器登录 Pixiv 后保存会话 cookie（Cloudflare/人机验证在弹窗内完成后抓取）。
+
+    webview 里完成登录 → 点"确认"抓取 cookie → 应用到后端会话并加密保存；
+    表单里输入的邮箱密码一并保存（会话失效时自动重登）。
+    """
+    global _pixiv_username, _pixiv_user_id
+    try:
+        _pixiv_session.cookies.clear()
+        for pair in (cookie_str or "").split(";"):
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            name, _, value = pair.partition("=")
+            try:
+                _pixiv_session.cookies.set(name.strip(), value.strip(), domain=".pixiv.net")
+            except Exception:
+                continue
+        cred = _pixiv_load_cred()
+        if (email or "").strip():
+            cred["email"] = email.strip()
+        if password:
+            cred["password"] = password
+        uid = _pixiv_phpsessid_uid()
+        if uid and uid != "0":
+            cred["user_id"] = uid
+            if not cred.get("username"):
+                cred["username"] = _pixiv_fetch_username(uid) or email
+            _pixiv_user_id = uid
+            _pixiv_username = cred.get("username") or ""
+        _pixiv_save_cred(_pixiv_sync_cookies(cred))
+        _emit_login_info()
+        emit({"event": "pixiv_login_result", "success": True,
+              "message": "Pixiv 会话已保存（验证完成）"})
+        # 立即校验会话是否有效（无效时会用保存的密码自动重登）
+        pixiv_check_login(False)
+    except Exception as exc:
+        logging.exception("Pixiv cookie 保存失败")
+        emit({"event": "pixiv_login_result", "success": False,
+              "message": f"保存会话失败: {exc}"})
+
+
+def pixiv_logout() -> None:
+    global _pixiv_username, _pixiv_user_id
+    _secure_store_clear_cred("pixiv")
+    _pixiv_session.cookies.clear()
+    _pixiv_username = ""
+    _pixiv_user_id = ""
+    _emit_login_info()
+    emit({"event": "pixiv_login_result", "success": False, "logout": True,
+          "message": "已退出 Pixiv 登录"})
+
+
+def pixiv_check_login(silent: bool = False) -> None:
+    """检查 Pixiv 登录状态（PHPSESSID 失效时用保存的密码自动重登）。"""
+    global _pixiv_username, _pixiv_user_id
+    cred = _pixiv_load_cred()
+    if not cred.get("cookies"):
+        emit({"event": "pixiv_login_result", "success": False, "silent": silent,
+              "message": "" if silent else "未登录"})
+        return
+    try:
+        # 随便请求一个 AJAX 端点：会话失效时 pixiv 会把 PHPSESSID 重置为 0_ 开头
+        _pixiv_api_get("/ajax/search/top", {"word": "test"})
+        uid = _pixiv_phpsessid_uid()
+        if uid and uid != "0":
+            _pixiv_user_id = uid
+            cred["user_id"] = uid
+            if not cred.get("username") and uid:
+                cred["username"] = _pixiv_fetch_username(uid)
+            _pixiv_username = cred.get("username") or ""
+            _pixiv_save_cred(_pixiv_sync_cookies(cred))
+            _emit_login_info()
+            emit({"event": "pixiv_login_result", "success": True, "silent": silent,
+                  "username": _pixiv_username, "message": "Pixiv 登录有效"})
+            return
+        # 会话失效 → 用保存的密码自动重登
+        if cred.get("email") and cred.get("password"):
+            _pixiv_session.cookies.clear()
+            pixiv_login(cred["email"], cred["password"])
+            return
+        emit({"event": "pixiv_login_result", "success": False, "silent": silent,
+              "message": "登录已失效，请重新登录"})
+    except requests.RequestException as exc:
+        emit({"event": "pixiv_login_result", "success": False, "silent": silent,
+              "message": f"连接失败: {exc}（请检查网络或 Pixiv 代理设置）",
+              "network_issue": True})
+    except Exception as exc:
+        emit({"event": "pixiv_login_result", "success": False, "silent": silent,
+              "message": f"检查登录失败: {exc}"})
+
+
+def _pixiv_parse_card(d: dict) -> dict:
+    """搜索/用户作品卡片数据 → 前端插画卡片。"""
+    illust_id = str(d.get("id") or "")
+    if not illust_id:
+        return {}
+    thumb = d.get("url") or ""
+    if thumb.startswith("//"):
+        thumb = "https:" + thumb
+    x_restrict = d.get("xRestrict") or 0
+    return {
+        "album_name": d.get("title") or f"pixiv_{illust_id}",
+        "album_url": f"{PIXIV_BASE}/artworks/{illust_id}",
+        "thumbnail": thumb,
+        "files": d.get("pageCount") or 1,
+        "site": "pixiv",
+        "illust_id": illust_id,
+        "author": d.get("userName") or "",
+        "author_url": f"{PIXIV_BASE}/users/{d.get('userId')}" if d.get("userId") else "",
+        "r18": x_restrict in (1, 2),
+        "ugoira": d.get("illustType") == 2,
+        "posted": (d.get("createDate") or "")[:10],
+    }
+
+
+async def pixiv_search(query: str, page: int = 1, mode: str = "") -> None:
+    """Pixiv 搜索插画/漫画（关键词 + 内容过滤）。"""
+    query = (query or "").strip()
+    if not query:
+        emit({"event": "search_error", "message": "搜索关键词为空"})
+        return
+    emit({"event": "search_loading", "loading": True})
+    try:
+        page = max(1, page or 1)
+        # 内容过滤：all=全部（含R-18，需登录）| safe=全年龄 | r18=仅R-18（需登录）
+        mode = mode if mode in ("all", "safe", "r18") else "all"
+        encoded = urllib.parse.quote(query, safe="")
+        body = await asyncio.to_thread(
+            _pixiv_api_get, f"/ajax/search/artworks/{encoded}",
+            {"word": query, "order": "date_d", "mode": mode, "p": page,
+             "type": "all", "s_mode": "s_tag_full", "lang": "zh"},
+        )
+        data = (body.get("illustManga") or {}).get("data") or []
+        total = int((body.get("illustManga") or {}).get("total") or 0)
+        items = [c for c in (_pixiv_parse_card(d) for d in data) if c]
+        # 已缓存的缩略图直接用本地 thumb://（i.pximg.net 直链在 <img> 里会 403）
+        _apply_cached_thumbnails(items)
+        per_page = 60
+        total_pages = (total + per_page - 1) // per_page if total else 0
+        label = {"all": "全部", "safe": "全年龄", "r18": "R-18"}.get(mode, "")
+        emit({
+            "event": "search_result", "query": query, "site": "pixiv",
+            "items": items, "page": page,
+            "total_pages": total_pages, "total_results": total,
+            "has_more": bool(total) and page * per_page < total,
+            "mode": mode,
+            "label": f"{query} · {label}" if label else query,
+        })
+        if items:
+            asyncio.create_task(_cache_thumbnails(items))
+        logging.info("Pixiv 搜索 '%s' (mode=%s page=%d): %d 个结果 / 共 %d",
+                     query, mode, page, len(items), total)
+    except Exception as exc:
+        emit({"event": "search_error",
+              "message": f"Pixiv 搜索失败: {exc}（请检查网络或 Pixiv 代理设置）"})
+        logging.exception("Pixiv 搜索失败")
+    finally:
+        emit({"event": "search_loading", "loading": False})
+
+
+def is_pixiv_url(url: str) -> bool:
+    """判断是否为 Pixiv 链接（作品页 /artworks/{id} 或用户主页 /users/{id}）。"""
+    return bool(re.search(r"pixiv\.net/(?:en/)?(?:artworks/\d+|users/\d+|member_illust\.php\?.*illust_id=\d+)", url, re.I))
+
+
+def _pixiv_filename(title: str, index: int, total: int, url: str) -> str:
+    """作品文件名：多页作品带 _p{N} 序号，扩展名取自直链。"""
+    ext = Path(urlparse(url).path).suffix.lstrip(".") or "jpg"
+    safe_title = sanitize_directory_name((title or "").strip()) or "pixiv"
+    if total > 1:
+        return f"{safe_title}_p{index}.{ext}"
+    return f"{safe_title}.{ext}"
+
+
+async def _pixiv_build_illust_items(illust_id: str) -> tuple[list[dict], dict]:
+    """解析单个作品的全部页面 → 文件条目列表（返回 items + 详情元数据）。
+
+    多页作品走 /ajax/illust/{id}/pages；动图(ugoira)额外取 ugoira_meta 的 zip 包。
+    """
+    detail = await asyncio.to_thread(_pixiv_api_get, f"/ajax/illust/{illust_id}")
+    title = detail.get("title") or f"pixiv_{illust_id}"
+    author = detail.get("userName") or ""
+    create_date = (detail.get("createDate") or "")[:10]
+    illust_type = detail.get("illustType")
+    page_count = int(detail.get("pageCount") or 1)
+    urls = detail.get("urls") or {}
+
+    # 子文件夹：YYYY-MM-作者（单作品任务：album=作品名 → 下载根/作品名/YYYY-MM-作者/文件）
+    date_prefix = create_date[:7] if create_date else ""
+    sub_parts = []
+    if date_prefix and author:
+        sub_parts.append(f"{date_prefix}-{author}")
+    elif author:
+        sub_parts.append(author)
+    subfolder = str(Path(*sub_parts)) if sub_parts else ""
+
+    items: list[dict] = []
+    if illust_type == 2:
+        # 动图：下载原始帧 zip（i.pximg.net，同样需要 Referer）
+        try:
+            ugoira = await asyncio.to_thread(_pixiv_api_get, f"/ajax/illust/{illust_id}/ugoira_meta")
+            zip_url = ugoira.get("originalSrc") or ""
+            if zip_url:
+                items.append({
+                    "filename": _pixiv_filename(title + "_动图", 0, 1, zip_url),
+                    "size": None,
+                    "item_page": f"{PIXIV_BASE}/artworks/{illust_id}",
+                    "status": "ok",
+                    "thumbnail": urls.get("regular") or "",
+                    "media_url": zip_url,
+                    "site": "pixiv", "illust_id": illust_id, "page_index": 0,
+                    "post_title": title, "post_date": create_date, "artist": author,
+                    "ugoira": True, "subfolder": subfolder,
+                })
+        except Exception:
+            logging.warning("Pixiv 动图 %s ugoira 元数据获取失败，回退为静态图", illust_id)
+    if not items:
+        if page_count > 1:
+            pages = await asyncio.to_thread(_pixiv_api_get, f"/ajax/illust/{illust_id}/pages")
+            for i, p in enumerate(pages or []):
+                original = (p.get("urls") or {}).get("original") or ""
+                if not original:
+                    continue
+                items.append({
+                    "filename": _pixiv_filename(title, i, page_count, original),
+                    "size": None,
+                    "item_page": f"{PIXIV_BASE}/artworks/{illust_id}",
+                    "status": "ok",
+                    "thumbnail": (p.get("urls") or {}).get("regular") or "",
+                    "media_url": original,
+                    "site": "pixiv", "illust_id": illust_id, "page_index": i,
+                    "post_title": title, "post_date": create_date, "artist": author,
+                    "subfolder": subfolder,
+                })
+        else:
+            original = urls.get("original") or ""
+            if original:
+                items.append({
+                    "filename": _pixiv_filename(title, 0, 1, original),
+                    "size": None,
+                    "item_page": f"{PIXIV_BASE}/artworks/{illust_id}",
+                    "status": "ok",
+                    "thumbnail": urls.get("regular") or "",
+                    "media_url": original,
+                    "site": "pixiv", "illust_id": illust_id, "page_index": 0,
+                    "post_title": title, "post_date": create_date, "artist": author,
+                    "subfolder": subfolder,
+                })
+    meta = {"title": title, "author": author, "user_id": detail.get("userId") or "",
+            "page_count": page_count, "create_date": create_date}
+    return items, meta
+
+
+async def _pixiv_user_items(uid: str) -> tuple[list[dict], str]:
+    """解析用户主页全部作品 → 文件条目列表（下载时按需解析原图直链）。
+
+    用户作品数可能上千：profile/all 只拿 id 列表（1 个请求），
+    profile/illusts 批量拿卡片数据（每批 30 个）；文件条目不带 media_url，
+    下载时由 _pixiv_download_one 按需解析（原图直链规则稳定）。
+    """
+    body = await asyncio.to_thread(_pixiv_api_get, f"/ajax/user/{uid}/profile/all")
+    ids: list[str] = []
+    for section in ("illusts", "manga"):
+        ids.extend(str(k) for k in (body.get(section) or {}).keys())
+    # id 即时间序：降序 = 最新在前；去重 + 截断上限
+    ids = sorted(set(ids), key=int, reverse=True)[:PIXIV_USER_MAX_WORKS]
+    if not ids:
+        return [], ""
+
+    # 批量取卡片数据（title/pageCount/userName/createDate）
+    cards: dict[str, dict] = {}
+    for i in range(0, len(ids), PIXIV_DETAIL_CHUNK):
+        chunk = ids[i:i + PIXIV_DETAIL_CHUNK]
+        params = [("ids[]", iid) for iid in chunk]
+        params += [("work_category", "illustManga"), ("is_first_page", "1"), ("lang", "zh")]
+        try:
+            works = await asyncio.to_thread(_pixiv_api_get, f"/ajax/user/{uid}/profile/illusts", params)
+            for wid, w in (works or {}).items():
+                cards[str(wid)] = w
+        except Exception as exc:
+            logging.warning("Pixiv 用户作品批次获取失败 %s: %s", uid, exc)
+        emit({"event": "inspect_progress", "current": min(i + PIXIV_DETAIL_CHUNK, len(ids)),
+              "total": len(ids), "filename": f"获取作品列表 {min(i + PIXIV_DETAIL_CHUNK, len(ids))}/{len(ids)}..."})
+
+    user_name = ""
+    items: list[dict] = []
+    for iid in ids:
+        w = cards.get(iid)
+        if not w:
+            continue
+        if not user_name:
+            user_name = w.get("userName") or ""
+        title = w.get("title") or f"pixiv_{iid}"
+        create_date = (w.get("createDate") or "")[:10]
+        date_prefix = create_date[:7] if create_date else ""
+        # 子文件夹：YYYY-MM-作品名（用户任务：album=作者名 → 下载根/作者名/YYYY-MM-作品名/文件）
+        sub = f"{date_prefix}-{title}" if date_prefix else title
+        thumb = w.get("url") or ""
+        if thumb.startswith("//"):
+            thumb = "https:" + thumb
+        page_count = int(w.get("pageCount") or 1)
+        items.append({
+            "filename": "",  # 下载时解析直链后确定（含扩展名与多页序号）
+            "size": None,
+            "item_page": f"{PIXIV_BASE}/artworks/{iid}",
+            "status": "ok",
+            "thumbnail": thumb,
+            "media_url": "",  # 下载时按需解析（profile/illusts 不含原图直链）
+            "site": "pixiv", "illust_id": iid, "page_index": 0,
+            "post_title": title, "post_date": create_date,
+            "artist": w.get("userName") or "",
+            "ugoira": w.get("illustType") == 2,
+            "subfolder": sanitize_directory_name(sub),
+            "_page_count": page_count,
+        })
+    return items, user_name
+
+
+async def pixiv_inspect(url: str, options: dict) -> None:
+    """解析 Pixiv 作品页 / 用户主页 → 文件列表。"""
+    # 用户主页：/users/{uid}
+    m_user = re.search(r"pixiv\.net/(?:en/)?users/(\d+)", url, re.I)
+    if m_user:
+        uid = m_user.group(1)
+        try:
+            emit({"event": "inspect_progress", "current": 0, "total": 0,
+                  "filename": f"获取用户 {uid} 的作品列表..."})
+            items, user_name = await _pixiv_user_items(uid)
+            if not items:
+                emit({"event": "inspect_error", "message": "该用户没有可下载的作品"})
+                return
+            album_name = user_name or f"pixiv用户_{uid}"
+            album_id = f"pixiv_user_{uid}"
+            _apply_cached_thumbnails(items)
+            _mark_items_new(album_id, items)
+            emit({
+                "event": "inspect_complete",
+                "album_name": album_name,
+                "album_id": album_id,
+                "is_album": True,
+                "items": items,
+            })
+            asyncio.create_task(_cache_thumbnails(items))
+            logging.info("Pixiv 用户 %s 解析完成: %d 个作品", uid, len(items))
+            return
+        except Exception as exc:
+            emit({"event": "inspect_error",
+                  "message": f"Pixiv 用户解析失败: {exc}（请检查网络或 Pixiv 代理设置）"})
+            logging.exception("Pixiv 用户解析出错")
+            return
+
+    # 作品页：/artworks/{id}（兼容旧 member_illust.php?illust_id=）
+    m = re.search(r"pixiv\.net/(?:en/)?artworks/(\d+)", url, re.I)
+    if not m:
+        m = re.search(r"member_illust\.php\?.*illust_id=(\d+)", url, re.I)
+    if not m:
+        emit({"event": "inspect_error",
+              "message": "无法识别的 Pixiv 链接（支持 /artworks/{id} 与 /users/{id}）"})
+        return
+    illust_id = m.group(1)
+    try:
+        items, meta = await _pixiv_build_illust_items(illust_id)
+        if not items:
+            emit({"event": "inspect_error", "message": "作品没有可下载的文件（可能已删除或需登录查看）"})
+            return
+        album_id = f"pixiv_{illust_id}"
+        _apply_cached_thumbnails(items)
+        _mark_items_new(album_id, items)
+        emit({
+            "event": "inspect_complete",
+            "album_name": meta["title"],
+            "album_id": album_id,
+            "is_album": len(items) > 1,
+            "items": items,
+        })
+        asyncio.create_task(_cache_thumbnails(items))
+        logging.info("Pixiv 作品 %s 解析完成: %d 个文件", illust_id, len(items))
+    except Exception as exc:
+        emit({"event": "inspect_error",
+              "message": f"Pixiv 解析失败: {exc}（请检查网络或 Pixiv 代理设置）"})
+        logging.exception("Pixiv 解析过程出错")
+
+
+# ============================
 # Oreno3D 站点支持 (oreno3d.com，MMD 视频聚合索引站，纯资源站类型)
 # ============================
 # - 服务端渲染 HTML（Laravel），无需登录，裸请求可访问全部内容
@@ -9708,7 +10289,7 @@ def _cleanup_thumbnail_cache() -> None:
 _MEDIA_ALLOWED_KEYWORDS = (
     "bunkr", "coomer", "pawchive", "e-hentai", "exhentai", "ehgt",
     "hath.network", "twimg", "iwara", "hanime", "hembed", "oreno3d",
-    "erommdtube", "asmr", "kiko-play",
+    "erommdtube", "asmr", "kiko-play", "pximg", "pixiv",
 )
 _media_proxy_port: int = 0  # 启动后填充（127.0.0.1 随机端口）
 
@@ -9756,6 +10337,10 @@ def _media_route(url: str) -> tuple[dict, str | None, str | None]:
     elif "hanime" in netloc or "hembed" in netloc:
         proxy = _hanime_proxy or None
         headers["Referer"] = f"{HANIME_BASE}/"
+    # Pixiv 图片（i.pximg.net）：必须带 Referer: pixiv.net（否则 403），国内走代理
+    elif "pximg" in netloc or "pixiv" in netloc:
+        proxy = _pixiv_proxy or None
+        headers["Referer"] = f"{PIXIV_BASE}/"
     # Oreno3D（oreno3d.com / *.oreno3d.com）：按设置走代理
     elif "oreno3d" in netloc:
         proxy = _oreno_proxy or None
@@ -10037,6 +10622,10 @@ async def _cache_thumbnails(items: list[dict]) -> None:
         if "hembed" in netloc or "hanime" in netloc:
             proxy = _hanime_proxy or None
             headers["Referer"] = f"{HANIME_BASE}/"
+        # Pixiv 缩略图（i.pximg.net）：必须带 Referer: pixiv.net（否则 403），国内走代理
+        if "pximg" in netloc or "pixiv" in netloc:
+            proxy = _pixiv_proxy or None
+            headers["Referer"] = f"{PIXIV_BASE}/"
         # Oreno3D 缩略图（oreno3d.com/storage/...）/ EroMMDTube 缩略图 按设置走代理
         if "oreno3d" in netloc:
             proxy = _oreno_proxy or None
@@ -10154,6 +10743,11 @@ async def gui_search(query: str, page: int, per_page: int, options: dict) -> Non
             options.get("hanime_genre") or "",
             options.get("hanime_sort") or "",
         )
+        return
+
+    # 站点切换：Pixiv 模式下搜索插画作品（关键词，全部/全年龄/R-18）
+    if options.get("site") == "pixiv":
+        await pixiv_search(query, page, options.get("pixiv_mode") or "")
         return
 
     # 站点切换：Oreno3D / EroMMDTube 模式下搜索视频（关键词）
@@ -10929,6 +11523,12 @@ class DownloadManager:
                 task, item, album_path, task_id, max_retries,
             )
             return
+        elif item.get("site") == "pixiv":
+            # Pixiv：i.pximg.net 直链永久有效但需 Referer；用户主页条目按 illust_id 解析直链
+            await self._pixiv_download_one(
+                task, item, album_path, task_id, max_retries,
+            )
+            return
         elif item.get("site") == "asmr":
             # ASMR：文件直链永久有效（匿名可下载），filename 含文件夹相对路径
             await self._asmr_download_one(
@@ -11508,6 +12108,188 @@ class DownloadManager:
             "size": item.get("size"),
             "task_id": task_id,
         })
+        self._save()
+        self.emit_snapshot()
+
+    async def _pixiv_download_one(
+        self,
+        task: dict,
+        item: dict,
+        album_path: str,
+        task_id: str,
+        max_retries: int,
+    ) -> None:
+        """下载单个 Pixiv 作品：i.pximg.net 直链（必须带 Referer）+ 代理流式下载。
+
+        - 单作品条目（解析时已带 media_url）：直接下载全部页面（含动图 zip）；
+        - 用户主页条目（media_url 为空）：按 illust_id 现场解析原图直链再下载，
+          一个条目 = 一件作品，多页全部下载完成后才算完成（task done 计数不变）。
+        目录：下载根目录/作者名/YYYY-MM-作品名/（subfolder 在解析时已生成）。
+        """
+        options = task.get("options", {})
+        sub = item.get("subfolder") or ""
+        file_dir = str(Path(album_path) / sub) if sub else album_path
+        illust_id = str(item.get("illust_id") or "")
+        title = item.get("post_title") or illust_id or "pixiv"
+
+        item["status"] = "downloading"
+        self._save()
+        self.emit_snapshot()
+
+        live_manager = GuiLiveManager()
+        live_manager.task_id = task_id
+        internal_task = live_manager.add_task()
+
+        # ---------- 1. 解析直链：单作品条目直接用；用户主页条目现场解析 ----------
+        pages: list[tuple[str, str]] = []  # (文件名, 原图直链)
+        media_url = item.get("media_url") or ""
+        if media_url.startswith("http"):
+            fname = _apply_rename_map(options, item, item.get("filename") or "")
+            pages.append((fname or _pixiv_filename(title, 0, 1, media_url), media_url))
+        else:
+            try:
+                if item.get("ugoira"):
+                    ugoira = await asyncio.to_thread(
+                        _pixiv_api_get, f"/ajax/illust/{illust_id}/ugoira_meta")
+                    zip_url = ugoira.get("originalSrc") or ""
+                    if zip_url:
+                        pages.append((_pixiv_filename(title + "_动图", 0, 1, zip_url), zip_url))
+                if not pages:
+                    detail = await asyncio.to_thread(_pixiv_api_get, f"/ajax/illust/{illust_id}")
+                    page_count = int(detail.get("pageCount") or 1)
+                    if page_count > 1:
+                        page_list = await asyncio.to_thread(
+                            _pixiv_api_get, f"/ajax/illust/{illust_id}/pages")
+                        for i, p in enumerate(page_list or []):
+                            u = (p.get("urls") or {}).get("original") or ""
+                            if u:
+                                pages.append((_pixiv_filename(title, i, page_count, u), u))
+                    else:
+                        u = (detail.get("urls") or {}).get("original") or ""
+                        if u:
+                            pages.append((_pixiv_filename(title, 0, 1, u), u))
+            except Exception as exc:
+                logging.warning("Pixiv 直链解析失败 %s: %s", illust_id, exc)
+
+        if not pages:
+            live_manager.update_log(event="解析失败", details=f"{title}（无法获取原图直链，请检查登录状态与代理）")
+            item["status"] = "failed"
+            task["failed"] = task.get("failed", 0) + 1
+            emit({"event": "file_complete", "filename": title, "success": False, "task_id": task_id})
+            self._save()
+            self.emit_snapshot()
+            return
+
+        # ---------- 2. 逐页下载（每页独立去重/重试/原子写入） ----------
+        results: list[tuple[str, str, bool]] = []  # (最终文件名, 路径, 是否成功)
+
+        def _download_page(fname: str, furl: str) -> tuple[str, str, bool]:
+            """同步执行：单页原图下载（带节流与重试，.part 原子写入）。"""
+            for attempt in range(max(1, max_retries)):
+                try:
+                    Path(file_dir).mkdir(parents=True, exist_ok=True)
+                    final_name, dup_action = _resolve_duplicate(file_dir, fname, None, options)
+                    if dup_action == "skip":
+                        live_manager.update_log(event="跳过重复", details=f"{final_name}（已存在）")
+                        return final_name, str(Path(file_dir) / truncate_filename(final_name)), True
+                    if dup_action == "prompt":
+                        live_manager.update_log(event="重名待改名", details=f"{final_name}（等待手动改名）")
+                        return final_name, "", True
+                    final_path = Path(file_dir) / truncate_filename(final_name)
+
+                    _pixiv_throttle()
+                    with _pixiv_session.get(
+                        furl, stream=True, timeout=60,
+                        headers={"Referer": f"{PIXIV_BASE}/"},
+                    ) as resp:
+                        resp.raise_for_status()
+                        size = int(resp.headers.get("Content-Length") or 0)
+                        live_manager.set_task_info(internal_task, final_name, size or None)
+                        emit({
+                            "event": "file_start",
+                            "filename": final_name,
+                            "index": 0,
+                            "size": size or None,
+                            "task_id": task_id,
+                        })
+                        downloaded = 0
+                        last_pct = -1
+
+                        def _on_chunk(chunk: bytes) -> None:
+                            nonlocal downloaded, last_pct
+                            downloaded += len(chunk)
+                            if size:
+                                pct = round(downloaded / size * 100, 1)
+                                if pct != last_pct:
+                                    live_manager.update_task(internal_task, pct)
+                                    last_pct = pct
+
+                        _atomic_stream_save(
+                            resp, final_path,
+                            on_chunk=_on_chunk,
+                            is_cancelled=lambda: task.get("status") in ("paused", "cancelled"),
+                        )
+                    return final_name, str(final_path), True
+
+                except InterruptedError:
+                    raise
+                except (requests.RequestException, PermissionError, OSError) as exc:
+                    logging.warning(
+                        "Pixiv 图片下载失败(第 %d 次) %s: %s", attempt + 1, fname, exc)
+                    if attempt < max(1, max_retries) - 1:
+                        time.sleep(2 ** attempt + random.uniform(0.5, 1.5))
+            return fname, "", False
+
+        interrupted = False
+        for fname, furl in pages:
+            try:
+                results.append(await asyncio.to_thread(_download_page, fname, furl))
+            except InterruptedError:
+                interrupted = True
+                break
+            except Exception as exc:
+                logging.exception("Pixiv 下载出错: %s", exc)
+                results.append((fname, "", False))
+
+        if interrupted:
+            item["status"] = "pending"
+            self._save()
+            self.emit_snapshot()
+            return
+
+        # ---------- 3. 汇总：全部页面成功才算条目完成 ----------
+        ok_count = sum(1 for _, _, ok in results if ok)
+        last_name, last_path, _ = results[-1]
+        if ok_count == len(results):
+            item["status"] = "completed"
+            item["completed"] = 100
+            item["size"] = None
+            task["done"] = task.get("done", 0) + 1
+            # 每页写一条历史记录（本地收藏/最近下载数据源）
+            for final_name, final_path, ok in results:
+                if ok and final_path:
+                    _add_history_entry({
+                        "id": f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}",
+                        "filename": final_name,
+                        "path": final_path,
+                        "size": None,
+                        "album": task.get("album") or "下载",
+                        "time": datetime.now().isoformat(timespec="seconds"),
+                    })
+        else:
+            item["status"] = "failed"
+            task["failed"] = task.get("failed", 0) + 1
+
+        for final_name, _, ok in results:
+            emit({
+                "event": "file_complete",
+                "filename": final_name,
+                "success": ok,
+                "size": None,
+                "task_id": task_id,
+            })
+        if item.get("_final_path") is None and last_path:
+            item["_final_path"] = last_path
         self._save()
         self.emit_snapshot()
 
@@ -13004,10 +13786,25 @@ def translate_youdao(text: str, from_lang: str = "auto", to_lang: str = "zh") ->
 
 
 # ============================
-# GitHub 仓库更新检查（secondashes/xiaoxiaodownloader）
+# GitHub 仓库更新检查（公开发布仓库，匿名可访问：更新检查 + 更新日志 + Release 安装包）
 # ============================
-GITHUB_REPO = "secondashes/xiaoxiaodownloader"
+GITHUB_REPO = "secondashes/xiaoxiao-release"
 GITHUB_LAST_SHA_FILE = "cache/github_last_sha.json"
+# 发布仓库（更新日志 + 版本安装包）：secondashes/xiaoxiao-release
+GITHUB_RELEASE_REPO = "secondashes/xiaoxiao-release"
+GITHUB_CHANGELOG_URL = (
+    "https://raw.githubusercontent.com/"
+    + GITHUB_RELEASE_REPO
+    + "/main/"
+    + urllib.parse.quote("更新日志.md")
+)
+# 更新日志备用地址（jsDelivr CDN：国内可直连，raw.githubusercontent.com 被墙时的回退）
+GITHUB_CHANGELOG_FALLBACK_URL = (
+    "https://cdn.jsdelivr.net/gh/"
+    + GITHUB_RELEASE_REPO
+    + "@main/"
+    + urllib.parse.quote("更新日志.md")
+)
 
 
 def _github_last_sha() -> str:
@@ -13135,6 +13932,94 @@ def check_github_update(current_version: str = "") -> None:
 _update_downloading = False
 
 
+def fetch_changelog(current_version: str = "") -> None:
+    """从发布仓库拉取更新日志（更新日志.md），返回比当前版本新的所有版本说明。
+
+    emit 事件 changelog_info：
+    - ok: 是否成功
+    - versions: [{version, date, lines: [每条更新说明]}] 从新到旧
+    - has_new: 是否存在比当前版本新的版本
+    """
+    s = _load_settings()
+    proxy = (s.get("github_proxy") or "").strip()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0"}
+    text = ""
+    last_err = ""
+    # 尝试顺序：raw.githubusercontent（走设置代理）→ jsDelivr CDN（直连，国内可访问）
+    # 注意：jsDelivr 不认代理，仅在 raw 失败且未配置代理时直连尝试（有代理时 raw 一般可成）
+    for url, use_proxies in ((GITHUB_CHANGELOG_URL, proxies), (GITHUB_CHANGELOG_FALLBACK_URL, None)):
+        try:
+            resp = requests.get(url, headers=headers, proxies=use_proxies, timeout=15)
+            if resp.status_code == 200:
+                text = resp.content.decode("utf-8", errors="replace")
+                if text.strip():
+                    break
+            else:
+                last_err = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            last_err = str(exc)
+    if not text.strip():
+        emit({
+            "event": "changelog_info",
+            "ok": False,
+            "error": f"更新日志拉取失败（{last_err or '内容为空'}），请检查网络或设置 GitHub 代理",
+        })
+        return
+
+    # 解析 "## v1.2.25（2026-08-30）" 分节
+    versions: list[dict] = []
+    cur_ver, cur_date, cur_lines = "", "", []
+
+    def _clean_line(l: str) -> str:
+        # 去掉 markdown 列表符号与首尾空白，弹窗里直接显示纯文本
+        t = l.strip()
+        if t.startswith("- ") or t.startswith("* "):
+            t = t[2:].strip()
+        elif t in ("-", "*"):
+            t = ""
+        return t
+
+    for line in text.splitlines():
+        m = re.match(r"^##\s+(v[\d.]+)\s*[（(]([^）)]*)[）)]\s*$", line.strip())
+        if m:
+            if cur_ver:
+                versions.append({
+                    "version": cur_ver,
+                    "date": cur_date,
+                    "lines": [c for c in (_clean_line(l) for l in cur_lines) if c],
+                })
+            cur_ver, cur_date, cur_lines = m.group(1), m.group(2), []
+        elif cur_ver:
+            # 跳过分隔线与空行
+            if line.strip() == "---":
+                continue
+            cur_lines.append(line)
+    if cur_ver:
+        versions.append({
+            "version": cur_ver,
+            "date": cur_date,
+            "lines": [c for c in (_clean_line(l) for l in cur_lines) if c],
+        })
+
+    if not versions:
+        emit({"event": "changelog_info", "ok": False, "error": "更新日志格式异常（未找到版本条目）"})
+        return
+
+    cur_tuple = _version_tuple(current_version)
+    newer = [v for v in versions if _version_tuple(v["version"]) > cur_tuple]
+    # 没有新版时也返回最新一节，供前端展示"当前版本说明"
+    result = newer if newer else versions[:1]
+    emit({
+        "event": "changelog_info",
+        "ok": True,
+        "current_version": current_version or "",
+        "versions": result,
+        "has_new": bool(newer),
+        "latest_version": versions[0]["version"] if versions else "",
+    })
+
+
 def download_update(url: str, file_name: str = "") -> None:
     """下载 GitHub Release 更新安装包到系统「下载」文件夹（流式 + 进度事件）。
 
@@ -13247,6 +14132,9 @@ def _site_cookie_str(site: str) -> str:
     if site == "hanime":
         cookies = _hanime_load_cred().get("cookies") or {}
         return "; ".join(f"{k}={v}" for k, v in cookies.items())
+    if site == "pixiv":
+        cookies = _pixiv_load_cred().get("cookies") or {}
+        return "; ".join(f"{k}={v}" for k, v in cookies.items())
     if site == "asmr":
         return _asmr_load_cred().get("token") or ""
     if site in _GENERIC_OAUTH_SITES:
@@ -13269,6 +14157,8 @@ def _site_username(site: str) -> str:
         return _iwara_load_token().get("username") or ""
     if site == "hanime":
         return _hanime_username or (_hanime_load_cred().get("username") or "")
+    if site == "pixiv":
+        return _pixiv_username or (_pixiv_load_cred().get("username") or "")
     if site == "asmr":
         return _asmr_username or (_asmr_load_cred().get("username") or "")
     if site in _GENERIC_OAUTH_SITES:
@@ -13837,7 +14727,7 @@ def _generic_logout(site: str) -> None:
 
 # 通用账号密码保存（全站登录套件：加密存本机，供登录表单回填与内置浏览器预填）
 _SITE_SAVE_CRED_SITES = (
-    "pawchive", "twitter", "exhentai", "iwara", "hanime", "asmr",
+    "pawchive", "twitter", "exhentai", "iwara", "hanime", "pixiv", "asmr",
     "xhamster", "pornhub", "xvideos", "javdb", "google",
     "oreno3d", "erommdtube",
 )
@@ -14037,6 +14927,7 @@ def _emit_login_info() -> None:
         ("pawchive", bool(pa_cookies.get("session")), "; ".join(f"{k}={v}" for k, v in pa_cookies.items())),
         ("iwara", bool(_iwara_load_token().get("user_token")), _iwara_load_token().get("user_token") or ""),
         ("hanime", bool(_hanime_load_cred().get("cookies")), _site_cookie_str("hanime")),
+        ("pixiv", bool(_pixiv_load_cred().get("cookies")), _site_cookie_str("pixiv")),
         ("asmr", bool(_asmr_load_cred().get("token")), _site_cookie_str("asmr")),
         ("xhamster", bool(_generic_load_cookies("xhamster").get("cookies")), _generic_cookie_str("xhamster")),
         ("pornhub", bool(_generic_load_cookies("pornhub").get("cookies")), _generic_cookie_str("pornhub")),
@@ -14064,7 +14955,7 @@ def _emit_login_info() -> None:
             if o_cred.get("password") and sites.get(_o_site):
                 sites[_o_site]["password"] = o_cred["password"]
     # 全站登录套件：回填保存的账号密码（登录表单预填 + 内置浏览器登录页自动预填）
-    for _s_site in ("pawchive", "twitter", "exhentai", "iwara", "hanime", "asmr",
+    for _s_site in ("pawchive", "twitter", "exhentai", "iwara", "hanime", "pixiv", "asmr",
                     "xhamster", "pornhub", "xvideos"):
         _s_cred = _secure_store_read_cred(_s_site)
         _s_user = _s_cred.get(_SITE_CRED_USER_FIELD.get(_s_site, "email")) or ""
@@ -14118,6 +15009,18 @@ def save_account(site: str, label: str = "") -> None:
             "username": ha_cred.get("username") or "",
             "user_id": ha_cred.get("user_id") or "",
             "cookies": ha_cred.get("cookies") or {},
+        }
+    # Pixiv：连邮箱密码一起存进档案（加密存储），切换账号后 PHPSESSID 失效也能自动重登
+    if site == "pixiv":
+        px_cred = _pixiv_load_cred()
+        profile["password"] = px_cred.get("password") or ""
+        profile["email"] = px_cred.get("email") or profile["username"]
+        profile["pixiv_cred"] = {
+            "email": px_cred.get("email") or "",
+            "password": px_cred.get("password") or "",
+            "username": px_cred.get("username") or "",
+            "user_id": px_cred.get("user_id") or "",
+            "cookies": px_cred.get("cookies") or {},
         }
     # ASMR：token + 用户名密码一起存进档案（加密存储），切换后失效也能自动重登
     if site == "asmr":
@@ -14211,6 +15114,30 @@ def switch_account(site: str, label: str) -> None:
         emit({"event": "hanime_login_result", "success": True, "silent": True,
               "username": cred.get("username") or label, "message": "账号档案已恢复"})
         hanime_check_login(silent=True)
+    elif site == "pixiv":
+        # 恢复完整凭据（cookies + 邮箱密码），PHPSESSID 失效时自动重登
+        global _pixiv_username
+        cred = dict(profile.get("pixiv_cred") or {})
+        cred.setdefault("cookies", {})
+        if not cred.get("cookies") and cookie_str:
+            # 旧档案只有 cookie 字符串：解析回字典
+            cred["cookies"] = {
+                p.split("=", 1)[0]: p.split("=", 1)[1]
+                for p in cookie_str.split("; ") if "=" in p
+            }
+        if not cred.get("password") and profile.get("password"):
+            cred["password"] = profile.get("password")
+        if not cred.get("email") and profile.get("email"):
+            cred["email"] = profile.get("email")
+        cred["username"] = profile.get("username") or cred.get("username") or label
+        _pixiv_save_cred(cred)
+        _pixiv_session.cookies.clear()
+        _pixiv_restore_session()
+        _pixiv_username = cred.get("username") or ""
+        _emit_login_info()
+        emit({"event": "pixiv_login_result", "success": True, "silent": True,
+              "username": cred.get("username") or label, "message": "账号档案已恢复"})
+        pixiv_check_login(silent=True)
     elif site == "asmr":
         # 恢复完整凭据（token + 用户名密码），token 过期时自动重登
         global _asmr_token, _asmr_username
@@ -14371,6 +15298,11 @@ async def command_loop() -> None:
     _hanime_restore_session()
     if _hanime_load_cred().get("cookies"):
         await asyncio.to_thread(hanime_check_login, True)
+    # 恢复 Pixiv 代理设置 + 会话（PHPSESSID 失效自动用保存的密码重登）
+    pixiv_set_proxy(_settings.get("pixiv_proxy") or PIXIV_DEFAULT_PROXY)
+    _pixiv_restore_session()
+    if _pixiv_load_cred().get("cookies"):
+        await asyncio.to_thread(pixiv_check_login, True)
     # 恢复 JavDB 代理设置 + 会话（cookie 约 7 天有效，过期提示重新 webview 登录）
     javdb_set_proxy(_settings.get("javdb_proxy") or "http://127.0.0.1:10809")
     _javdb_restore_session()
@@ -14456,6 +15388,15 @@ async def command_loop() -> None:
 
             elif cmd == "get_settings":
                 emit({"event": "settings", "settings": _load_settings()})
+
+            elif cmd == "set_setting":
+                # 单键更新（主进程写入 settings.json 后前端转发，刷新后端内存缓存）
+                key = str(command.get("key", ""))
+                if key:
+                    merged = _load_settings()
+                    merged[key] = command.get("value")
+                    _save_settings(merged)
+                    _reverse_settings.update(merged)
 
             elif cmd == "save_settings":
                 # 合并保存：磁盘上可能有主进程写入的键（如 close_action 关闭行为），
@@ -14758,6 +15699,26 @@ async def command_loop() -> None:
             elif cmd == "hanime_set_proxy":
                 hanime_set_proxy(command.get("proxy", ""))
 
+            elif cmd == "pixiv_login":
+                await asyncio.to_thread(
+                    pixiv_login, command.get("email", ""), command.get("password", ""),
+                )
+
+            elif cmd == "pixiv_logout":
+                await asyncio.to_thread(pixiv_logout)
+
+            elif cmd == "pixiv_check_login":
+                await asyncio.to_thread(pixiv_check_login)
+
+            elif cmd == "pixiv_set_proxy":
+                pixiv_set_proxy(command.get("proxy", ""))
+
+            elif cmd == "pixiv_set_cookies":
+                await asyncio.to_thread(
+                    pixiv_set_cookies, command.get("cookie_str", ""),
+                    command.get("email", ""), command.get("password", ""),
+                )
+
             elif cmd == "hanime_home":
                 await hanime_home()
 
@@ -14949,6 +15910,9 @@ async def command_loop() -> None:
 
             elif cmd == "check_github_update":
                 await asyncio.to_thread(check_github_update, command.get("current_version", ""))
+
+            elif cmd == "fetch_changelog":
+                await asyncio.to_thread(fetch_changelog, command.get("current_version", ""))
 
             elif cmd == "download_update":
                 # 下载 GitHub Release 更新安装包（流式 + 进度事件），放线程池避免阻塞命令循环
