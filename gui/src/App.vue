@@ -4015,7 +4015,9 @@ function handlePixivLogin() {
   wvLogin.captchaPatterns = [/challenge|captcha|recaptcha|turnstile|gotcha/i]
   wvLogin.credentials = null
   wvLogin.manualConfirm = false
-  wvLogin.codeRegex = /pixiv:\/\/account\/login\?code=([A-Za-z0-9]+)/
+  // 匹配登录成功后的两种回跳 URL：authenticate 中间页（https 302，did-navigate 触发，首选）
+  // 和 pixiv:// 自定义协议（webview 事件不可靠，仅兜底）
+  wvLogin.codeRegex = /app-api\.pixiv\.net\/web\/v1\/login\/authenticate\?.*?\bcode=([A-Za-z0-9]+)|pixiv:\/\/account\/login\?code=([A-Za-z0-9]+)/
   wvLogin.watchLoginUrl = true
   wvLogin.visible = true
   // webview 会话代理（国内必须走代理才能打开登录页）

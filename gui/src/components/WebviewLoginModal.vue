@@ -54,6 +54,7 @@
       ref="wvRef"
       :src="currentUrl"
       :partition="partition"
+      :useragent="wvUserAgent"
       class="login-webview"
       @did-navigate="onNav"
       @did-navigate-in-page="onNav"
@@ -121,6 +122,9 @@ const wvRef = ref(null)
 
 const canGrab = computed(() => status.value !== 'success' && !grabbing.value)
 
+// webview UA：去掉 Electron 标记（Cloudflare/Pixiv 登录页会拦截含 Electron 的 UA）
+const wvUserAgent = (navigator.userAgent || '').replace(/\sElectron\/[\d.]+/i, '').trim()
+
 // 同步外部 show 变化
 watch(() => props.show, (v) => {
   visible.value = v
@@ -136,16 +140,20 @@ watch(() => props.loginUrl, (v) => {
   }
 })
 
-// 自定义协议授权码提取（Pixiv OAuth）：pixiv://account/login?code=xxx
-// 该协议 webview 无法加载（did-fail-load），但 URL 已出现在 will-navigate / did-fail-load 事件里
+// OAuth 授权码提取（Pixiv）：
+// 登录成功后 Pixiv 先 302 跳 https://app-api.pixiv.net/web/v1/login/authenticate?code=xxx
+// （标准 https 导航，did-navigate 100% 触发），再由页面 JS 跳 pixiv://account/login?code=xxx
+// （未知协议，webview 事件不可靠，仅作兜底）。所以 did-navigate / will-navigate /
+// did-fail-load 三处都要尝试提取。
 let codeExtracted = false
 function tryExtractCode(url) {
   if (codeExtracted || !props.codeRegex || !url) return false
   const m = props.codeRegex.exec(url)
-  if (m && m[1]) {
+  const code = m && (m[1] || m[2] || m[3])
+  if (m && code) {
     codeExtracted = true
     status.value = 'oauth'
-    emit('login-code', { code: m[1], site: props.site })
+    emit('login-code', { code, site: props.site })
     return true
   }
   return false
@@ -174,9 +182,10 @@ function startLogin() {
   currentUrl.value = props.loginUrl
 }
 
-// 导航事件：检测 captcha + 登录成功
+// 导航事件：检测 captcha + 登录成功 + OAuth 授权码（did-navigate 触发，最可靠的提取点）
 async function onNav(e) {
   const url = e.url || address.value || ''
+  if (tryExtractCode(url)) return
   address.value = url
   // 更新后退/前进可用状态
   await nextTick()

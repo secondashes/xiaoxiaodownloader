@@ -7211,7 +7211,7 @@ PIXIV_OAUTH_URL = "https://oauth.secure.pixiv.net/auth/token"
 PIXIV_CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpTpa92e"
 PIXIV_CLIENT_SECRET = "lAS1wCK1PsOnmoUoBvNsc28MZ6ZtjxPAK71eiOT7"
 PIXIV_HASH_SECRET = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
-PIXIV_APP_UA = "PixivIOSApp/7.13.3 (iOS 14.6; iPhone11,8)"
+PIXIV_APP_UA = "PixivAndroidApp/5.0.234 (Android 14; Pixel 7)"
 PIXIV_DEFAULT_PROXY = "http://127.0.0.1:10809"
 # 用户主页解析的作品数上限（防止大触作者数千作品把解析卡死）
 PIXIV_USER_MAX_WORKS = 500
@@ -7353,7 +7353,7 @@ def _pixiv_oauth_post(extra: dict) -> dict:
         PIXIV_OAUTH_URL, data=data, timeout=30,
         headers={
             "User-Agent": PIXIV_APP_UA,
-            "App-OS": "ios", "App-Version": "7.13.3",
+            "App-OS": "android", "App-Version": "5.0.234",
         },
         proxies=({"http": _pixiv_proxy, "https": _pixiv_proxy} if _pixiv_proxy else None),
     )
@@ -7495,7 +7495,7 @@ def _pixiv_app_api(method: str, path: str, params: dict | None = None,
     headers = {
         "Authorization": f"Bearer {_pixiv_access_token}",
         "User-Agent": PIXIV_APP_UA,
-        "App-OS": "ios", "App-Version": "7.13.3",
+        "App-OS": "android", "App-Version": "5.0.234",
         "X-Client-Time": client_time,
         "X-Client-Hash": client_hash,
     }
@@ -8436,7 +8436,7 @@ async def pixiv_upload(paths: list[str], title: str, caption: str,
             headers = {
                 "Authorization": f"Bearer {_pixiv_access_token}",
                 "User-Agent": PIXIV_APP_UA,
-                "App-OS": "ios", "App-Version": "7.13.3",
+                "App-OS": "android", "App-Version": "5.0.234",
                 "X-Client-Time": client_time,
                 "X-Client-Hash": client_hash,
             }
