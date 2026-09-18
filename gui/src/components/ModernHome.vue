@@ -19,6 +19,12 @@
         <button class="mh-help-btn" title="查看下载任务与保存位置" @click="openDownloads()">📥 下载管理</button>
         <button class="mh-help-btn" title="粘贴磁力链接或 .torrent 地址用 aria2 内核下载；磁力站页面直接点磁力链接也会弹出下载"
                 @click="btPromptSubmit">🧲 BT 下载</button>
+        <button class="mh-help-btn" :disabled="updChecking || updDownloading"
+                :title="`检查并安装新版本（当前 v${updCurrent || '…'}）`"
+                @click="checkUpdate">{{ updChecking ? '检查中…' : (updHasNew ? '⬇ 有新版' : '⬇ 检查更新') }}</button>
+        <button class="mh-help-btn" :class="{ 'mh-btn-on': updAuto }"
+                :title="`自动检查更新：${updAuto ? '开（启动时自动检查 GitHub 新版本）' : '关'}`"
+                @click="updAuto = !updAuto; message.info(updAuto ? '已开启自动检查更新（每次启动检查一次）' : '已关闭自动检查更新')">{{ updAuto ? '⏰ 自动更新 开' : '⏰ 自动更新 关' }}</button>
         <button class="mh-help-btn" :disabled="syncing"
                 title="从 GitHub 校验源强制重新同步站点可用性（官方发布页 / 每日检测表 / 书源端点）"
                 @click="syncSites">{{ syncing ? '同步中…' : '🔄 同步站点' }}</button>
@@ -644,6 +650,52 @@ if (window.api && window.api.onBtMagnetClick) {
   })
 }
 
+// ===== 自动更新（表世界单独设置；统一从 GitHub Release 获取最新安装包） =====
+const updCurrent = ref('')
+const updChecking = ref(false)
+const updHasNew = ref(false)
+const updInfo = ref(null)          // github_update_info 的 release 部分
+const updDownloading = ref(false)
+const updProgress = ref(0)         // 下载百分比
+const updDonePath = ref('')        // 下载完成的安装包路径
+// 自动检查开关（表世界单独设置，默认开）
+const updAuto = ref(localStorage.getItem('mh_auto_update') !== '0')
+watch(updAuto, v => { try { localStorage.setItem('mh_auto_update', v ? '1' : '0') } catch (e) { /* 忽略 */ } })
+const updSilent = ref(false)       // 自动检查=静默；手动点击=有反馈
+
+async function checkUpdate(silent = false) {
+  if (updChecking.value || !window.api) return
+  updChecking.value = true
+  updSilent.value = !!silent
+  if (!updCurrent.value) {
+    try {
+      const v = await window.api.getAppVersion()
+      updCurrent.value = String(v || '').replace(/^v/, '')
+    } catch (e) { /* 忽略 */ }
+  }
+  window.api.sendCommand({ cmd: 'check_github_update', current_version: updCurrent.value })
+  if (!silent) message.info('正在检查更新…')
+  setTimeout(() => { updChecking.value = false }, 20000)   // 超时兜底解除按钮
+}
+
+function confirmInstallUpdate() {
+  const r = updInfo.value || {}
+  const asset = (r.assets && r.assets[0]) || {}
+  const lines = [
+    `发现新版本 ${r.tag || ''}${r.name ? ' · ' + r.name : ''}`,
+    asset.name ? `安装包：${asset.name}（${asset.size ? (asset.size / 1048576).toFixed(0) + ' MB' : '大小未知'}）` : '',
+    (r.body || '').slice(0, 400),
+    '',
+    '将开始下载安装包，下载完成后会询问是否立即安装。',
+  ].filter(Boolean)
+  if (window.confirm(lines.join('\n'))) {
+    if (!asset.url) { message.error('该版本没有可下载的安装包附件'); return }
+    updDownloading.value = true
+    updProgress.value = 0
+    window.api.sendCommand({ cmd: 'download_update', url: asset.url, file_name: asset.name })
+  }
+}
+
 // ===== 当前页面存为 Word（页内提取正文元素，图片表格按原位置写入文档） =====
 const exportingWord = ref(false)
 let wordTimer = null   // 导出超时兜底（结果事件未回来时解除按钮锁定）
@@ -1166,6 +1218,8 @@ let offHotPopup = null
 onMounted(() => {
   // 拉取后端设置（settings 事件回流，onEvent 里读 surface_save_path 显示当前保存位置）
   window.api && window.api.sendCommand({ cmd: 'get_settings' })
+  // 自动检查更新（表世界单独设置，默认开；结果经 github_update_info 回流）
+  if (localStorage.getItem('mh_auto_update') !== '0') checkUpdate(true)
   if (window.api && window.api.onSnifferResource) {
     offResource = window.api.onSnifferResource(addItem)
   }
@@ -1183,6 +1237,38 @@ onMounted(() => {
       if (ev.event === 'settings') {
         // 保存位置回流（App 层也处理同一事件，互不影响）
         surfaceSavePath.value = (ev.settings && ev.settings.surface_save_path) || ''
+        return
+      }
+      if (ev.event === 'github_update_info') {
+        // 更新检查回流：has_new_release → 弹确认（版本+说明+大小）
+        updChecking.value = false
+        if (ev.current_version) updCurrent.value = ev.current_version
+        const rel = ev.release || null
+        updHasNew.value = !!ev.has_new_release
+        updInfo.value = rel
+        if (ev.has_new_release && rel) confirmInstallUpdate()
+        else if (!updSilent.value) message.info(`当前已是最新版本（v${updCurrent.value || ev.current_version}）`)
+        return
+      }
+      if (ev.event === 'update_download_progress') {
+        updProgress.value = ev.percent || 0
+        return
+      }
+      if (ev.event === 'update_download_done') {
+        updDownloading.value = false
+        updDonePath.value = ev.path || ''
+        message.success(`更新包已下载：${ev.file_name || ''}（${((ev.size || 0) / 1048576).toFixed(0)} MB）`)
+        // 安装确认环节：用户确认后才运行安装包（NSIS 覆盖安装即更新）
+        if (window.confirm(`新版本安装包已就绪：\n${ev.path}\n\n立即运行安装程序？（安装过程中应用会关闭）`)) {
+          window.api.sendCommand({ cmd: 'open_update_installer', path: updDonePath.value })
+        } else {
+          message.info('已取消安装；安装包保留在下载文件夹，可稍后手动运行')
+        }
+        return
+      }
+      if (ev.event === 'update_download_error') {
+        updDownloading.value = false
+        message.error(ev.error || '更新下载失败')
         return
       }
       if (ev.event === 'word_result') {

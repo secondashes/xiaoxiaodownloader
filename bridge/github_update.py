@@ -90,10 +90,10 @@ _state.apply_prev(globals())
 # ============================
 # GitHub 仓库更新检查（公开发布仓库，匿名可访问：更新检查 + 更新日志 + Release 安装包）
 # ============================
-GITHUB_REPO = "secondashes/xiaoxiao-release"
+GITHUB_REPO = "secondashes/xiaoxiaodownloader"
 GITHUB_LAST_SHA_FILE = "cache/github_last_sha.json"
 # 发布仓库（更新日志 + 版本安装包）：secondashes/xiaoxiao-release
-GITHUB_RELEASE_REPO = "secondashes/xiaoxiao-release"
+GITHUB_RELEASE_REPO = "secondashes/xiaoxiaodownloader"
 GITHUB_CHANGELOG_URL = (
     "https://raw.githubusercontent.com/"
     + GITHUB_RELEASE_REPO
