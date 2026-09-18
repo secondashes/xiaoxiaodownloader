@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>更新说明 · 细分板块大扩充（v1.2.47）</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --line: #e6e9f2;
+    --tx: #23262f;
+    --tx2: #6a7080;
+    --acc: #5b7cfa;
+    --acc2: #8f6bff;
+    --ok: #21c58b;
+    --warn: #f5a623;
+    --bad: #e0554d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(165deg, #eef1fa 0%, #f6f4fb 50%, #eefaf5 100%);
+    color: var(--tx);
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.75;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 30px 70px; }
+
+  .hero {
+    padding: 54px 0 36px; text-align: center; margin-bottom: 38px;
+    background: radial-gradient(700px 260px at 25% 0%, rgba(91,124,250,.16), transparent 70%),
+                radial-gradient(600px 240px at 75% 10%, rgba(33,197,139,.12), transparent 70%);
+  }
+  .hero .badge {
+    display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 2px;
+    color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2));
+    padding: 6px 20px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h1 { font-size: 32px; font-weight: 800; line-height: 1.35; }
+  .hero p.sub { color: var(--tx2); margin-top: 12px; font-size: 14.5px; }
+
+  section { margin-bottom: 46px; }
+  h2.sec {
+    font-size: 21px; font-weight: 800; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2.sec .ico { font-size: 24px; }
+
+  .big {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 26px 28px; margin-bottom: 18px;
+  }
+  .big h3 { font-size: 17px; margin-bottom: 10px; }
+  .big h3 .em { color: var(--acc); }
+  .big p { font-size: 13.5px; color: #4a4f5e; }
+  .big ul { list-style: none; margin-top: 10px; }
+  .big li { font-size: 13.5px; padding: 5px 0 5px 22px; position: relative; }
+  .big li::before { content: '✓'; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip {
+    font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 999px;
+    background: #f0f2fb; color: var(--tx2); border: 1px solid var(--line);
+  }
+  .chip.on {
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    color: #fff; border-color: transparent;
+  }
+  .chip.new { background: #e9fbf3; color: #12915f; border-color: #b6ecd4; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .tag {
+    font-size: 12px; background: #f4f5fa; border: 1px solid var(--line);
+    border-radius: 8px; padding: 3px 11px; color: #4a4f5e;
+  }
+
+  .sub2 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+  .sub2 .cell { background: #f7f8fd; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .sub2 .cell b { display: block; font-size: 13px; margin-bottom: 4px; }
+  .sub2 .cell span { font-size: 12px; color: var(--tx2); line-height: 1.6; }
+
+  .steps { counter-reset: st; }
+  .step {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 20px; margin-bottom: 12px; display: flex; gap: 16px; align-items: flex-start;
+  }
+  .step .sn {
+    counter-increment: st; flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 800;
+  }
+  .step .sn::before { content: counter(st); }
+  .step h3 { font-size: 14.5px; margin-bottom: 3px; }
+  .step p { font-size: 12.5px; color: var(--tx2); }
+
+  .fixes { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .fixrow { display: grid; grid-template-columns: 1.2fr 1.6fr; border-bottom: 1px solid var(--line); }
+  .fixrow:last-child { border-bottom: none; }
+  .fixrow > div { padding: 12px 18px; font-size: 13px; }
+  .fixrow.head { background: #f4f5fa; font-weight: 700; font-size: 12.5px; color: var(--tx2); }
+  .fixrow .was { color: var(--bad); }
+  .fixrow .now { color: var(--ok); font-weight: 600; }
+
+  .probe { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  .probe .pcell { flex: 1; min-width: 130px; border-radius: 14px; padding: 14px 16px; color: #fff; text-align: center; }
+  .probe .p1 { background: linear-gradient(150deg, #1fa36a, #4fc98f); }
+  .probe .p2 { background: linear-gradient(150deg, #2a5fd0, #6f9bff); }
+  .probe .p3 { background: linear-gradient(150deg, #8a93ad, #b7bdd0); }
+  .probe .pcell b { display: block; font-size: 24px; line-height: 1.3; }
+  .probe .pcell span { font-size: 12px; opacity: .92; }
+
+  .know {
+    background: #fff8ea; border: 1px solid #f5e3bd; border-radius: 16px;
+    padding: 20px 24px; font-size: 13px;
+  }
+  .know b { color: #b07b1a; }
+  .know ul { list-style: none; margin-top: 8px; }
+  .know li { padding: 4px 0 4px 20px; position: relative; }
+  .know li::before { content: '·'; position: absolute; left: 6px; font-weight: 900; color: #b07b1a; }
+
+  footer { text-align: center; margin-top: 46px; color: #9aa0b2; font-size: 12.5px; line-height: 2; }
+  @media (max-width: 820px) { .fixrow { grid-template-columns: 1fr; } .sub2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="badge">重大更新 · 2026-09-18 / v1.2.47</span>
+    <h1>细分板块大扩充<br>13 顶层分类 · 新增 110 站 · 越用越懂你的「常用」</h1>
+    <p class="sub">分类重排 + 二级板块 + 110 个新站全部实测连通性 + 上游同步对齐——这一版把「分得细、找得准、跟得上」一次做齐。</p>
+  </div>
+
+  <!-- 1 顶层分类重排 -->
+  <section>
+    <h2 class="sec"><span class="ico">🧭</span>一、顶层分类重排为 13 类，空分类自动隐藏</h2>
+    <div class="big">
+      <h3>分类更细更准，<span class="em">没有站点的分类不会出来占位</span></h3>
+      <p>在哪看：美好世界首页顶部分类 chips。全部 / 常用之外按内容类型细分，全新「磁力站」「美术·艺术」两大分类登场；科学、资讯等暂无足够站点的分类自动隐藏，将来收录后自动出现。</p>
+      <div class="chips">
+        <span class="chip on">全部</span>
+        <span class="chip on">常用</span>
+        <span class="chip">影视·看番</span>
+        <span class="chip new">美术·艺术 ✦新</span>
+        <span class="chip">音乐</span>
+        <span class="chip">电子书·书源</span>
+        <span class="chip">游戏资源</span>
+        <span class="chip">AI 制作</span>
+        <span class="chip">学术·医学</span>
+        <span class="chip">科学</span>
+        <span class="chip">资讯</span>
+        <span class="chip">软件·资源社区</span>
+        <span class="chip new">磁力站 ✦新</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 二级分类 -->
+  <section>
+    <h2 class="sec"><span class="ico">🗂</span>二、二级分类：三大板块再细分</h2>
+    <div class="big">
+      <h3>站多了也不怕，<span class="em">二级 chips 一层层收窄</span></h3>
+      <p>影视·看番、美术·艺术、电子书·书源三个大板块内部再分二级，点二级只看该小类；某二级下没有站点时同样自动隐藏。</p>
+      <div class="sub2">
+        <div class="cell"><b>影视 · 看番</b><span>综合 / 日韩剧 / 欧美剧 / 动漫番剧</span></div>
+        <div class="cell"><b>美术 · 艺术</b><span>灵感社区 / 博物馆画廊 / 素材图库</span></div>
+        <div class="cell"><b>电子书 · 书源</b><span>综合图书馆 / LibGen / 轻小说 / 铅笔小说 / 白嫖站</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 新增 110 站 -->
+  <section>
+    <h2 class="sec"><span class="ico">✨</span>三、新增 110 个站点，总量 57 → 167</h2>
+    <div class="big">
+      <h3>每个方向都大幅扩容，<span class="em">官方长视频四站也进来了</span></h3>
+      <ul>
+        <li><b>影视 16 + 日韩剧 3</b>：星河影视、追影、厂长资源、独播库、奈飞工厂、爱壹帆、心动日剧、追新番、韩剧TV 等；官方长视频四站：<b>爱奇艺 / 腾讯视频 / 优酷 / 芒果TV</b>（免费专区 + 限免）</li>
+        <li><b>动漫番剧 22</b>：AcFun、嗷呜、NyaFun、囧次元、咕咕番、打驴、五弹幕、MX动漫、NT动漫、异世界、girigiri、喵物次元、次元城、E站弹幕、风车、饭团，以及 BT 向动漫花园 / 蜜柑计划 / 漫猫 / 爱恋</li>
+        <li><b>美术·艺术 20</b>：站酷、花瓣、涂鸦王国、Behance、ArtStation、Dribbble、故宫数字文物库、中华珍宝馆、Google 艺术与文化、Pexels、Pixabay、Unsplash 等</li>
+        <li><b>电子书 20</b>：LibGen、古腾堡、Internet Archive、Open Library、轻之国度、SF轻小说、轻小说文库、哔哩轻小说、铅笔小说、知轩藏书、起点、纵横等</li>
+        <li><b>磁力站 20</b>：磁力多、吴签磁力、磁力猫、BTDigg、磁力狗、老王磁力、BTSOW 等（只做搜索入口）</li>
+        <li><b>AI 制作 5</b>：吐司AI、星流AI、海艺AI、CivArchive、ComfyWorkflows</li>
+      </ul>
+      <div class="tags">
+        <span class="tag">爱奇艺</span>
+        <span class="tag">腾讯视频</span>
+        <span class="tag">优酷</span>
+        <span class="tag">芒果TV</span>
+        <span class="tag">AcFun</span>
+        <span class="tag">囧次元</span>
+        <span class="tag">咕咕番</span>
+        <span class="tag">动漫花园</span>
+        <span class="tag">站酷</span>
+        <span class="tag">Behance</span>
+        <span class="tag">故宫数字文物库</span>
+        <span class="tag">LibGen</span>
+        <span class="tag">轻之国度</span>
+        <span class="tag">铅笔小说</span>
+        <span class="tag">磁力多</span>
+        <span class="tag">BTDigg</span>
+        <span class="tag">吐司AI</span>
+        <span class="tag">…… 等共 110 个新站</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 常用模块 -->
+  <section>
+    <h2 class="sec"><span class="ico">⭐</span>四、「常用」模块：越用越懂你</h2>
+    <div class="big">
+      <h3>预设主流 Top15 起步，<span class="em">点得多的自动往前排</span></h3>
+      <p>首页新增「常用」分类：起步就是 B站 / 抖音 / YouTube / 小红书等主流 Top15；之后每点一次磁贴都会计数，点击多的站点自动顶进前排——你的常用就是你的常用。</p>
+      <ul>
+        <li><b>预设起步</b>：收录主流 Top15，开箱即用不用冷启动</li>
+        <li><b>点击自动排序</b>：磁贴点击次数实时累计，点几次就能顶掉预设末位</li>
+        <li><b>隐私安全</b>：点击数据只存在本机（localStorage），不上传不联网</li>
+        <li><b>只排好站</b>：已失效、无地址、留空位的站点不会混进常用列表</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 5 连通性实测 -->
+  <section>
+    <h2 class="sec"><span class="ico">🩺</span>五、110 个新站全部实测连通性</h2>
+    <div class="big">
+      <h3>不是抄来的清单，<span class="em">每一站都开证书校验真探测过</span></h3>
+      <p>2026-09-18 对全部 110 个新站逐一直连 + 代理双路探测，结果直接写进注册表：</p>
+      <div class="probe">
+        <div class="pcell p1"><b>74</b><span>直连可用</span></div>
+        <div class="pcell p2"><b>25</b><span>需系统代理</span></div>
+        <div class="pcell p3"><b>6</b><span>失效已置灰</span></div>
+      </div>
+      <ul>
+        <li><b>直连 74 站</b>：打开即用，不做任何标记</li>
+        <li><b>需代理 25 站</b>：磁贴带「需代理」角标，悬停说明里写明</li>
+        <li><b>失效 6 站</b>：磁贴置灰「已失效」+ 换域名指引（NT动漫、神凑轻小说、魔笔小说、磁力草、磁力百科、无限磁力），GitHub 校验表确认恢复后自动点亮</li>
+        <li><b>域名自动切换</b>：囧次元 / girigiri / 饭团 / LibGen 已自动切到当前可用域名，主备域名都记在卡片里</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 6 上游同步对齐 -->
+  <section>
+    <h2 class="sec"><span class="ico">🔄</span>六、GitHub 上游同步对齐</h2>
+    <div class="fixes">
+      <div class="fixrow head"><div>问题</div><div>修复</div></div>
+      <div class="fixrow"><div class="was">追剧站上游（awesome-zhuiju-free 每日检测）动态下发的地址与本地新增基线站重叠，同一站可能重复出磁贴</div><div class="now">已对齐：动态地址下发与新增基线站按 key 合并去重，一个站只出一张磁贴，域名以上游最新为准</div></div>
+      <div class="fixrow"><div class="was">上游新收录站点与本地 baseline 顺序打架，排序忽前忽后</div><div class="now">排序分层稳定：官方主流永远在前 → 白嫖/资源站居中 → 动态下发垫底，同级保持 baseline 顺序</div></div>
+    </div>
+  </section>
+
+  <!-- 7 已知边界 -->
+  <section>
+    <h2 class="sec"><span class="ico">📋</span>七、已知边界（诚实说明）</h2>
+    <div class="know">
+      <b>这些情况如实告诉你，软件不会假装成功：</b>
+      <ul>
+        <li>磁力站只做搜索入口：搜到的磁力链接 / 种子需复制到下载器（或交由捕获）配合下载，站内不直接落盘</li>
+        <li>部分海外站（Behance、ArtStation、Pexels、LibGen 等 25 站）需开系统代理才能访问</li>
+        <li>失效置灰的 6 站以应用内实际校验为准，GitHub 校验表下发新地址后自动恢复</li>
+        <li>域名常变的站点，磁贴说明里都写了备用域名与找新地址的方法</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    小小浏览器 · 可视化更新说明 · 本页为离线单文件页（无外部资源，随安装包分发，无需联网即可查看）<br>
+    制度说明：每次重大更新发版前都会产出同款可视化更新页（美好世界顶栏「📜 更新」随时可看）<br>
+    数据日期：2026-09-18 · 版本 v1.2.47
+  </footer>
+</div>
+</body>
+</html>

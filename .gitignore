@@ -6,6 +6,8 @@ gui/.cache/
 bunkr_bridge/
 dist/
 build/
+dist_v*/
+build_v*/
 # 例外：gui/build/ 是 NSIS 安装包定制脚本（installer.nsh / xxd.app），必须入库
 !gui/build/
 !gui/build/**
@@ -18,6 +20,8 @@ downloads/
 
 # 发布产物（体积过大，不入库）
 *.exe
+# 例外：aria2c BT 内核是运行必需的二进制依赖（bridge/bt_downloader.py RPC 调用）
+!resources/aria2/aria2c.exe
 小小下载器/
 update/
 bugfile/
@@ -38,8 +42,35 @@ _t.py
 debug_*.py
 *.html
 !gui/dist/index.html
+# 例外：内置帮助页是产品功能（离线帮助中心）
+!gui/public/**/*.html
 test.bat
 事件任务对话压缩上下文.md
+_video_probe_report.txt
+_video_sites.json
+
+# 个人工作区 / 本地工具 / 制作文档（不入库）
+.mimosa/
+**/.mimosa/
+.workbuddy/
+.zcode/
+AGENTS.md
+Zcod修改说明.txt
+任务中心/
+_research/
+_recover/
+_backup_merge/
+X-Spider/
+grok任务结果区/
+assets/
+_pylibs/
+_gen_code_map.py
+_gen_surface_overview.js
+_grok_search.py
+_closemimic.ps1
+_front.ps1
+_bili_worker_ran.txt
+_env_probe.txt
 
 # 敏感运行时数据（账号 cookie / 会话 / 用户数据，绝不上传）
 theme_cache.dat
@@ -54,3 +85,10 @@ downloads_tasks.json
 .vscode/
 *.pyc
 __pycache__/
+_grok_channel.json
+
+# 上游遗留工具文档 / 本地制作文档
+.trae/
+api/
+测试用.jpg
+release_data/README.md

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小小下载器 · 使用导览</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --line: #e6e9f2;
+    --tx: #23262f;
+    --tx2: #6a7080;
+    --acc: #5b7cfa;
+    --acc2: #8f6bff;
+    --ok: #21c58b;
+    --warn: #f5a623;
+    --bad: #ff5f7d;
+    --dark: #16181f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(165deg, #eef1fa 0%, #f6f4fb 50%, #fdf0f5 100%);
+    color: var(--tx);
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.75;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 30px 70px; }
+
+  .hero {
+    padding: 58px 0 40px; text-align: center; margin-bottom: 40px;
+    background: radial-gradient(700px 260px at 20% 0%, rgba(91,124,250,.14), transparent 70%),
+                radial-gradient(600px 240px at 80% 10%, rgba(255,95,143,.10), transparent 70%);
+  }
+  .hero .logo {
+    width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 18px;
+    background: linear-gradient(135deg, #5b7cfa, #8f6bff);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px; color: #fff; box-shadow: 0 10px 26px rgba(91,124,250,.35);
+  }
+  .hero h1 { font-size: 34px; font-weight: 800; }
+  .hero p.sub { color: var(--tx2); margin-top: 10px; font-size: 15px; }
+  .hero .ver { margin-top: 14px; font-size: 12.5px; color: #9aa0b2; }
+
+  section { margin-bottom: 56px; }
+  h2.sec {
+    font-size: 24px; font-weight: 800; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2.sec .num {
+    font-size: 13px; color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2));
+    border-radius: 9px; padding: 3px 11px;
+  }
+  p.secsub { color: var(--tx2); font-size: 14px; margin-bottom: 24px; }
+
+  /* 双世界 */
+  .worlds { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .world {
+    border-radius: 20px; padding: 28px; color: #fff; position: relative; overflow: hidden;
+  }
+  .world.light-w { background: linear-gradient(150deg, #6a7bff, #8f9bff); }
+  .world.dark-w { background: linear-gradient(150deg, #23262f, #3a3f52); }
+  .world .wtag {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 2px;
+    background: rgba(255,255,255,.22); padding: 4px 14px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .world h3 { font-size: 22px; margin-bottom: 8px; }
+  .world p { font-size: 13.5px; opacity: .92; }
+  .world ul { list-style: none; margin-top: 14px; }
+  .world li { font-size: 13px; padding: 4px 0; opacity: .95; }
+  .world li::before { content: "✦ "; opacity: .8; }
+  .world .key {
+    margin-top: 16px; display: inline-block; font-size: 12px; font-weight: 700;
+    background: rgba(255,255,255,.25); padding: 6px 14px; border-radius: 10px;
+  }
+
+  /* 手势演示 */
+  .gesture {
+    margin-top: 20px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 22px 26px; display: flex; align-items: center; gap: 20px;
+  }
+  .gesture .keys { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  .gesture .k {
+    min-width: 46px; height: 46px; padding: 0 12px;
+    background: var(--dark); color: #fff; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700; box-shadow: 0 4px 0 #0c0e14;
+  }
+  .gesture .plus { color: var(--tx2); font-weight: 700; }
+  .gesture .gtxt { font-size: 14px; }
+  .gesture .gtxt b { color: var(--acc); }
+
+  /* 功能地图 */
+  .fmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .fcard {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; transition: transform .15s, box-shadow .15s;
+  }
+  .fcard:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(35,38,47,.10); }
+  .fcard .fi { font-size: 24px; margin-bottom: 8px; }
+  .fcard h3 { font-size: 14.5px; margin-bottom: 5px; }
+  .fcard p { font-size: 12.5px; color: var(--tx2); }
+  .fcard .zone { display: inline-block; margin-top: 8px; font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .zone-light { background: #eef0ff; color: #4a54a8; }
+  .zone-dark { background: #23252e; color: #b9a7ff; }
+  .zone-both { background: #e6f7f0; color: #17906b; }
+
+  /* B站下载流程 */
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; position: relative; }
+  .fstep { text-align: center; padding: 0 10px; position: relative; }
+  .fstep .fnum {
+    width: 42px; height: 42px; margin: 0 auto 10px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px;
+  }
+  .fstep:not(:last-child)::after {
+    content: ''; position: absolute; top: 21px; left: calc(50% + 26px); right: calc(-50% + 26px);
+    height: 3px; background: linear-gradient(90deg, var(--acc), var(--acc2)); opacity: .35; border-radius: 2px;
+  }
+  .fstep h3 { font-size: 14px; margin-bottom: 4px; }
+  .fstep p { font-size: 12px; color: var(--tx2); }
+
+  /* 排查表 */
+  .trouble { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 1.1fr 1fr 1.6fr; gap: 0; border-bottom: 1px solid var(--line); }
+  .trow:last-child { border-bottom: none; }
+  .trow > div { padding: 14px 18px; font-size: 13px; }
+  .trow.head { background: #f4f5fa; font-weight: 700; font-size: 12.5px; color: var(--tx2); }
+  .trow .sym { color: var(--bad); font-weight: 600; }
+  .trow .fix { color: var(--ok); font-weight: 600; }
+
+  /* 提示条 */
+  .tips { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+  .tip { background: #fff8ea; border: 1px solid #f5e3bd; border-radius: 14px; padding: 16px 20px; font-size: 13px; }
+  .tip b { color: #b07b1a; }
+
+  footer { text-align: center; margin-top: 50px; color: #9aa0b2; font-size: 12.5px; }
+  @media (max-width: 860px) {
+    .worlds, .fmap, .tips { grid-template-columns: 1fr; }
+    .flow { grid-template-columns: 1fr 1fr; gap: 18px 0; }
+    .fstep:not(:last-child)::after { display: none; }
+    .trow { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="logo">⬇</div>
+    <h1>小小下载器 · 使用导览</h1>
+    <p class="sub">多站点资源下载 + 热门平台媒体捕获，一套软件搞定。本页是可视化说明书，随软件一起更新。</p>
+    <p class="ver">适用版本 v1.2.42 及以上</p>
+  </div>
+
+  <!-- 1 双世界 -->
+  <section>
+    <h2 class="sec"><span class="num">01</span>热门平台：一站聚合</h2>
+    <p class="secsub">看视频、刷动态、保存喜欢的媒体——都在这一个界面完成。</p>
+    <div class="worlds">
+      <div class="world light-w">
+        <span class="wtag">主界面</span>
+        <h3>正常网站模式</h3>
+        <p>干净明亮的界面，聚合常用正规平台：看视频、刷动态、抓媒体、一键下载。</p>
+        <ul>
+          <li>哔哩哔哩 / 抖音 / 小红书 / 快手</li>
+          <li>微博 / YouTube / 网易云 / 知乎</li>
+          <li>B站专属下载：登录后可选清晰度、音视频分离</li>
+        </ul>
+        <span class="key">适合：日常浏览 + 正版平台内容保存</span>
+      </div>
+      
+    </div>
+  </section>
+
+  <!-- 2 功能地图 -->
+  <section>
+    <h2 class="sec"><span class="num">02</span>功能地图</h2>
+    <p class="secsub">全部功能一页看全。标「表」「里」「通用」表示在哪个世界使用。</p>
+    <div class="fmap">
+      <div class="fcard"><div class="fi">🎬</div><h3>B站专属下载</h3><p>进视频页自动解析，选清晰度，音视频分开或合并成 MP4</p><span class="zone zone-light">主界面</span></div>
+      <div class="fcard"><div class="fi">📱</div><h3>热门平台浏览</h3><p>B站/抖音/小红书/快手/微博/YouTube/网易云/知乎 内置浏览器</p><span class="zone zone-light">主界面</span></div>
+      <div class="fcard"><div class="fi">📡</div><h3>实时媒体捕获</h3><p>主界面浏览时，视频/图片/音频自动进右侧列表，点下载即存</p><span class="zone zone-light">主界面</span></div>
+      <div class="fcard"><div class="fi">🎯</div><h3>手动嗅探抓取</h3><p>独立窗口：内置浏览器浏览任意网页，媒体实时捕获可下载</p><span class="zone zone-both">通用</span></div>
+      <div class="fcard"><div class="fi">🖼️</div><h3>识图溯源</h3><p>丢一张图，trace.moe / SauceNAO / IQDB 多网站并发找出处</p><span class="zone zone-both">通用</span></div>
+      <div class="fcard"><div class="fi">🌐</div><h3>翻译</h3><p>文本翻译（有道/免费引擎），结果可复制</p><span class="zone zone-both">通用</span></div>
+      <div class="fcard"><div class="fi">📥</div><h3>下载管理</h3><p>迅雷式任务面板：暂停/续传/重试/清除，支持同时删除本地文件</p><span class="zone zone-both">通用</span></div>
+      <div class="fcard"><div class="fi">🔄</div><h3>重启应用</h3><p>登录卡死/网络异常一键重启，自动还原网络设置并保持界面模式</p><span class="zone zone-both">通用</span></div>
+    </div>
+  </section>
+
+  <!-- 3 B站下载流程 -->
+  <section>
+    <h2 class="sec"><span class="num">03</span>B站视频怎么下（4 步）</h2>
+    <p class="secsub">哔哩哔哩 → 打开任意视频页，解析卡会自动出现。</p>
+    <div class="flow">
+      <div class="fstep"><div class="fnum">1</div><h3>打开视频页</h3><p>内置浏览器里随便点开一个视频，右侧自动弹出「B站解析」卡</p></div>
+      <div class="fstep"><div class="fnum">2</div><h3>选清晰度</h3><p>下拉选择清晰度（含体积）；未登录最高 480P，登录B站后更高、大会员可 4K</p></div>
+      <div class="fstep"><div class="fnum">3</div><h3>选下载方式</h3><p>下载 MP4（音视频自动合并）/ 仅视频 / 仅音频（.m4a）</p></div>
+      <div class="fstep"><div class="fnum">4</div><h3>下载管理看进度</h3><p>合并完成后在下载管理里「打开文件夹」，直接可播</p></div>
+    </div>
+    <div class="tips" style="margin-top:18px">
+      <div class="tip"><b>💡 想要 1080P / 4K？</b> 先在内置浏览器里登录B站账号（解析自动带上你的登录态），清晰度列表会立刻变多；大会员可解锁 4K。</div>
+      <div class="tip"><b>💡 多P视频？</b> 解析卡上方会出现 P1/P2/P3… 分P切换按钮，先选中哪一P就下载哪一P。</div>
+    </div>
+  </section>
+
+  <!-- 4 登录 -->
+  <section>
+    <h2 class="sec"><span class="num">04</span>登录与账号</h2>
+    <p class="secsub">两种登录方式，都能取消、都不会卡死。</p>
+    <div class="trouble">
+      <div class="trow head"><div>方式</div><div>在哪用</div><div>说明</div></div>
+      <div class="trow"><div><b>账密登录</b></div><div>部分站点的登录卡</div><div>填账号密码点登录。网络不佳转圈时，点转圈旁的 <b style="color:var(--warn)">「✕ 网络不佳？点击取消转圈」</b> 即可放弃等待重新再试；60 秒无响应也会自动取消</div></div>
+      <div class="trow"><div><b>内置浏览器登录</b></div><div>Pixiv / JavDB / FC2 / Leakedzone 等登录卡</div><div>弹出内置浏览器完成登录（含滑块/人机验证），登录后点「确认抓取」把会话带回软件；B站在内置浏览器里直接登录即可</div></div>
+    </div>
+  </section>
+
+  <!-- 5 排查 -->
+  <section>
+    <h2 class="sec"><span class="num">05</span>常见问题排查</h2>
+    <p class="secsub">遇到问题先对照这张表，绝大多数一分钟解决。</p>
+    <div class="trouble">
+      <div class="trow head"><div>症状</div><div>原因</div><div>解决</div></div>
+      <div class="trow"><div class="sym">点登录一直转圈</div><div>网络不佳，站点无响应</div><div class="fix">点转圈旁的「取消」→ 稍后重试；或用重启按钮</div></div>
+      <div class="trow"><div class="sym">登录之后再也点不动</div><div>上一次登录请求卡死</div><div class="fix">取消转圈后再登录；或直接重启应用</div></div>
+      <div class="trow"><div class="sym">软件整体网络异常</div><div>嗅探/代理设置残留</div><div class="fix">点「🔄 重启应用」会自动还原网络设置</div></div>
+      <div class="trow"><div class="sym">B站下载只有画面没声音</div><div>旧版本问题</div><div class="fix">升级到本版本（已修复音视频合并）</div></div>
+      <div class="trow"><div class="sym">视频抓不到</div><div>该视频用加密流或尚未播放</div><div class="fix">先正常播放几秒让媒体出现；HLS 流暂不支持直下可复制链接</div></div>
+      <div class="trow"><div class="sym">YouTube 打不开</div><div>需要代理</div><div class="fix">设置里配置代理后再访问（主界面 YouTube 卡片标注了需代理）</div></div>
+    </div>
+  </section>
+
+  <!-- 6 三个按钮 -->
+  <section>
+    <h2 class="sec"><span class="num">06</span>三个救急按钮</h2>
+    <p class="secsub">分布在设置区和主界面顶栏，出问题时按顺序试。</p>
+    <div class="fmap" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="fcard"><div class="fi">✕</div><h3>取消转圈</h3><p>登录转圈旁出现，点一下立刻解除卡死等待</p><span class="zone zone-both">登录卡旁</span></div>
+      <div class="fcard"><div class="fi">🔄</div><h3>重启应用</h3><p>一键还原网络+重启软件，界面模式保持不变</p><span class="zone zone-both">设置区 / 主界面顶栏</span></div>
+      <div class="fcard"><div class="fi">🧹</div><h3>清除缓存</h3><p>缩略图/相册信息异常时使用，不影响账号与任务</p><span class="zone zone-both">设置区</span></div>
+    </div>
+  </section>
+
+  <footer>小小下载器 · 可视化使用导览 · 本页为软件内置离线页面 · 每次重大更新会同步产出新的可视化更新说明</footer>
+</div>
+</body>
+</html>

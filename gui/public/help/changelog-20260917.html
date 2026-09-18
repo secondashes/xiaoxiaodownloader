@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>更新说明 · 全新主界面 + B站专属下载</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --line: #e6e9f2;
+    --tx: #23262f;
+    --tx2: #6a7080;
+    --acc: #5b7cfa;
+    --acc2: #8f6bff;
+    --ok: #21c58b;
+    --warn: #f5a623;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(165deg, #eef1fa 0%, #f6f4fb 50%, #eefaf5 100%);
+    color: var(--tx);
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.75;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 30px 70px; }
+
+  .hero {
+    padding: 54px 0 36px; text-align: center; margin-bottom: 38px;
+    background: radial-gradient(700px 260px at 25% 0%, rgba(91,124,250,.16), transparent 70%),
+                radial-gradient(600px 240px at 75% 10%, rgba(33,197,139,.12), transparent 70%);
+  }
+  .hero .badge {
+    display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 2px;
+    color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2));
+    padding: 6px 20px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h1 { font-size: 32px; font-weight: 800; line-height: 1.35; }
+  .hero p.sub { color: var(--tx2); margin-top: 12px; font-size: 14.5px; }
+
+  section { margin-bottom: 46px; }
+  h2.sec {
+    font-size: 21px; font-weight: 800; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2.sec .ico { font-size: 24px; }
+
+  .big {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 26px 28px; margin-bottom: 18px;
+  }
+  .big h3 { font-size: 17px; margin-bottom: 10px; }
+  .big h3 .em { color: var(--acc); }
+  .big p { font-size: 13.5px; color: #4a4f5e; }
+  .big ul { list-style: none; margin-top: 10px; }
+  .big li { font-size: 13.5px; padding: 5px 0 5px 22px; position: relative; }
+  .big li::before { content: '✓'; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+  .big .screenshot-hint {
+    margin-top: 14px; font-size: 12px; color: #9aa0b2;
+    background: #f4f5fa; border-radius: 10px; padding: 8px 14px;
+  }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+  .mini {
+    border-radius: 16px; padding: 22px; color: #fff;
+  }
+  .mini.light-m { background: linear-gradient(150deg, #6a7bff, #8f9bff); }
+  .mini.dark-m { background: linear-gradient(150deg, #23262f, #3a3f52); }
+  .mini h3 { font-size: 18px; margin-bottom: 8px; }
+  .mini h3 .wtag {
+    font-size: 11px; font-weight: 800; letter-spacing: 2px;
+    background: rgba(255,255,255,.22); padding: 3px 12px; border-radius: 999px;
+    vertical-align: 4px; margin-left: 8px;
+  }
+  .mini p { font-size: 13px; opacity: .95; }
+  .mini ul { list-style: none; margin-top: 10px; }
+  .mini li { font-size: 12.5px; padding: 3px 0; }
+  .mini li::before { content: '✦ '; opacity: .8; }
+
+  .fixes { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .fixrow { display: grid; grid-template-columns: 1.2fr 1.6fr; border-bottom: 1px solid var(--line); }
+  .fixrow:last-child { border-bottom: none; }
+  .fixrow > div { padding: 12px 18px; font-size: 13px; }
+  .fixrow.head { background: #f4f5fa; font-weight: 700; font-size: 12.5px; color: var(--tx2); }
+  .fixrow .was { color: var(--bad); }
+  .fixrow .now { color: var(--ok); font-weight: 600; }
+
+  .steps { counter-reset: st; }
+  .step {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 20px; margin-bottom: 12px; display: flex; gap: 16px; align-items: flex-start;
+  }
+  .step .sn {
+    counter-increment: st; flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 800;
+  }
+  .step .sn::before { content: counter(st); }
+  .step h3 { font-size: 14.5px; margin-bottom: 3px; }
+  .step p { font-size: 12.5px; color: var(--tx2); }
+
+  .know {
+    background: #fff8ea; border: 1px solid #f5e3bd; border-radius: 16px;
+    padding: 20px 24px; font-size: 13px;
+  }
+  .know b { color: #b07b1a; }
+  .know ul { list-style: none; margin-top: 8px; }
+  .know li { padding: 4px 0 4px 20px; position: relative; }
+  .know li::before { content: '·'; position: absolute; left: 6px; font-weight: 900; color: #b07b1a; }
+
+  footer { text-align: center; margin-top: 46px; color: #9aa0b2; font-size: 12.5px; }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="badge">重大更新 · 2026-09-17</span>
+    <h1>全新亮色主界面 正式上线<br>B站专属下载全面升级</h1>
+    <p class="sub">本次更新带来了全新的平台聚合界面、一套全新的B站下载体验，外加登录不再卡死。</p>
+  </div>
+
+  <!-- 1 全新主界面 -->
+  <section>
+    <h2 class="sec"><span class="ico">🌈</span>一、全新亮色主界面：平台聚合，浏览即捕获</h2>
+    <div class="big">
+      <h3>聚合日常使用的正规平台，<span class="em">刷到的视频/图片自动进下载列表</span></h3>
+      <ul>
+        <li>哔哩哔哩 · 抖音 · 小红书 · 快手 · 微博 · YouTube · 网易云 · 知乎</li>
+        <li>新增看番（AgeFans / 樱花动漫）、电子书（鸠摩搜书 / Z-Library / Anna's Archive）入口</li>
+        <li>新增学术医学（丁香园 / PubMed / Google 学术 / arXiv / 知网）与资源社区（GitHub / Wikipedia）入口</li>
+        <li>内置 📖 软件说明 与 📜 更新说明（可视化页面）入口</li>
+      </ul>
+    </div>
+    <div class="steps" style="margin-top: 18px;">
+      <div class="step"><div class="sn"></div><div><h3>窗口新外观</h3><p>主窗口改为 iOS 风格圆角 + 半透明毛玻璃标题栏，标题栏颜色随界面主题自动变化。</p></div></div>
+    </div>
+  </section>
+
+  <!-- 2 B站专属下载 -->
+  <section>
+    <h2 class="sec"><span class="ico">🎬</span>二、B站专属下载：像B站插件一样专业</h2>
+    <div class="big">
+      <h3>在表世界打开「哔哩哔哩」，进入任意视频页——<span class="em">「B站解析」卡自动出现</span></h3>
+      <p>视频标题、UP主、分P列表、全部可选清晰度（含每档体积）、音频码率，一目了然。</p>
+      <ul>
+        <li><b>清晰度自由选</b>：480P 起步；在浏览器里登录B站后自动解锁 1080P / 1080P60，大会员可到 4K</li>
+        <li><b>音视频分离或合并</b>：三个按钮——「下载 MP4（音视频合并）」「仅视频」「仅音频(.m4a)」</li>
+        <li><b>合并由 ffmpeg 无损封装</b>：不重编码，速度快、画质无损</li>
+        <li><b>多P视频</b>：解析卡直接列出全部分P，点选即下</li>
+        <li><b>登录态自动生效</b>：在表世界浏览器里登录B站后，解析与下载自动使用你的账号能力，无需额外配置</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3 登录不再卡死 -->
+  <section>
+    <h2 class="sec"><span class="ico">🔓</span>三、登录不再卡死</h2>
+    <div class="big">
+      <h3>两个方案，双保险</h3>
+      <ul>
+        <li><b>转圈可取消</b>：网络不佳点登录后一直转圈？转圈旁出现「✕ 网络不佳？点击取消转圈」，点一下立刻解除等待，马上可以重试</li>
+        <li><b>60 秒自动超时</b>：就算不点，60 秒无响应也会自动取消转圈并记录日志</li>
+        <li>取消/超时只复位界面等待——后台仍在尝试，登录结果出来后账号卡会照常自动刷新</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 4 重启按钮 -->
+  <section>
+    <h2 class="sec"><span class="ico">🔄</span>四、重启应用按钮</h2>
+    <div class="steps">
+      <div class="step"><div class="sn"></div><div><h3>在哪点</h3><p>设置区「清除缓存」下方；顶栏右侧。两个位置都有。</p></div></div>
+      <div class="step"><div class="sn"></div><div><h3>做什么</h3><p>自动还原嗅探/代理网络设置 → 干净结束后端 → 整个应用重新启动。登录状态、界面模式全部保持。</p></div></div>
+      <div class="step"><div class="sn"></div><div><h3>什么时候用</h3><p>登录卡死、网络异常、界面状态诡异——重启是万能第一步。</p></div></div>
+    </div>
+  </section>
+
+  <!-- 5 修复清单 -->
+  <section>
+    <h2 class="sec"><span class="ico">🛠</span>五、底层修复（对应「下载没声音/抓不到」老问题）</h2>
+    <div class="fixes">
+      <div class="fixrow head"><div>问题</div><div>修复</div></div>
+      <div class="fixrow"><div class="was">B站下载的 MP4 只有画面没声音</div><div class="now">ffmpeg 合并改显式音视频映射（-map），并写入 ffmpeg 错误日志便于排查</div></div>
+      <div class="fixrow"><div class="was">表世界/嗅探下载的B站视频抓不到或秒失败</div><div class="now">B站 CDN 校验 Referer+浏览器 UA 双重防盗链，已按捕获来源自动补齐</div></div>
+      <div class="fixrow"><div class="was">下载分轨被误判"已下载"直接跳过</div><div class="now">分轨临时文件改用唯一名，去重不再误伤</div></div>
+      <div class="fixrow"><div class="was">识图假结果、结果不能复制</div><div class="now">识图重做：只保留真实可解析站点，结果可一键复制/打开原页</div></div>
+      <div class="fixrow"><div class="was">搜索结果/下载任务偶发字段丢失</div><div class="now">任务字段白名单补齐B站下载所需全部字段</div></div>
+    </div>
+  </section>
+
+  <!-- 6 已知边界 -->
+  <section>
+    <h2 class="sec"><span class="ico">📋</span>六、已知边界（诚实说明）</h2>
+    <div class="know">
+      <b>这些情况属于平台限制，软件会如实提示而不是假装成功：</b>
+      <ul>
+        <li>B站未登录时清晰度上限 480P；1080P+ 需登录、4K 需大会员——在表世界浏览器登录即自动生效</li>
+        <li>HLS 直播流（.m3u8）只捕获不直下，可复制链接用外部工具</li>
+        <li>下架/私有视频解析可能拿不到播放流，属站方限制</li>
+        <li>抖音/小红书等平台的专属下载面板在后续版本逐站接入，当前先以实时捕获方式使用</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>小小下载器 · 可视化更新说明 · 每次重大更新都会产出同款页面（表世界顶栏「📜 更新」随时可看）</footer>
+</div>
+</body>
+</html>

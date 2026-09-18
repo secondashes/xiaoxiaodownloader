@@ -1,0 +1,293 @@
+{
+  "version": 2,
+  "updated": "2026-09-18",
+  "note": "表世界站点校验表：status ok=有效 / dead=失效（磁贴置灰） / todo=待验证；url 非空则下发为磁贴新地址；extra 可动态新增站点。由应用启动时自动拉取（raw→jsDelivr→缓存）。v2：探测脚本开启 TLS 证书校验后全量复测（zlib 翻 dead；agefans/annas/hifini/tonzhon 实为 TLS 层重置维持 dead）。",
+  "sites": {
+    "agefans": {
+      "status": "dead",
+      "url": "",
+      "note": "主域名 agefans.ge 直连失败、代理 TLS 握手被重置（2026-09-18 开证书校验复测），去发布页 github.com/agefanscom/website 找最新地址"
+    },
+    "anfuns": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "annas": {
+      "status": "dead",
+      "url": "",
+      "note": "annas-archive.org 直连超时、代理 TLS 握手被重置（2026-09-18 复测），搜索 Anna's Archive 最新地址"
+    },
+    "appinn": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "arxiv": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "bilibili": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "civitai": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "cnki": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "douyin": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "dxy": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "epic": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "four23": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "gequbao": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "ghxi": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "github": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "hf": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "hifini": {
+      "status": "dead",
+      "url": "",
+      "note": "www.hifini.com 直连失败、代理 TLS 握手被重置（2026-09-18 复测），搜索 HiFiNi 音乐磁场 最新地址"
+    },
+    "itch": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "jianyun": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "jiumo": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "juzong": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "krzacg": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "kuaishou": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "kungal": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "kxyy": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "legado": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "liblib": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "listen1": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "lxmusic": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "mmov": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "modelscope": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "mpyit": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "music163": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "omofun": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "openart": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "pianku": {
+      "status": "ok",
+      "url": "https://piankuwan.com",
+      "note": ""
+    },
+    "pojie": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "pubmed": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "pxsource": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "scholar": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "steam": {
+      "status": "ok",
+      "url": "",
+      "note": "国内间歇可直连，异常时开系统代理"
+    },
+    "suno": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "tensorart": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "threedm": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "tonzhon": {
+      "status": "dead",
+      "url": "",
+      "note": "whamon 镜像直连失败、代理 TLS 握手被重置（2026-09-18 复测），搜索 铜钟音乐 最新地址"
+    },
+    "twodfan": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "weibo": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "wiki": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "xhs": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "xiaoya": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "xifan": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "xiu2": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "yinghua": {
+      "status": "ok",
+      "url": "",
+      "note": "该镜像证书异常（浏览器访问会警告）且域名常变，建议优先搜最新镜像"
+    },
+    "youtube": {
+      "status": "ok",
+      "url": "",
+      "note": "需系统代理访问"
+    },
+    "zhihu": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    },
+    "zlib": {
+      "status": "dead",
+      "url": "",
+      "note": "z-library.sk 当前不可达（2026-09-18 复测），Z-Library 域名常变，搜索最新地址或用官方发布页"
+    },
+    "zzzfun": {
+      "status": "ok",
+      "url": "",
+      "note": ""
+    }
+  },
+  "extra": []
+}

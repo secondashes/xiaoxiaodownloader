@@ -1,16 +1,21 @@
-const { app, BrowserWindow, ipcMain, protocol, shell, Menu, session, Tray, globalShortcut, nativeImage, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, protocol, shell, Menu, session, Tray, globalShortcut, nativeImage, dialog, clipboard } = require('electron')
 const { spawn, spawnSync, execSync, execFileSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 
-// 应用版本号（package.json）：主窗口标题显示"小小下载器 vX.Y.Z"
+// 应用版本号（package.json）：主窗口标题显示"小小浏览器 vX.Y.Z"
 const APP_VERSION = require('../package.json').version || ''
-const APP_TITLE = APP_VERSION ? `小小下载器 v${APP_VERSION}` : '小小下载器'
+const APP_TITLE = APP_VERSION ? `小小浏览器 v${APP_VERSION}` : '小小浏览器'
 
 // 在 app ready 之前设置命令行参数
+// GPU 策略（三态权衡，勿只看其一）：
+//   全开硬件加速 → 本机（服务器/虚拟 GPU）窗口合成崩溃 = 整窗黑屏；
+//   禁 GPU + 禁软件光栅（旧行为）→ WebGL = null，CF Turnstile 直接判定自动化
+//     → leakedzone 等站人机验证复选框无限循环；
+//   现行：保留软件合成（disable-gpu + disableHardwareAcceleration），但不禁
+//   软件光栅器 → WebGL 走 SwiftShader 可用，CF 能拿到 WebGL 指纹即可放行验证。
 app.commandLine.appendSwitch('no-sandbox')
 app.commandLine.appendSwitch('disable-gpu')
-app.commandLine.appendSwitch('disable-software-rasterizer')
 app.disableHardwareAcceleration()
 
 // ============================
@@ -42,9 +47,13 @@ function getReleaseDir() {
 }
 
 // 所有运行数据（后端 cwd / 缩略图 / 设置 / 日志 / Chromium 会话）的根目录
+// NSIS 安装版（非便携非 dev）：数据目录固定到 %APPDATA%\TinyDownloaderBackup——
+// 安装目录（Program Files 等）对普通用户不可写，settings/theme_cache 落那里会
+// 全部静默失败 → 界面上所有站的账号/密码/Cookie 表现为"空值"
 function getDataDir() {
   if (isReleased) return path.join(exeDir, 'data')
   if (isStub) return path.join(getReleaseDir(), 'data')
+  if (!isDev) return path.join(process.env.APPDATA || exeDir, 'TinyDownloaderBackup')
   return getProjectRoot()
 }
 
@@ -78,7 +87,12 @@ const SITE_SESSIONS = {
   pornhub:  { partition: 'persist:twitter', domains: ['.pornhub.com', '.phncdn.com'] },
   xvideos:  { partition: 'persist:xvideos', domains: ['.xvideos.com', '.xvideos-cdn.com'] },
   // JavDB：独立会话（webview 内完成邮箱密码登录 + Cloudflare 人机验证，"记住装置"后 cookie 约 7 天有效）
-  javdb:    { partition: 'persist:javdb', domains: ['.javdb.com', '.jdbstatic.com'] },
+  // authNames：Rails/Devise 登录 cookie（session/uid/remember_user_token 任一存在才算已登录；
+  // 不配置会走"cookie 数量>3"启发式，Cloudflare 的 cf_clearance/__cf_bm + over18/locale 就够 4 个，未登录也会被误判）
+  javdb:    { partition: 'persist:javdb', domains: ['.javdb.com', '.jdbstatic.com'],
+              authNames: ['session', '_jdb_session', 'jdb_session', 'uid', 'remember_user_token'] },
+  // FC2：独立会话（webview 内登录 FC2 ID，cookie 长期有效；未登录也可浏览/看免费视频）
+  fc2:      { partition: 'persist:fc2', domains: ['.fc2.com', 'video.fc2.com', 'secure.id.fc2.com'] },
   // 谷歌邮箱：独立会话，登录后 cookie 是其他站 Google OAuth 授权的凭据源
   // （authNames：SID/HSID/SSID + SAPISID 同时存在才算已登录）
   google:   { partition: 'persist:google', domains: ['.google.com', '.accounts.google.com'], authNames: ['SID', 'SAPISID'] },
@@ -86,8 +100,16 @@ const SITE_SESSIONS = {
   oreno3d:  { partition: 'persist:oreno3d', domains: ['.oreno3d.com'] },
   // EroMMDTube：与 Oreno3D 同架构（无账号体系），保存站点会话 cookie（Cloudflare 验证后免重复验证）
   erommdtube: { partition: 'persist:erommdtube', domains: ['.erommdtube.com'] },
+  // Hanime1：独立会话（webview 内邮箱密码登录，Laravel 会话）；键名与前端 wvLogin.site 一致（'hanime'），
+  // 此前缺失导致登录后抓 cookie 报"未知站点: hanime"
+  hanime:   { partition: 'persist:hanime', domains: ['.hanime1.me'], authNames: ['hanime1_session'] },
   // Pixiv：独立会话（webview 内完成邮箱密码登录 + Cloudflare/人机验证），抓取 PHPSESSID
   pixiv:    { partition: 'persist:pixiv', domains: ['.pixiv.net', '.pximg.net'], authNames: ['PHPSESSID'] },
+  // Leakedzone：独立会话（Cloudflare 过盾 cookie 存这里，后端共用过盾会话）。
+  // UA 保持 Electron 真实 Chrome 版本（仅去 Electron 标记）：报比引擎新的大版本会被
+  // CF 一致性检测识破 → 循环挑战；自洽旧版本 + WebGL 可用 + 代理出口才是可通过组合。
+  // 后端 LZ_UA 同步为同一版本号，cf_clearance 才有效。
+  leakedzone: { partition: 'persist:leakedzone', domains: ['.leakedzone.com'] },
   // ExHentai：与右侧浏览器视图共用 persist:exhentai 会话（cookie 互通）；
   // 登录走 e-hentai 论坛账号（forums.e-hentai.org），登录后自动下发 exhentai.org 的 ipb cookie
   exhentai: { partition: 'persist:exhentai', domains: ['.e-hentai.org', '.exhentai.org'], authNames: ['ipb_member_id', 'ipb_pass_hash'] },
@@ -304,11 +326,15 @@ function findPythonPath() {
   // 位置：项目根/bunkr_bridge/bunkr_bridge.exe（PyInstaller onedir）
   const root = getProjectRoot()
   const builtinExe = path.join(root, 'bunkr_bridge', 'bunkr_bridge.exe')
-  if (fs.existsSync(builtinExe)) {
+  // 开发模式（启动.bat / electron .）必须跳过打包 exe：exe 是打包时冻结的旧代码，
+  // 源码 gui_bridge.py 改动永远不会生效，会造成"改了没效果"的假象；改跑源码 + 系统 Python
+  if (!isDev && fs.existsSync(builtinExe)) {
     debugLog(`使用内置打包后端: ${builtinExe}`)
     return { exe: builtinExe, args: [] }
   }
-  debugLog('未找到内置 bunkr_bridge.exe，回退查找系统 Python')
+  if (isDev) {
+    debugLog('开发模式：跳过内置 bunkr_bridge.exe，使用源码 + 系统 Python')
+  }
 
   if (!isDev) {
     // 打包后：优先从 resources/bunkr_bridge 查找（electron-builder extraResources）
@@ -373,6 +399,37 @@ ipcMain.handle('get-backend-error', () => lastBackendError)
 function startPythonBackend() {
   debugLog('--- 开始启动 Python 后端 ---')
   const root = getProjectRoot()
+
+  // NSIS 安装版：数据目录初始化（只补缺，不覆盖用户已有数据）
+  // 1) resources/preset_data（压制时预置的账号/设置）→ 复制缺失文件
+  // 2) 旧安装目录的同名文件 → 迁移
+  if (!isDev && !PORTABLE_MODE) {
+    try {
+      const dataDir = getDataDir()
+      fs.mkdirSync(path.join(dataDir, 'cache'), { recursive: true })
+      const presetDir = path.join(process.resourcesPath || '', 'preset_data')
+      const copyIfMissing = (src, dst) => {
+        if (src && fs.existsSync(src) && !fs.existsSync(dst)) {
+          fs.copyFileSync(src, dst)
+          debugLog(`数据迁移: ${path.basename(dst)}`)
+        }
+      }
+      for (const f of ['theme_cache.dat', 'settings.json', 'downloads_tasks.json']) {
+        copyIfMissing(path.join(presetDir, f), path.join(dataDir, f))
+        copyIfMissing(path.join(exeDir, f), path.join(dataDir, f))
+      }
+      const presetCache = path.join(presetDir, 'cache')
+      if (fs.existsSync(presetCache)) {
+        for (const f of fs.readdirSync(presetCache)) {
+          copyIfMissing(path.join(presetCache, f), path.join(dataDir, 'cache', f))
+        }
+      }
+      debugLog(`安装版数据目录: ${dataDir}`)
+    } catch (e) {
+      debugLog(`安装版数据初始化失败(忽略): ${e.message}`)
+    }
+  }
+
   const { exe: pythonExe, args: pythonArgs, notFound } = findPythonPath()
 
   // 没有可用 Python：给出傻瓜式提示，不再盲目 spawn
@@ -437,6 +494,10 @@ function startPythonBackend() {
           if (evName === 'ready') backendReadyReceived = true
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('python-event', event)
+          }
+          // 嗅探窗口：只转发嗅探相关事件（提交结果等，其他事件主窗口消化）
+          if (snifferWindow && !snifferWindow.isDestroyed() && String(evName || '').startsWith('sniff')) {
+            snifferWindow.webContents.send('python-event', event)
           }
           // 同步给独立下载管理器窗口
           if (downloadsWindow && !downloadsWindow.isDestroyed()) {
@@ -514,16 +575,29 @@ function createWindow() {
       minWidth: 900,
       minHeight: 600,
       title: APP_TITLE,
+      // 里/美好世界：无边框透明圆角窗口（iOS 风格），标题栏由渲染层自绘（随模式变色）
+      frame: false,
+      transparent: true,
       autoHideMenuBar: true,
-      backgroundColor: '#18181c',
       webPreferences: {
         preload: path.join(__dirname, 'preload.cjs'),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
         webviewTag: true,  // ExHentai 浏览器视图需要 <webview> 标签
+        // 启动界面模式（里世界/美好世界）随命令行直接传给渲染层。
+        // 后端 settings 要等命令往返才到（见 get_settings），在那之前渲染层只能用自己的
+        // 默认值 —— 会出现"打开程序先闪一下里世界"。这里从 settings.json 同步读出上次
+        // 模式，渲染层首帧就能摆正，一次都不闪。（preload 里读 process.argv 暴露）
+        additionalArguments: ['--xxd-ui-mode-hot=' + (() => {
+          try {
+            const j = JSON.parse(fs.readFileSync(path.join(getDataDir(), 'settings.json'), 'utf-8'))
+            return j && j.ui_mode_hot === true ? '1' : '0'
+          } catch (e) { return '0' }
+        })()],
       },
     })
+    mainWindow.setMenu(null)  // 单按 Alt 不再弹出（隐藏的）功能菜单栏
     debugLog('BrowserWindow 创建成功')
   } catch (err) {
     debugLog(`BrowserWindow 创建失败: ${err.message}`)
@@ -541,6 +615,8 @@ function createWindow() {
     mainWindow.loadFile(loadPath)
   }
 
+  mainWindow.on('maximize', sendWinMaxState)
+  mainWindow.on('unmaximize', sendWinMaxState)
   mainWindow.webContents.on('did-finish-load', () => {
     debugLog('页面加载完成')
     // 页面 <title> 会覆盖窗口标题：加载完成后强制写回带版本号的标题
@@ -694,9 +770,303 @@ function createDownloadsWindow() {
 }
 
 // ============================
+// 手动抓取（资源嗅探）窗口 —— 复刻 res-downloader：内置浏览器 + webRequest 媒体监听
+// webview 浏览任意网页（persist:sniffer 会话），该会话的媒体响应实时转发到右侧资源列表；
+// 勾选后经后端 sniff_download 命令走通用下载管线（仅允许公网 http/https，后端校验）
+// ============================
+let snifferWindow = null
+const SNIFFER_PARTITION = 'persist:sniffer'
+let snifferListenerAttached = false
+let snifferNetDirty = false   // 是否执行过影响本机网络的嗅探操作（代理/系统代理/透明重定向）
+
+// 网络还原：嗅探窗口关闭或应用退出时调用——系统代理/mitm/透明重定向全部还原，
+// 保证本机网络通畅（后端命令均幂等，未开启时调用无副作用）
+function sniffNetTeardown() {
+  try {
+    sendCommand({ cmd: 'sniff_sysproxy_off' })
+    sendCommand({ cmd: 'sniff_proxy_stop' })
+    sendCommand({ cmd: 'sniff_tap_off' })
+    debugLog('嗅探网络设置已还原（系统代理/mitm/透明重定向）')
+  } catch (e) { /* 后端可能已退出 */ }
+}
+
+// 媒体扩展名（页面装饰素材的 .js/.css/.woff 等天然排除；svg 常是图标，排除）
+// doc：电子书/论文/文档（电子书站、学术站的核心资源）；archive：压缩包（资源整合）
+const SNIFFER_MEDIA_EXT = /\.(mp4|webm|mkv|mov|avi|flv|ts|m4s|mp3|m4a|aac|flac|wav|ogg|opus|jpg|jpeg|png|gif|webp|avif|bmp)(\?|#|$)/i
+const SNIFFER_DOC_EXT = /\.(pdf|epub|mobi|azw3?|djvu|docx?|cbr|cbz)(\?|#|$)/i
+const SNIFFER_ARCHIVE_EXT = /\.(zip|rar|7z|tar|gz)(\?|#|$)/i
+const SNIFFER_STREAM_EXT = /\.(m3u8|mpd)(\?|#|&|$)/i
+// TS/m4s = HLS 分片。一个视频播放要请求上百个分片，若按「视频」逐条列出来，会把真正的
+// 正片（m3u8 那一条）挤出列表上限（MAX_ITEMS 截尾）——这正是「找不到要下的视频」的主因。
+// 单列一类，前端默认不混在主列表、也不对分片做时长探测（每个分片只有几秒）。
+const SNIFFER_SEG_EXT = /\.(ts|m4s)(\?|#|&|$)/i
+// 流地址常被藏进参数或路径（/nby/m3u8/getM3u8?url=NBY-xxx.m3u8&time=…），
+// 扩展名不在结尾时 SNIFFER_STREAM_EXT 会漏；URL 里出现 m3u8/mpd 且非静态资源时兜住
+const SNIFFER_STREAM_HINT = /m3u8|\.mpd/i
+const SNIFFER_SKIP_EXT = /\.(js|mjs|css|woff2?|ttf|eot|html?|xhtml|json|xml|txt|wasm)(\?|#|$)/i
+
+function snifferEmit(payload) {
+  if (snifferWindow && !snifferWindow.isDestroyed()) {
+    snifferWindow.webContents.send('sniffer-resource', payload)
+  }
+}
+
+// 主窗热门平台模式（ModernHome）也复用同一捕获通道，按 payload.scope 过滤
+function hotEmit(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('sniffer-resource', payload)
+  }
+}
+
+// webRequest 媒体捕获工厂：同一逻辑可挂到多个会话分区（嗅探窗 / 热门平台主界面），
+// 捕获事件带 scope 标记，前端各自过滤
+function attachCaptureListener(partition, scope) {
+  const ses = session.fromPartition(partition)
+  // 去 Electron 标记（部分站校验 UA；与登录套件同款处理）
+  try { ses.setUserAgent(ses.getUserAgent().replace(/\sElectron\/[\d.]+/i, '').trim()) } catch (e) { /* 忽略 */ }
+  const seen = new Set() // URL 去重（主进程层，避免同资源重复转发）
+  ses.webRequest.onCompleted((details) => {
+    try {
+      const url = details.url || ''
+      if (!/^https?:/i.test(url)) return
+      if (seen.has(url)) return
+      let type = ''
+      if (details.resourceType === 'media') type = 'video'
+      if (SNIFFER_STREAM_EXT.test(url)) type = 'hls'
+      // TS/m4s 分片：覆盖上面的 media 判定（分片的 resourceType 也是 media）。
+      // 单列 'hlsseg' —— 见 SNIFFER_SEG_EXT 处的说明。
+      if (SNIFFER_SEG_EXT.test(url)) type = 'hlsseg'
+      // 兜底：URL 里出现 m3u8/mpd 的非静态资源按流处理。排除 image/script/stylesheet/font
+      // 资源类型——CDN 路径里恰好含 m3u8 的缩略图（/m3u8/poster.jpg）不该被判成视频流
+      if (!type && !SNIFFER_SKIP_EXT.test(url) && SNIFFER_STREAM_HINT.test(url)
+          && !['image', 'script', 'stylesheet', 'font'].includes(details.resourceType)) type = 'hls'
+      if (!type && SNIFFER_DOC_EXT.test(url)) type = 'doc'
+      if (!type && SNIFFER_ARCHIVE_EXT.test(url)) type = 'archive'
+      if (!type && SNIFFER_MEDIA_EXT.test(url)) {
+        type = /\.(mp4|webm|mkv|mov|avi|flv|ts|m4s)(\?|#|$)/i.test(url) ? 'video'
+          : /\.(mp3|m4a|aac|flac|wav|ogg|opus)(\?|#|$)/i.test(url) ? 'audio' : 'image'
+      }
+      if (!type && details.responseHeaders) {
+        const ct = (details.responseHeaders['content-type'] || details.responseHeaders['Content-Type'] || [''])[0] || ''
+        if (/^(application|audio)\/(vnd\.apple\.mpegurl|x-mpegurl|mpegurl)/i.test(ct)
+            || /^application\/dash\+xml/i.test(ct)) type = 'hls'
+        else if (/^video\//i.test(ct)) type = 'video'
+        else if (/^audio\//i.test(ct)) type = 'audio'
+        else if (/^image\//i.test(ct)) type = 'image'
+        else if (/^application\/pdf/i.test(ct) || /\.(pdf|epub|mobi|azw3?|djvu|docx?|cbr|cbz)(\?|#|$)/i.test(url)) type = 'doc'
+        else if (/^(application|application\/x-)\/(zip|rar|x-rar-compressed|x-7z-compressed|gzip|x-tar)/i.test(ct) || /\.(zip|rar|7z|tar|gz)(\?|#|$)/i.test(url)) type = 'archive'
+      }
+      if (!type) return
+      seen.add(url)
+      if (seen.size > 5000) seen.clear() // 防长会话无限膨胀
+      let size = 0
+      try {
+        const cl = (details.responseHeaders || {})['content-length'] || (details.responseHeaders || {})['Content-Length']
+        size = cl ? parseInt(cl[0], 10) || 0 : 0
+      } catch (e) { /* 无长度头 */ }
+      const payload = {
+        url,
+        type,
+        size,
+        mime: '',
+        page_url: (details.referrer || details.frame?.url || details.topDocument?.url || '').trim(),
+        ts: Date.now(),
+        scope,
+      }
+      if (scope === 'sniffer') snifferEmit(payload)
+      else hotEmit(payload)
+    } catch (e) { /* 单条失败不影响监听 */ }
+  })
+  debugLog(`媒体捕获监听已挂载（${partition}, scope=${scope}）`)
+}
+
+function attachSnifferListener() {
+  if (snifferListenerAttached) return
+  snifferListenerAttached = true
+  attachCaptureListener(SNIFFER_PARTITION, 'sniffer')
+}
+
+// 热门平台主界面（ModernHome）内嵌浏览器的会话捕获：进入该模式时由前端经此 IPC 挂载
+const HOT_PARTITION = 'persist:hotplatform'
+let hotListenerAttached = false
+ipcMain.on('hot-capture-attach', () => {
+  if (hotListenerAttached) return
+  hotListenerAttached = true
+  attachCaptureListener(HOT_PARTITION, 'hot')
+})
+
+function createSnifferWindow() {
+  if (snifferWindow && !snifferWindow.isDestroyed()) {
+    snifferWindow.show()
+    snifferWindow.focus()
+    return
+  }
+  attachSnifferListener()
+  snifferWindow = new BrowserWindow({
+    width: 1400,
+    height: 920,
+    title: '手动抓取（资源嗅探）',
+    backgroundColor: '#16161a',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webviewTag: true,
+    },
+  })
+  snifferWindow.loadFile(path.join(__dirname, '../dist/sniffer.html'))
+  snifferWindow.on('closed', () => {
+    // 关闭嗅探窗口即还原网络（系统代理/mitm/透明重定向），保证本机网络通畅
+    sniffNetTeardown()
+    snifferWindow = null
+  })
+  debugLog('嗅探窗口创建成功')
+}
+
+ipcMain.on('sniffer-open', () => {
+  createSnifferWindow()
+})
+
+// ============================
+// Leakedzone · 系统 Edge 过盾登录（CDP 抓 Cookie）
+// webview 过不了 Cloudflare Turnstile（引擎指纹检测），但用户在真实 Edge 里一点就过。
+// 方案：spawn 一个带 --remote-debugging-port 的专用 Edge 实例（独立 profile，过盾状态可复用），
+// 用户过盾后经 CDP Storage.getCookies 抓 leakedzone cookie + navigator.userAgent，
+// 走 leakedzone_set_cookies(cookie, ua) 保存——cf_clearance 与 UA 绑定，后端 requests 同 UA 请求。
+// ============================
+let leakEdgeProc = null
+let leakEdgeReady = false
+
+function leakEdgeState(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('leak-edge-state', payload)
+  }
+}
+
+function findEdgeExe() {
+  for (const p of [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  ]) {
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
+
+function httpGetJson(port, path) {
+  return new Promise((resolve, reject) => {
+    const req = require('http').get({ host: '127.0.0.1', port, path, timeout: 3000 }, (res) => {
+      let buf = ''
+      res.on('data', (d) => { buf += d })
+      res.on('end', () => { try { resolve(JSON.parse(buf)) } catch (e) { reject(e) } })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(new Error('timeout')) })
+  })
+}
+
+function cdpWsCall(wsUrl, method, params = {}, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl)
+    const timer = setTimeout(() => { try { ws.close() } catch (e) {} reject(new Error('CDP 超时')) }, timeoutMs)
+    ws.onopen = () => ws.send(JSON.stringify({ id: 1, method, params }))
+    ws.onmessage = (m) => {
+      try {
+        const msg = JSON.parse(m.data)
+        if (msg.id === 1) {
+          clearTimeout(timer)
+          ws.close()
+          if (msg.error) reject(new Error(msg.error.message || 'CDP 错误'))
+          else resolve(msg.result)
+        }
+      } catch (e) { /* 忽略非 JSON */ }
+    }
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('CDP 连接失败')) }
+  })
+}
+
+ipcMain.on('leak-edge-login', async () => {
+  try {
+    const exe = findEdgeExe()
+    if (!exe) { leakEdgeState({ running: false, error: '未找到 Edge，请先安装 Microsoft Edge' }); return }
+    const profileDir = path.join(process.cwd(), 'cache', 'edge_sniff_profile')
+    fs.mkdirSync(profileDir, { recursive: true })
+    const port = 9333
+    // 已在跑则直接前置复用（profile 复用=过盾状态可复用）
+    let alreadyReady = false
+    try { await httpGetJson(port, '/json/version'); alreadyReady = true } catch (e) { /* 未起 */ }
+    if (!alreadyReady) {
+      leakEdgeProc = spawn(exe, [
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run', '--no-default-browser-check',
+        'https://leakedzone.com/',
+      ], { detached: false, stdio: 'ignore' })
+      leakEdgeProc.on('exit', () => { leakEdgeProc = null; leakEdgeReady = false; leakEdgeState({ running: false }) })
+      // 轮询 CDP 就绪
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        try { await httpGetJson(port, '/json/version'); alreadyReady = true; break } catch (e) { /* 重试 */ }
+      }
+    }
+    if (!alreadyReady) { leakEdgeState({ running: false, error: 'Edge 调试实例启动失败' }); return }
+    leakEdgeReady = true
+    leakEdgeState({ running: true, message: 'Edge 已打开：完成人机验证看到网站内容后，回来点「② 我已过盾，抓取 Cookie」' })
+  } catch (err) {
+    debugLog(`leak-edge-login 失败: ${err.message}`)
+    leakEdgeState({ running: false, error: err.message })
+  }
+})
+
+ipcMain.on('leak-edge-harvest', async () => {
+  try {
+    const ver = await httpGetJson(9333, '/json/version')
+    const result = await cdpWsCall(ver.webSocketDebuggerUrl, 'Storage.getCookies')
+    const cookies = (result.cookies || []).filter(c => (c.domain || '').includes('leakedzone'))
+    if (!cookies.length) {
+      leakEdgeState({ running: true, error: '未抓到 leakedzone cookie——请先在 Edge 窗口里完成人机验证（出现网站内容）' })
+      return
+    }
+    const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+    // 精确 UA：在该 Edge 实例的页面上下文里取 navigator.userAgent
+    let ua = ''
+    try {
+      const pages = await httpGetJson(9333, '/json')
+      const page = pages.find(p => (p.url || '').includes('leakedzone') && p.webSocketDebuggerUrl) || pages.find(p => p.webSocketDebuggerUrl)
+      if (page) {
+        const r = await cdpWsCall(page.webSocketDebuggerUrl, 'Runtime.evaluate', { expression: 'navigator.userAgent' })
+        ua = (r.result && r.result.value) || ''
+      }
+    } catch (e) { /* 拿不到就用默认 */ }
+    // 保存（cookie+UA 绑定保存，后端 requests 同 UA 请求 cf_clearance 才有效）
+    sendCommand({ cmd: 'leakedzone_set_cookies', cookie_str: cookieStr, user_agent: ua })
+    sendCommand({ cmd: 'leakedzone_check_login', notify: true })
+    // 自动存入账号档案（通用 save_account；账号卡下拉可切换）
+    sendCommand({ cmd: 'save_account', site: 'leakedzone', label: `Edge过盾-${new Date().toISOString().slice(5, 10)}` })
+    leakEdgeState({ running: true, message: `已抓取 ${cookies.length} 个 cookie（含 cf_clearance）+UA，已存为账号并验证登录态…` })
+  } catch (err) {
+    debugLog(`leak-edge-harvest 失败: ${err.message}`)
+    leakEdgeState({ running: true, error: `抓取失败: ${err.message}（Edge 窗口被关了？重新点①）` })
+  }
+})
+
+// 嗅探窗口请求转发后端事件（提交下载结果等）——主进程把 python-event 同发嗅探窗口
+ipcMain.on('sniffer-ready', () => {
+  // 渲染层就绪标记（预留：当前 preload onEvent 自动回放缓冲，无需额外拉取）
+})
+
+// ============================
 // IPC
 // ============================
 ipcMain.on('python-command', (event, command) => {
+  // 跟踪影响本机网络的嗅探操作（退出时需要还原）
+  try {
+    const c = (command && command.cmd) || ''
+    if (c === 'sniff_proxy_start' || c === 'sniff_sysproxy_on' || c === 'sniff_tap_on') snifferNetDirty = true
+    if (c === 'sniff_sysproxy_off' || c === 'sniff_tap_off') snifferNetDirty = false
+  } catch (e) { /* 忽略 */ }
   sendCommand(command)
 })
 
@@ -925,11 +1295,48 @@ ipcMain.handle('ex-set-proxy', async (event, proxyRules) => {
 // 通用 webview OAuth 站点会话（xhamster/pornhub/xvideos 等）
 // ============================
 // 初始化指定站点的 webview 会话：设置代理 + 放行权限 + 持久化
+// 本机真实 Chrome 版本（upgradeUA 用）：启动时探测一次，失败用保底新版本。
+// Electron 30 的 UA 是 Chrome/124（两年半前），CF Turnstile 会无限循环挑战
+let REAL_CHROME_VERSION = ''
+function detectRealChromeVersion() {
+  try {
+    const { execFileSync } = require('child_process')
+    const paths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    ]
+    for (const p of paths) {
+      try {
+        REAL_CHROME_VERSION = execFileSync('powershell', [
+          '-NoProfile', '-Command',
+          `(Get-Item '${p}').VersionInfo.ProductVersion`,
+        ], { timeout: 8000 }).toString().trim()
+        if (REAL_CHROME_VERSION) break
+      } catch (e) { /* 下一个路径 */ }
+    }
+  } catch (e) { /* 保底 */ }
+  if (!/^\d+\./.test(REAL_CHROME_VERSION)) REAL_CHROME_VERSION = '152.0.0.0'
+  debugLog(`本机 Chrome 版本（UA 升级用）: ${REAL_CHROME_VERSION}`)
+}
+
+// 把 UA 的 Chrome/xxx 段替换为本机真实版本（只动版本号，平台段保持 Windows 桌面）
+function upgradeChromeVersion(ua) {
+  return ua.replace(/Chrome\/[\d.]+/, `Chrome/${REAL_CHROME_VERSION}`)
+}
+
 async function setupSiteSession(site, proxyRules) {
   const cfg = SITE_SESSIONS[site]
   if (!cfg) return
   try {
     const ses = session.fromPartition(cfg.partition)
+    // 去 Electron 标记：cf_clearance 等 Cloudflare cookie 绑定 UA，webview 实际请求用
+    // 的 UA 不含 Electron 后缀（WebviewLoginModal 已同步去掉），后端必须用同一 UA
+    // 才能通过 CF 校验，所以在会话初始化时就统一掉
+    try { ses.setUserAgent(ses.getUserAgent().replace(/\sElectron\/[\d.]+/i, '').trim()) } catch (e) { /* 忽略 */ }
+    // CF 严格站（leakedzone）：Chrome 版本号升到本机真实 Chrome，避免 Turnstile 循环
+    if (cfg.upgradeUA && REAL_CHROME_VERSION) {
+      try { ses.setUserAgent(upgradeChromeVersion(ses.getUserAgent())) } catch (e) { /* 忽略 */ }
+    }
     if (proxyRules) {
       await ses.setProxy({ proxyRules })
       debugLog(`${site} 会话代理已设置: ${proxyRules}`)
@@ -975,6 +1382,30 @@ ipcMain.handle('site-get-cookies', async (event, site) => {
   } catch (err) {
     debugLog(`读取 ${site} cookie 失败: ${err.message}`)
     return { ok: false, cookieStr: '', hasAuth: false, count: 0, error: err.message }
+  }
+})
+
+// 清除站点分区 cookie（退出登录时用，保证 webview 下次打开是干净会话）
+ipcMain.handle('site-clear-cookies', async (event, site) => {
+  try {
+    const cfg = SITE_SESSIONS[site]
+    if (!cfg) return { ok: false, error: `未知站点: ${site}` }
+    const ses = session.fromPartition(cfg.partition)
+    let cleared = 0
+    for (const d of cfg.domains) {
+      const cs = await ses.cookies.get({ domain: d })
+      const url = `https://${d.replace(/^\./, '')}/`
+      for (const c of cs) {
+        try {
+          await ses.cookies.remove(url.startsWith('https') ? url : `https://${d.replace(/^\./, '')}`, c.name)
+          cleared++
+        } catch (e) { /* 单个失败不阻断 */ }
+      }
+    }
+    debugLog(`清除 ${site} 分区 cookie: ${cleared} 个`)
+    return { ok: true, cleared }
+  } catch (err) {
+    return { ok: false, error: err.message }
   }
 })
 
@@ -1093,7 +1524,7 @@ function createTray() {
   } catch { icon = nativeImage.createEmpty() }
 
   appTray = new Tray(icon)
-  appTray.setToolTip('小小下载器（后台运行）')
+  appTray.setToolTip('小小浏览器（后台运行）')
   rebuildTrayMenu()
 }
 
@@ -1154,6 +1585,93 @@ function forceQuitSoon() {
     app.exit(0)
   }, 2000)
 }
+
+// 内置可视化帮助页（dist/help/ 下的离线页面）：独立窗口打开，单例防重复
+const helpWindows = new Map()
+const HELP_PAGES = {
+  'software-guide.html': '小小浏览器 · 使用导览',
+  'changelog-20260917.html': '更新说明 · 里世界 / 美好世界 + B站专属下载',
+  'changelog-20260918.html': '更新说明 · 美好世界 57 站 + GitHub 校验 + 流媒体拼接',
+  'changelog-20260918b.html': '更新说明 · 细分板块大扩充（13 分类 + 110 新站 + 常用模块）',
+  'changelog-20260918c.html': '更新说明 · 返回逻辑 / Word 导出 / 品牌显示（v1.2.48）',
+  'changelog-20260918d.html': '更新说明 · 返回不重播 / B站链接 / Word 落点（v1.2.51）',
+  'surface-sites.html': '美好世界 · 站点分类总览',
+}
+ipcMain.handle('open-help-window', (_e, file) => {
+  if (!HELP_PAGES[file]) return { ok: false, error: '未知的说明页' }
+  const prev = helpWindows.get(file)
+  if (prev && !prev.isDestroyed()) {
+    prev.show()
+    prev.focus()
+    return { ok: true }
+  }
+  const w = new BrowserWindow({
+    width: 1160,
+    height: 880,
+    title: HELP_PAGES[file],
+    autoHideMenuBar: true,
+    backgroundColor: '#f6f7fb',
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  w.loadFile(path.join(__dirname, '..', 'dist', 'help', file))
+  w.on('closed', () => helpWindows.delete(file))
+  helpWindows.set(file, w)
+  return { ok: true }
+})
+
+// 美好世界伪装路径：系统下载文件夹（C 盘用户目录，真实存在——路径即事实）
+function surfaceDownloadsDir() {
+  try { return path.join(process.env.USERPROFILE || process.env.HOME || 'C:', 'Downloads') }
+  catch (e) { return 'C:\Users\Public\Downloads' }
+}
+
+// 选择目录（里世界「移动文件夹」用）
+ipcMain.handle('pick-directory', async () => {
+  try {
+    const r = await dialog.showOpenDialog({
+      title: '选择要移动到的目标文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (r.canceled || !r.filePaths.length) return { ok: false }
+    return { ok: true, path: r.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// 里/美好世界自定义标题栏：窗口控制（最小化/最大化切换/关闭——close 走现有
+// handleCloseRequest 分流：ask/tray/exit）
+ipcMain.on('win-control', (_e, action) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (action === 'minimize') mainWindow.minimize()
+  else if (action === 'maximize') {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+    else mainWindow.maximize()
+  } else if (action === 'close') mainWindow.close()
+})
+
+// 最大化状态变化 → 渲染层切换圆角贴边样式
+function sendWinMaxState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('win-max-state', mainWindow.isMaximized())
+  }
+}
+
+// 应用重启：还原嗅探网络 → 杀后端 → relaunch（ui_mode_hot 等设置已持久化，
+// 重启后自动恢复重启前停留的界面模式）
+ipcMain.handle('app-restart', async () => {
+  try {
+    debugLog('应用重启：还原网络设置并退出')
+    sniffNetTeardown()
+    try { if (pythonProcess) pythonProcess.kill() } catch (e) {}
+    app.relaunch()
+    app.exit(0)
+    return { ok: true }
+  } catch (err) {
+    debugLog(`应用重启失败: ${err.message}`)
+    return { ok: false, error: err.message }
+  }
+})
 
 // 快速缩小：隐藏主窗口 + 关闭悬浮窗 + 显示托盘
 function quickMinimizeToTray() {
@@ -1225,8 +1743,8 @@ function handleCloseRequest(e) {
   e.preventDefault()
   dialog.showMessageBox(mainWindow, {
     type: 'question',
-    title: '关闭小小下载器',
-    message: '要关闭小小下载器吗？',
+    title: '关闭小小浏览器',
+    message: '要关闭小小浏览器吗？',
     detail: '选择「最小化到托盘」可以隐藏到后台，下载任务会继续进行。',
     buttons: ['最小化到托盘', '退出程序'],
     defaultId: 0,
@@ -1283,6 +1801,35 @@ function unregisterAllShortcuts() {
   }
   shortcutMap.clear()
 }
+
+// 快捷键录入保护：录入期间暂停全部全局快捷键。不暂停的话，用户按下的
+// 组合若与已注册快捷键相同会被系统级 globalShortcut 拦截，渲染进程收不到
+// keydown，导致"第二个键无法录入"。
+let shortcutsSuspended = false
+ipcMain.handle('suspend-shortcuts', () => {
+  if (shortcutsSuspended) return { ok: true }
+  shortcutsSuspended = true
+  for (const [, acc] of shortcutMap) {
+    try { globalShortcut.unregister(acc) } catch {}
+  }
+  return { ok: true }
+})
+ipcMain.handle('resume-shortcuts', () => {
+  if (!shortcutsSuspended && !shortcutMap.size) return { ok: true }
+  shortcutsSuspended = false
+  const failed = []
+  for (const [action, acc] of shortcutMap) {
+    try {
+      // 已注册的组合跳过：重复 register 同一组合会返回 false，误报"恢复失败"
+      if (globalShortcut.isRegistered(acc)) continue
+      if (!globalShortcut.register(acc, shortcutCallbacks[action])) failed.push(acc)
+    } catch {
+      failed.push(acc)
+    }
+  }
+  if (failed.length) debugLog(`快捷键恢复失败: ${failed.join(', ')}`)
+  return { ok: true, failed }
+})
 
 // 拟态模式：创建/显示伪装面板窗口
 // 拟态窗口标题：有上传文件时用文件名（含扩展名），否则用内置占位页名
@@ -1395,6 +1942,16 @@ ipcMain.handle('open-external', async (event, url) => {
       return { ok: false, error: '不允许的链接协议' }
     }
     await shell.openExternal(url)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// 主进程剪贴板写入（渲染层 navigator.clipboard 在 Electron 下常静默失败）
+ipcMain.handle('copy-text', async (event, text) => {
+  try {
+    clipboard.writeText(String(text ?? ''))
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -1570,6 +2127,7 @@ function readExProxyFromSettings() {
 app.whenReady().then(async () => {
   debugLog('=== Electron app ready ===')
   debugLog(`isDev=${isDev}, hasBuild=${hasBuild()}`)
+  detectRealChromeVersion()
   registerThumbProtocol()
   registerPixivProtocol()
   createWindow()
@@ -1585,9 +2143,82 @@ app.whenReady().then(async () => {
   })
 })
 
+// webview 多层弹窗：登录弹窗内的网页（Google OAuth 账号选择器 / CF 验证弹窗等）
+// window.open 出的新窗口——默认被吞（用户感知"点了没反应"）。这里统一拦截：
+// 弹窗不真开（保持无边框单窗口形态），把 URL 转发给渲染层，由 WebviewLoginModal
+// 在模态内以"第二层 webview"显示（带返回按钮）；渲染层未开登录弹窗时维持旧行为（吞掉）。
+// 取「可注册域名」粗判：www.bilibili.com → bilibili.com（同站判定用）。
+// 不追求完善 eTLD+1（co.uk 之类），只用于区分"站内链接"与"站外广告弹窗"。
+function registrableHost(u) {
+  try {
+    const h = new URL(u).hostname.toLowerCase()
+    if (!h || h === 'localhost' || /^\d+(\.\d+){3}$/.test(h)) return h
+    const parts = h.split('.')
+    return parts.length > 2 ? parts.slice(-2).join('.') : h
+  } catch (e) { return '' }
+}
+
+app.on('web-contents-created', (_e, wc) => {
+  if (wc.getType() !== 'webview') return
+  // 磁力链接点击拦截：磁力站页面的 magnet: 链接不属于 http(s) 导航，webview 点它
+  // 会因协议无处理器而静默失败。拦下来发给两个世界的前端 → confirm 后走 BT 下载。
+  wc.on('will-navigate', (e, url) => {
+    if (url && url.toLowerCase().startsWith('magnet:')) {
+      e.preventDefault()
+      debugLog(`magnet 点击拦截: ${url.slice(0, 90)}`)
+      const payload = { url }
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('bt-magnet-click', payload)
+      if (snifferWin && !snifferWin.isDestroyed()) snifferWin.webContents.send('bt-magnet-click', payload)
+    }
+  })
+  wc.setWindowOpenHandler(({ url }) => {
+    debugLog(`webview 弹窗拦截: ${url}`)
+    // 磁力链接经 target=_blank 弹出时同样拦截（window.open 不会触发 will-navigate）
+    if (url && url.toLowerCase().startsWith('magnet:')) {
+      debugLog(`magnet 弹窗拦截: ${url.slice(0, 90)}`)
+      const payload = { url }
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('bt-magnet-click', payload)
+      if (snifferWin && !snifferWin.isDestroyed()) snifferWin.webContents.send('bt-magnet-click', payload)
+      return { action: 'deny' }
+    }
+    // 热门平台界面的 webview：target=_blank 链接改在当前 webview 内打开。
+    // B站/追影等站点的视频卡片基本都是 <a target="_blank">，没有 allowpopups 时
+    // 本回调根本不会被触发（window.open 直接被吞）→ 用户"点了没反应"，永远进不了
+    // 播放页、也就抓不到正片。带上 allowpopups 后弹到这里，改为站内导航。
+    // 只放行「同站」链接：否则点播放时被弹出的第三方广告窗会把正在看的片子顶掉。
+    try {
+      if (wc.session === session.fromPartition(HOT_PARTITION)) {
+        const cur = registrableHost(wc.getURL() || '')
+        const nxt = registrableHost(url)
+        const sameSite = !!nxt && !!cur && nxt === cur
+        if (sameSite) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('hot-popup-navigate', { url })
+          }
+        } else {
+          debugLog(`  非本站弹窗，忽略: ${url}`)
+        }
+        return { action: 'deny' }
+      }
+    } catch (e) { /* 会话不可用时走通用路径 */ }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('webview-popup-open', { url })
+    }
+    return { action: 'deny' }
+  })
+})
+
 app.on('before-quit', () => {
   // 任何主动退出路径（托盘退出/对话框退出/系统关机）都放行关闭事件
   isQuitting = true
+  // 兜底：退出前还原嗅探的网络设置（系统代理/mitm/透明重定向），防止用户断网。
+  // 后端异步处理这三条命令需几百毫秒：dirty 时同步等待，避免进程先死、还原命令没跑完
+  if (snifferNetDirty) {
+    sniffNetTeardown()
+    const t0 = Date.now()
+    while (Date.now() - t0 < 600) { /* 忙等给后端处理窗口 */ }
+    snifferNetDirty = false
+  }
 })
 
 app.on('window-all-closed', () => {

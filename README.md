@@ -1,242 +1,73 @@
-# Bunkr Downloader
+# 小小下载器 · 美好世界（TinyDownloader · Wonderful World）
 
-> A Python Bunkr downloader that fetches images and videos from URLs. It supports both Bunkr albums and individual file URLs, logs issues, and enables concurrent downloads for efficiency.
+一款 Windows 桌面聚合浏览器与资源下载器。**美好世界**是它的主流站点模式：内置浏览器 + 实时资源嗅探 + 智能下载，覆盖影视、动漫、音乐、电子书、美术、AI 制作、学术、软件社区、磁力等 160+ 站点，浏览即抓取，一键保存。
 
-![Demo](https://github.com/Lysagxra/BunkrDownloader/blob/8d07aaa4fe4e5b438e9ccc75bf0b71c845df942d/assets/demo.gif)
+## ✨ 功能
 
-## Features
+### 站点聚合
+- **160+ 站点磁贴**：13 个顶层分类 + 二级分类（影视·看番 / 美术·艺术 / 音乐 / 电子书·书源 / 游戏资源 / AI 制作 / 学术·医学 / 科学 / 资讯 / 软件·资源社区 / 磁力站等），悬浮说明、失效置灰、空位站自动留白
+- **站点地址自动校准**：三源兜底——GitHub 上游发布页（agefans / 影视每日检测表 / 书源端点）自动下发新域名，换域名不发版；失效站点自动置灰并支持上游复活
+- **「常用」模块**：点击统计 + 预设权重，越常用越靠前
+- **需代理角标**：对需要代理的站点提前标注
 
-- Downloads multiple files from an album concurrently.
-- Supports [batch downloading](https://github.com/Lysagxra/BunkrDownloader?tab=readme-ov-file#batch-download) via a list of URLs.
-- Supports [selective files downloading](https://github.com/Lysagxra/BunkrDownloader/tree/main?tab=readme-ov-file#selective-download) based on filename criteria.
-- Supports [custom download location](https://github.com/Lysagxra/BunkrDownloader/tree/main?tab=readme-ov-file#file-download-location).
-- Provides [minimal UI](https://github.com/Lysagxra/BunkrDownloader/tree/main?tab=readme-ov-file#disable-ui-for-notebooks) for notebook environments.
-- Provides progress indication during downloads.
-- Automatically creates a directory structure for organized storage.
-- Logs URLs that encounter errors for troubleshooting.
+### 浏览即抓取（嗅探）
+- 内置浏览器浏览网页，视频 / 音频 / 图片 / 文档 / 压缩包 / 种子**实时出现在捕获列表**
+- **智能判决**：对视频流（HLS）自动判「正片 / 存疑 / 疑似广告」——基于清单时长、SCTE-35 广告插播标记、地址特征词、分片数综合打分；广告自动沉底，「全部下载」自动跳过
+- **分片单列**：HLS 的 TS/m4s 分片独立收纳，不再把正片挤出列表；**媒体优先排序**：视频/音频/文档永远排在页面装饰图前面
+- **图片马甲流剥壳**：识别「TS 套 PNG 外壳」的伪装分片（部分站点用图片 CDN 藏视频流），自动剥壳后正常拼接
 
-## Dependencies
+### 下载
+- **流媒体「下载整片」**：HLS 清单一键任务化下载——分片并发、**断点续传**（清单指纹校验防错配）、**AES-128 自动解密**（含 IV 推导）、fMP4 初始化段、BYTERANGE 区间分片、签名过期自动重拉清单自救；完成后 ffmpeg 转封装 MP4
+- **BT 下载（磁力链接 / .torrent）**：集成 [aria2](https://github.com/aria2/aria2) 内核——**在磁力站页面直接点击磁力链接**即弹出下载；支持粘贴 magnet 链接或种子地址；进度 / 暂停 / 继续 / 取消与下载管理无缝衔接
+- **B 站专属解析**：进入 B 站视频页自动解析清晰度（360P → 8K）与音频码率，音视频分轨下载后合并 MP4（登录后可取高清晰度）
+- **📄 存为 Word**：当前页面正文一键导出 .docx——图片、表格按原文位置嵌入，自动处理懒加载与 AVIF 转码
+- **下载管理**：迅雷式任务列表——分片进度 / 总速度 / 剩余时间 / 失败数，暂停 / 继续 / 重试 / 清除，支持删除本地文件
 
-- Python 3.11+
-- `BeautifulSoup` (bs4) - for HTML parsing
-- `requests` - for HTTP requests
-- `rich` - for progress display in the terminal
+### 其他
+- 深色 / 浅色主题、iOS 圆角透明窗口、托盘、全局快捷键
+- 完整离线帮助中心（使用导览 / 站点总览 / 每次更新可视化说明）
 
-<details>
+## 🏗 技术栈
 
-<summary>Show directory structure</summary>
+| 层 | 技术 |
+|---|---|
+| 桌面壳 | Electron（多窗口、webview 会话隔离、协议拦截、系统代理） |
+| 界面 | Vue 3 + Naive UI + Vite |
+| 下载后端 | Python（asyncio + aiohttp + curl_cffi，PyInstaller 打包为独立进程，NDJSON 与壳通信） |
+| BT 内核 | aria2（JSON-RPC） |
+| 流媒体 | 自研 HLS 解析 / 判决 / 分片调度 + ffmpeg remux |
+
+## 📁 目录结构（节选）
 
 ```
-project-root/
-├── src/
-│ ├── crawlers/
-| | ├── api_utils.py         # Utilities for handling API requests and responses
-│ │ └── crawler_utils.py     # Utilities for extracting media download links
-│ ├── downloaders/
-│ │ ├── album_downloader.py  # Manages the downloading of entire albums
-│ │ ├── download_utils.py    # Utilities for managing the download process
-│ │ └── media_downloader.py  # Manages the downloading of individual media files
-│ ├── managers/
-│ │ ├── live_manager.py      # Manages a real-time live display
-│ │ ├── log_manager.py       # Manages real-time log updates
-│ │ ├── progress_manager.py  # Manages progress bars
-│ │ └── summary_manager.py   # Manages final summaries
-│ ├── bunkr_utils.py         # Utilities for checking Bunkr status
-│ ├── config.py              # Manages constants and settings used across the project
-│ ├── file_utils.py          # Utilities for managing file operations
-│ ├── general_utils.py       # Miscellaneous utility functions
-│ └── url_utils.py           # Utilities for Bunkr URLs
-├── downloader.py            # Module for initiating downloads from specified Bunkr URLs
-├── main.py                  # Main script to run the downloader
-├── URLs.txt                 # Text file listing album URLs to be downloaded
-└── session_log.txt          # Log file for recording session details
+├─ gui/                  # Electron 壳 + Vue3 界面
+│  ├─ electron/          #   主进程（窗口/嗅探/协议/IPC）
+│  ├─ src/               #   渲染层（站点聚合、嗅探窗、下载管理…）
+│  └─ public/help/       #   内置帮助页
+├─ bridge/               # Python 下载后端（站点适配 / 嗅探下载 / 流媒体 / BT / 媒体代理）
+├─ src/                  # 通用下载器核心（分块下载 / 断点续传 / 去重）
+├─ resources/aria2/      # aria2c 内核（BT 下载）
+├─ release_data/         # 站点校验表（GitHub 上游直取的本地兜底）
+└─ gui_bridge.py         # 后端入口（按模块拆分于 bridge/）
 ```
 
-</details>
-
-## Installation
-
-1. Clone the repository:
+## 🚀 开发
 
 ```bash
-git clone https://github.com/Lysagxra/BunkrDownloader.git
-```
-
-2. Navigate to the project directory:
-
-```bash
-cd BunkrDownloader
-```
-
-3. Install the required dependencies:
-
-```bash
+# 依赖
+cd gui && npm install
 pip install -r requirements.txt
+
+# 启动（开发态：Vite 构建产物 + Python 源码后端）
+cd gui && npm run build
+python gui_bridge.py          # 或使用 启动.bat
+
+# 打包安装包（NSIS，含后端 exe / aria2 / 预置数据）
+cd gui && npm run dist
+python -m PyInstaller gui_bridge.spec --noconfirm
 ```
 
-## Single Download
+## 📄 许可
 
-To download a single media from an URL, you can use `downloader.py`, running the script with a valid album or media URL.
-
-### Usage
-
-```bash
-python3 downloader.py <bunkr_url>
-```
-
-### Examples
-
-You can either download an entire album or a specific file:
-
-```bash
-python3 downloader.py https://bunkr.si/a/PUK068QE       # Download album
-python3 downloader.py https://bunkr.fi/f/gBrv5f8tAGlGW  # Download single media
-```
-
-## Preserve original filenames
-
-By default the downloader may generate filenames based on the URL. Use the `--clean-name` flag to preserve the original filename found on the item page. If multiple files in an album share the exact same original filename, an index suffix like `(1)`, `(2)` will be automatically appended to avoid collisions.
-
-### Usage
-
-```bash
-python3 downloader.py <bunkr_url> --clean-name
-```
-
-### Dry-run example
-
-```bash
-python3 downloader.py --dry-run --clean-name <bunkr_url>
-```
-
-The flag is optional and defaults to `False`.
-
-## Selective Download
-
-The script supports selective file downloads from an album, allowing you to exclude files using the [Ignore List](https://github.com/Lysagxra/BunkrDownloader?tab=readme-ov-file#ignore-list) and include specific files with the [Include List](https://github.com/Lysagxra/BunkrDownloader?tab=readme-ov-file#include-list).
-
-## Ignore List
-
-The Ignore List is specified using the `--ignore` argument in the command line.
-This allows you to skip the download of any file from an album if its filename contains at least one of the specified strings in the list.
-Item in the list should be separated by a space.
-
-### Usage
-
-```bash
-python3 downloader.py <bunkr_album_url> --ignore <ignore_list>
-```
-
-### Example
-
-This feature is particularly useful when you want to skip files with certain extensions, such as `.zip` files. For instance:
-
-```bash
-python3 downloader.py https://bunkr.si/a/PUK068QE --ignore .zip
-```
-
-## Include List
-
-The Include List is specified using the `--include` argument in the command line.
-This allows you to download a file from an album only if its filename contains at least one of the specified strings in the list.
-Items in the list should be separated by a space.
-
-### Usage
-
-```bash
-python3 downloader.py <bunkr_album_url> --include <include_list>
-```
-
-### Example
-
-```bash
-python3 downloader.py https://bunkr.si/a/PUK068QE --include FullSizeRender
-```
-
-## Batch Download
-
-To batch download from multiple URLs, you can use the `main.py` script.
-This script reads URLs from a file named `URLs.txt` and downloads each one using the media downloader.
-
-### Usage
-
-1. Create a file named `URLs.txt` in the root of your project, listing each URL on a new line.
-
-- Example of `URLs.txt`:
-
-```
-https://bunkr.si/a/PUK068QE
-https://bunkr.fi/f/gBrv5f8tAGlGW
-https://bunkr.fi/a/kVYLh49Q
-```
-
-- Ensure that each URL is on its own line without any extra spaces.
-- You can add as many URLs as you need, following the same format.
-
-2. Run the batch download script:
-
-```
-python3 main.py
-```
-
-## File Download Location
-
-If the `--custom-path <custom_path>` argument is used, the downloaded files will be saved in `<custom_path>/Downloads`.
-Otherwise, the files will be saved in a `Downloads` folder created within the script's directory
-
-### Usage
-
-```bash
-python3 main.py --custom-path <custom_path>
-```
-
-### Example
-
-```bash
-python3 main.py --custom-path /path/to/external/drive
-```
-
-## Disable UI for Notebooks
-
-When the script is executed in a notebook environment (such as Jupyter), excessive output may lead to performance issues or crashes.
-
-### Usage
-
-You can run the script with the `--disable-ui` argument to disable the progress bar and minimize log messages.
-
-To disable the UI, use the following command:
-
-```
-python3 main.py --disable-ui
-```
-
-To download a single file or album without the UI, you can use this command:
-
-```bash
-python3 downloader.py <bunkr_url> --disable-ui
-```
-
-## Maximum Number of Retries
-
-When the download fails, by default there is 5 retry attempts to download each media file again.
-You can control the number of maximum attempts with the `--max-retries` argument.
-It may be useful when you would like to skip broken media faster for the very large media collection.
-
-### Usage
-
-Allowed values: 0 (don't re-download) and larger.
-
-```bash
-python3 downloader.py <bunkr_url> --max-retries 3
-```
-
-### Example:
-
-```bash
-python3 downloader.py https://bunkr.si/a/PUK068QE --max-retries 3
-```
-
-## Logging
-
-The application logs any issues encountered during the download process in a file named `session.log`.
-Check this file for any URLs that may have been blocked or had errors.
+本项目基于上游 [BunkrDownloader](https://github.com/Lysagxra/BunkrDownloader) 的通用下载核心演化而来；aria2 为 GPL-2.0 独立进程调用。
+仅供个人学习与技术研究，请尊重目标站点的服务条款与内容版权。

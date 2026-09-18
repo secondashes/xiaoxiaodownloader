@@ -60,17 +60,21 @@ class MediaDownloader:
         live_manager: LiveManager,
         retry_config: RetryConfig,
         should_abort: callable | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """Initialize the MediaDownloader instance.
 
         should_abort: GUI 任务暂停/取消时的协同中止检查（每 chunk 调用一次），
         返回 True 时抛 DownloadInterrupted 立即停止下载线程。
+        headers: 每任务请求头覆盖（嗅探/热门平台抓取的 CDN 需要 Referer，
+        如 B站 bilivideo 校验 bilibili Referer）；None = 默认 DOWNLOAD_HEADERS。
         """
         self.session_info = session_info
         self.download_info = download_info
         self.live_manager = live_manager
         self.retry_config = retry_config
         self.should_abort = should_abort
+        self.headers = headers or DOWNLOAD_HEADERS
 
     def attempt_download(self, final_path: str) -> bool:
         """Attempt to download the file, using parallel chunks when possible.
@@ -96,7 +100,7 @@ class MediaDownloader:
                 raise DownloadInterrupted("任务已暂停/取消")
             try:
                 supports_range, content_length = detect_range_support(
-                    self.download_info.download_link, DOWNLOAD_HEADERS,
+                    self.download_info.download_link, self.headers,
                 )
 
                 if should_use_parallel_download(
@@ -112,7 +116,7 @@ class MediaDownloader:
                         DownloadConfig(
                             content_length=content_length,
                             num_connections=num_connections,
-                            headers=DOWNLOAD_HEADERS,
+                            headers=self.headers,
                             rate_limiter=rate_limiter,
                             should_abort=self.should_abort,
                         ),
@@ -132,7 +136,7 @@ class MediaDownloader:
                 response = requests.get(
                     self.download_info.download_link,
                     stream=True,
-                    headers=DOWNLOAD_HEADERS,
+                    headers=self.headers,
                     timeout=_SINGLE_CONNECTION_TIMEOUT,
                 )
                 response.raise_for_status()

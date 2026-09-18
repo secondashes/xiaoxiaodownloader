@@ -49,34 +49,53 @@
       <n-tag v-else-if="status === 'failed'" size="small" type="error" round>✗ {{ errorMsg }}</n-tag>
     </div>
 
-    <!-- webview 浏览器（partition 共享 persist:twitter，OAuth 跳转 x.com 自动带 X 站 cookie） -->
-    <webview
-      ref="wvRef"
-      :src="currentUrl"
-      :partition="partition"
-      :useragent="wvUserAgent"
-      class="login-webview"
-      @did-navigate="onNav"
-      @did-navigate-in-page="onNav"
-      @will-navigate="onWillNav"
-      @did-fail-load="onFailLoad"
-      @did-start-loading="loading = true; status = 'loading'"
-      @did-stop-loading="loading = false; onStop()"
-    />
+    <!-- webview 浏览器（partition 共享 persist:twitter，OAuth 跳转 x.com 自动带 X 站 cookie）
+         舞台内可叠多层：网页 window.open 的弹窗（Google 账号选择器/CF 验证窗等）被主进程
+         setWindowOpenHandler 拦截转发到这里，显示为第二/三层 webview（同 partition 共享会话） -->
+    <div class="wv-stage">
+      <webview
+        ref="wvRef"
+        :src="currentUrl"
+        :partition="partition"
+        :useragent="wvUserAgent"
+        class="login-webview"
+        @did-navigate="onNav"
+        @did-navigate-in-page="onNav"
+        @will-navigate="onWillNav"
+        @did-fail-load="onFailLoad"
+        @did-start-loading="loading = true; status = 'loading'"
+        @did-stop-loading="loading = false; onStop()"
+      />
+
+      <!-- 弹出层（可叠多层）：每层带地址与"返回登录页" -->
+      <div v-for="(p, pi) in popupStack" :key="'pop' + pi" class="wv-popup-layer">
+        <div class="wv-popup-bar">
+          <span class="wv-popup-title">弹窗 {{ pi + 1 }}</span>
+          <span class="wv-popup-url" :title="p.url">{{ p.url }}</span>
+          <n-button size="tiny" quaternary type="primary" @click="closePopup(pi)">返回登录页</n-button>
+        </div>
+        <webview
+          :src="p.url"
+          :partition="partition"
+          :useragent="wvUserAgent"
+          class="wv-popup-webview"
+        />
+      </div>
+    </div>
 
     <!-- 手动确认模式（EX 站）：底部提示 + 取消/确认按钮，用户确认后抓取 cookie -->
     <div v-if="manualConfirm" class="wv-confirm-bar">
-      <span class="wv-confirm-hint">请登录，如果已登录请点击确认。</span>
+      <span class="wv-confirm-hint">{{ confirmHint }}</span>
       <span class="wv-confirm-btns">
         <n-button size="small" quaternary @click="visible = false">取消</n-button>
-        <n-button size="small" type="primary" :loading="grabbing" @click="grabCookies()">确认</n-button>
+        <n-button size="small" type="primary" :loading="grabbing" @click="grabCookies()">{{ confirmText }}</n-button>
       </span>
     </div>
   </n-modal>
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 
 const props = defineProps({
   // 是否显示
@@ -97,9 +116,17 @@ const props = defineProps({
   captchaPatterns: { type: Array, default: () => [] },
   // 登录账号预填（{ email, password }）：加载登录页后自动填入表单（javdb/xvideos 邮箱密码登录）
   credentials: { type: Object, default: null },
-  // 手动确认模式（EX 站）：不自动检测登录成功，底部显示提示 + 取消/确认按钮，
-  // 用户点"确认"后才抓取 cookie（e-hentai 论坛登录成功后 URL 不确定，自动检测不可靠）
+  // 手动确认模式（EX/javdb 站）：不自动检测登录成功，底部显示提示 + 取消/确定按钮，
+  // 用户点"确定"后才抓取 cookie（e-hentai 论坛登录成功后 URL 不确定自动检测不可靠；
+  // javdb 自动抓取会在"同意条款"页提前触发导致 cookie 不完整）
   manualConfirm: { type: Boolean, default: false },
+  // 手动确认栏文案（可按站点自定义；未传则用默认值）
+  confirmHint: { type: String, default: '请登录，如果已登录请点击确认。' },
+  confirmText: { type: String, default: '确认' },
+  // 自动抓取模式（javdb 等）：导航命中该 RegExp（非登录页）即静默尝试抓 cookie——
+  // 已登录则抓取成功并自动关闭弹窗，未登录静默跳过（不依赖特定成功页 URL，登录后
+  // 无论回跳首页/搜索页/详情页都能自动完成抓取，P站式全自动体验）
+  autoGrabPattern: { type: RegExp, default: null },
   // 自定义协议授权码提取（Pixiv OAuth）：URL 匹配该正则时提取第 1 个捕获组作为 code，
   // emit('login-code', { code })（登录成功重定向 pixiv://account/login?code=xxx 无法加载，走 will-navigate/did-fail-load 拦截）
   codeRegex: { type: RegExp, default: null },
@@ -125,6 +152,23 @@ const canGrab = computed(() => status.value !== 'success' && !grabbing.value)
 // webview UA：去掉 Electron 标记（Cloudflare/Pixiv 登录页会拦截含 Electron 的 UA）
 const wvUserAgent = (navigator.userAgent || '').replace(/\sElectron\/[\d.]+/i, '').trim()
 
+// 多层弹窗（主进程 setWindowOpenHandler 拦截 webview 内 window.open → 转发到这里）：
+// Google OAuth 账号选择器、CF 验证弹窗等以模态内第二/三层 webview 显示（同 partition
+// 共享会话 cookie，登录状态延续）；层上"返回登录页"即关闭该层
+const popupStack = ref([])
+function onWebviewPopupOpen(data) {
+  if (!visible.value || !data || !data.url) return
+  if (!/^https?:/i.test(data.url)) return
+  if (popupStack.value.some(p => p.url === data.url)) return   // 同 URL 去重
+  popupStack.value = [...popupStack.value, { url: data.url }]
+}
+function closePopup(i) {
+  popupStack.value = popupStack.value.filter((_, idx) => idx !== i)
+}
+onMounted(() => {
+  if (window.api && window.api.onWebviewPopup) window.api.onWebviewPopup(onWebviewPopupOpen)
+})
+
 // 同步外部 show 变化
 watch(() => props.show, (v) => {
   visible.value = v
@@ -146,6 +190,9 @@ watch(() => props.loginUrl, (v) => {
 // （未知协议，webview 事件不可靠，仅作兜底）。所以 did-navigate / will-navigate /
 // did-fail-load 三处都要尝试提取。
 let codeExtracted = false
+// 自动抓取去重（javdb autoGrabPattern）：同一 URL 短时间只抓一次
+let lastAutoGrabUrl = ''
+let lastAutoGrabAt = 0
 function tryExtractCode(url) {
   if (codeExtracted || !props.codeRegex || !url) return false
   const m = props.codeRegex.exec(url)
@@ -185,6 +232,9 @@ function startLogin() {
   status.value = 'loading'
   errorMsg.value = ''
   codeExtracted = false
+  lastAutoGrabUrl = ''
+  lastAutoGrabAt = 0
+  popupStack.value = []
   address.value = props.loginUrl
   currentUrl.value = props.loginUrl
 }
@@ -213,6 +263,15 @@ async function onNav(e) {
   if (!props.manualConfirm && props.successPatterns.some(re => re.test(url))) {
     // 等页面渲染稳定后抓 cookie（避免 cookie 还没 set 就抓）
     setTimeout(() => grabCookies(true), 800)
+  } else if (!props.manualConfirm && props.autoGrabPattern && props.autoGrabPattern.test(url)) {
+    // 自动抓取模式：导航到站点非登录页即尝试抓（同 URL 去重 2.5s，防 Cloudflare 刷新重放；
+    // 未登录时静默失败不打扰，登录成功后任一页面都会触发抓取并自动关闭弹窗）
+    const now = Date.now()
+    if (url !== lastAutoGrabUrl || now - lastAutoGrabAt > 2500) {
+      lastAutoGrabUrl = url
+      lastAutoGrabAt = now
+      grabCookies(true)
+    }
   }
   // 3. 检测 OAuth 跳转到 x.com / accounts.google.com（共享凭据自动授权中；目标站自身登录时不提示）
   if (props.site !== 'twitter' && /twitter\.com|x\.com/i.test(url)) {
@@ -325,6 +384,47 @@ function onClose() {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+/* webview 舞台：主层 + 多层弹窗覆盖 */
+.wv-stage {
+  position: relative;
+}
+.wv-popup-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: #18181c;
+  border: 1px solid #63e2b7;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wv-popup-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(99, 226, 183, 0.12);
+}
+.wv-popup-title {
+  font-size: 12px;
+  color: #63e2b7;
+  flex-shrink: 0;
+}
+.wv-popup-url {
+  flex: 1;
+  font-size: 12px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wv-popup-webview {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
 }
 .wv-address {
   flex: 1;

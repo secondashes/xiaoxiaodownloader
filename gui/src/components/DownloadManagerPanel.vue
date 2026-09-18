@@ -12,6 +12,14 @@
       </div>
       <div class="dl-toolbar-actions">
         <n-button v-if="hasPaused" size="small" quaternary @click="$emit('resume-all')">全部继续</n-button>
+        <!-- 同时删除本地文件：对所有删除操作生效（单个删除 / 清除所有任务）；
+             首次勾选后执行删除会额外弹一次确认（确认后记入 localStorage 不再重复询问） -->
+        <n-checkbox size="small" class="dl-del-files"
+                    :checked="deleteFiles"
+                    @update:checked="v => (deleteFiles = v)">同时删除本地文件</n-checkbox>
+        <n-button size="small" quaternary type="error" :disabled="!tasks.length"
+                  title="清除列表中的全部下载任务"
+                  @click="onClearAll">清除所有任务</n-button>
         <div class="dl-shutdown">
           <n-switch size="small" :value="shutdownOn" @update:value="v => $emit('toggle-shutdown', v)" />
           <span class="dl-shutdown-label">下载完关机</span>
@@ -65,6 +73,7 @@
                 <n-tag size="small" :type="statusType(task.status)" round>{{ statusText(task.status) }}</n-tag>
                 <span class="dl-album" :title="task.album">{{ trTitle(task.album) }}</span>
                 <span class="dl-count">{{ task.done }}/{{ task.total }}</span>
+                <span class="dl-task-created" :title="'任务创建于 ' + formatDateTime(task.created_at)">{{ formatDateTime(task.created_at) }}</span>
               </div>
               <div class="dl-task-actions" @click.stop>
                 <n-button
@@ -86,10 +95,24 @@
                   title="在文件管理器中打开该任务的保存文件夹"
                   @click="$emit('open-folder', task)"
                 >📂 打开文件夹</n-button>
-                <n-button size="tiny" quaternary type="error" @click="$emit('remove', task.id)">删除</n-button>
+                <n-button
+                  v-if="task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'"
+                  size="tiny" quaternary type="warning"
+                  title="把该任务的文件夹整体移动到其他位置（迁移/集中资源）"
+                  @click="moveTaskFolder(task)"
+                >📁 移动文件夹</n-button>
+                <n-button size="tiny" quaternary type="error" @click="onDeleteTask(task.id)">删除</n-button>
               </div>
             </div>
 
+            <!-- 迅雷式详情行：创建时间 / 大小 / 速度 / 剩余时间 / 状态明细 -->
+            <div class="dl-task-info">
+              <span title="任务创建时间">🕐 {{ formatDateTime(task.created_at) }}</span>
+              <span v-if="taskSize(task)" title="总大小（按已完成比例估算已下载量）">📦 {{ fmtDone(task) }} / {{ formatSize(taskSize(task)) }}</span>
+              <span v-if="taskSpeed(task)" class="dl-info-speed" title="当前总速度（所有下载中文件合计）">⚡ {{ formatSpeed(taskSpeed(task)) }}</span>
+              <span v-if="taskEta(task)" title="按当前速度估算的剩余时间">⏳ 剩余约 {{ taskEta(task) }}</span>
+              <span class="dl-info-failed" v-if="(task.failed || 0) > 0" title="失败文件数">⚠ 失败 {{ task.failed }}</span>
+            </div>
             <n-progress
               type="line"
               :percentage="taskPercent(task)"
@@ -104,8 +127,13 @@
                 <div class="dl-file-line">
                   <span class="dl-file-name" :title="f.filename">{{ trTitle(f.filename) }}</span>
                   <span class="dl-file-meta">
+                    <span v-if="f.hls_total" class="dl-file-seg"
+                          :title="'流媒体任务：分片下载完成后自动合并为 MP4'">
+                      {{ f.hls_phase === 'merging' ? '合并中…' : `分片 ${f.hls_done || 0}/${f.hls_total}` }}
+                    </span>
                     <span class="dl-file-size">{{ formatSize(f.size) }}</span>
                     <span v-if="f.speed" class="dl-file-speed">{{ formatSpeed(f.speed) }}</span>
+                    <span v-if="f.finished_at" class="dl-file-time" :title="'完成于 ' + formatDateTime(f.finished_at)">{{ formatClock(f.finished_at) }}</span>
                     <span class="dl-file-status" :class="'st-' + f.status">{{ fileStatusText(f.status) }}</span>
                     <button
                       v-if="f.status === 'failed'"
@@ -138,6 +166,7 @@
 
 <script setup>
 import { computed, watch, nextTick, ref } from 'vue'
+import { useDialog } from 'naive-ui'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -150,8 +179,66 @@ const props = defineProps({
 
 const emit = defineEmits([
   'close', 'pause', 'resume', 'resume-all', 'cancel', 'remove', 'toggle-shutdown',
-  'open-folder', 'locate-file', 'retry', 'retry-file',
+  'open-folder', 'locate-file', 'retry', 'retry-file', 'clear-all',
 ])
+
+// ---------- 删除时同步删除本地文件 ----------
+// 勾选后对所有删除操作生效（单个删除 / 清除所有任务）；首次执行额外弹一次确认，
+// 确认后记入 localStorage（delete_files_confirmed），之后不再重复询问
+const dialog = useDialog()
+const deleteFiles = ref(false)
+const DELETE_FILES_CONFIRM_KEY = 'delete_files_confirmed'
+
+function _deleteFilesConfirmed() {
+  try {
+    return localStorage.getItem(DELETE_FILES_CONFIRM_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function requestDelete(run) {
+  if (!deleteFiles.value) {
+    run(false)
+    return
+  }
+  if (_deleteFilesConfirmed()) {
+    run(true)
+    return
+  }
+  dialog.warning({
+    title: '确认同时删除本地文件？',
+    content: '将把这些任务已下载到磁盘的文件和文件夹一并删除（不可恢复）。'
+      + '确认一次后，之后勾选「同时删除本地文件」执行删除时不再询问。',
+    positiveText: '确认删除，不再提醒',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      try {
+        localStorage.setItem(DELETE_FILES_CONFIRM_KEY, '1')
+      } catch {}
+      run(true)
+    },
+  })
+}
+
+async function moveTaskFolder(task) {
+  if (!window.api || !window.api.pickDirectory) return
+  const pick = await window.api.pickDirectory()
+  if (!pick || pick.ok === false || !pick.path) return
+  window.api.sendCommand({
+    cmd: 'move_task_folder',
+    task_id: task.id,
+    dest_dir: pick.path,
+  })
+}
+
+function onDeleteTask(taskId) {
+  requestDelete(df => emit('remove', taskId, df))
+}
+
+function onClearAll() {
+  requestDelete(df => emit('clear-all', df))
+}
 
 // 展开状态（母组 / 任务两级，点击头部切换）
 const expandedGroups = ref(new Set())
@@ -288,6 +375,58 @@ function fileStatusText(status) {
   return map[status] || status
 }
 
+// ---------- 迅雷式详情（创建时间/大小/速度/剩余时间） ----------
+function formatDateTime(ts) {
+  if (!ts) return '—'
+  const d = new Date(typeof ts === 'number' && ts < 1e12 ? ts * 1000 : ts)  // 后端秒 / 前端毫秒
+  if (isNaN(d.getTime())) return '—'
+  const p2 = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+}
+
+function formatClock(ts) {
+  const dt = typeof ts === 'number' && ts < 1e12 ? ts * 1000 : ts
+  const d = new Date(dt)
+  if (isNaN(d.getTime())) return ''
+  const p2 = n => String(n).padStart(2, '0')
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+}
+
+function taskSize(task) {
+  return (task.files || []).reduce((acc, f) => acc + (Number(f.size) || 0), 0)
+}
+
+function taskDoneBytes(task) {
+  // 按各文件完成百分比估算已下载字节；流媒体任务直接用后端报的分片累计字节
+  return (task.files || []).reduce((acc, f) => {
+    const realBytes = Number(f.completed_bytes) || 0
+    if (realBytes > 0) return acc + realBytes
+    const sz = Number(f.size) || 0
+    if (!sz) return acc
+    const pct = Math.min(100, Math.max(0, Number(f.completed) || (f.status === 'completed' ? 100 : 0)))
+    return acc + sz * pct / 100
+  }, 0)
+}
+
+function taskSpeed(task) {
+  return (task.files || []).reduce((acc, f) => acc + (Number(f.speed) || 0), 0)
+}
+
+function fmtDone(task) {
+  return formatSize(taskDoneBytes(task))
+}
+
+function taskEta(task) {
+  const speed = taskSpeed(task)
+  if (speed <= 0) return ''
+  const remain = taskSize(task) - taskDoneBytes(task)
+  if (remain <= 0) return ''
+  const sec = Math.round(remain / speed)
+  if (sec < 60) return `${sec} 秒`
+  if (sec < 3600) return `${Math.round(sec / 60)} 分钟`
+  return `${(sec / 3600).toFixed(1)} 小时`
+}
+
 function taskPercent(task) {
   const total = task.total || 1
   const done = task.done || 0
@@ -314,6 +453,11 @@ function formatSize(bytes) {
 </script>
 
 <style scoped>
+/* 进度条平滑稳定增长：宽度变化加过渡，字节级高频更新不再跳动 */
+:deep(.n-progress-graph-line-indicator) {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .dl-manager {
   display: flex;
   flex-direction: column;
@@ -363,6 +507,11 @@ function formatSize(bytes) {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.dl-del-files {
+  margin: 0 4px;
+  white-space: nowrap;
 }
 
 .dl-shutdown {
@@ -574,6 +723,21 @@ function formatSize(bytes) {
   font-family: monospace;
 }
 
+/* 流媒体任务的分片进度（一个视频几百片，进度单位不是字节） */
+.dl-file-seg {
+  font-size: 11px;
+  color: #f0a020;
+  font-family: monospace;
+}
+
+.dl-task-created { color: #8a8a92; font-size: 11px; }
+.dl-task-info {
+  display: flex; gap: 14px; flex-wrap: wrap; padding: 2px 0 4px;
+  font-size: 11.5px; color: #8a8a92;
+}
+.dl-info-speed { color: #63e2b7; }
+.dl-info-failed { color: #e88080; }
+.dl-file-time { color: #8a8a92; }
 .dl-file-speed {
   font-size: 11px;
   color: #63e2b7;

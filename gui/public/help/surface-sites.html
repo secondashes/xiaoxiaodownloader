@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>表世界 · 站点分类总览</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --line: #e6e9f2;
+    --tx: #23262f;
+    --tx2: #6a7080;
+    --acc: #5b7cfa;
+    --acc2: #8f6bff;
+    --ok: #21c58b;
+    --warn: #f5a623;
+    --bad: #e05252;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(165deg, #eef1fa 0%, #f6f4fb 50%, #eefaf5 100%);
+    color: var(--tx);
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.75;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 26px 70px; }
+
+  /* ---- Hero ---- */
+  .hero { padding: 50px 0 26px; text-align: center; margin-bottom: 22px;
+    background: radial-gradient(700px 260px at 25% 0%, rgba(91,124,250,.16), transparent 70%),
+                radial-gradient(600px 240px at 75% 10%, rgba(33,197,139,.12), transparent 70%); }
+  .hero .badge { display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 2px;
+    color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2));
+    padding: 6px 20px; border-radius: 999px; margin-bottom: 16px; }
+  .hero h1 { font-size: 30px; font-weight: 800; line-height: 1.35; }
+  .hero p.sub { color: var(--tx2); margin: 12px auto 0; font-size: 14px; max-width: 860px; }
+  .hero p.sub b { color: var(--acc); }
+
+  /* ---- 机制说明卡 ---- */
+  .mech { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 26px 0 14px; }
+  .mcard { border-radius: 16px; padding: 18px 20px; color: #fff; }
+  .m1 { background: linear-gradient(150deg, #4a63e8, #7a8dff); }
+  .m2 { background: linear-gradient(150deg, #7a4fd0, #a98bff); }
+  .m3 { background: linear-gradient(150deg, #1fa36a, #4fc98f); }
+  .mcard h3 { font-size: 15.5px; margin-bottom: 6px; }
+  .mcard p, .mcard li { font-size: 12.5px; line-height: 1.65; }
+  .mcard ul { list-style: none; margin-top: 4px; }
+  .mcard li { padding: 2px 0; }
+  .mcard li::before { content: '✦ '; opacity: .8; }
+
+  /* ---- 图例 ---- */
+  .legend { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+    font-size: 12px; color: var(--tx2); margin-bottom: 20px; }
+  .legend b { color: var(--tx); font-size: 12.5px; }
+
+  /* ---- 角标 ---- */
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; line-height: 1.5;
+    padding: 1px 9px; border-radius: 999px; white-space: nowrap; vertical-align: 2px; }
+  .tag.proxy { color: #1d5fd1; background: #e8f0ff; border: 1px solid #c4d8ff; }
+  .tag.dead  { color: #d43838; background: #ffecec; border: 1px solid #ffc9c9; }
+  .tag.todo  { color: #6a7080; background: #f0f1f5; border: 1px solid #dcdfe8; }
+
+  /* ---- 筛选条 ---- */
+  .fbar { position: sticky; top: 0; z-index: 50;
+    background: rgba(246,244,251,.93); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px;
+    margin-bottom: 22px; padding: 10px 14px;
+    display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  .fbtn { border: 1px solid var(--line); background: #fff; color: var(--tx); font: inherit;
+    font-size: 12.5px; font-weight: 600; padding: 5px 13px; border-radius: 999px; cursor: pointer; }
+  .fbtn:hover { border-color: var(--acc); color: var(--acc); }
+  .fbtn.on { background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff; border-color: transparent; }
+  .fbar .fcount { margin-left: auto; font-size: 12px; color: var(--tx2); white-space: nowrap; }
+  .fbar .fcount b { color: var(--acc); }
+
+  /* ---- 分类区块 ---- */
+  .catsec { margin-bottom: 32px; scroll-margin-top: 76px; }
+  .catsec.hide { display: none; }
+  h2.cat { font-size: 19px; font-weight: 800; margin-bottom: 13px;
+    display: flex; align-items: center; gap: 10px; }
+  h2.cat .dot { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
+  h2.cat .cnt { font-size: 11.5px; color: var(--tx2); background: #fff; border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 10px; font-weight: 700; }
+
+  /* ---- 站点卡 ---- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 13px; }
+  .site { position: relative; background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 14px 15px 12px 21px; overflow: hidden;
+    display: flex; flex-direction: column; }
+  .site.hide { display: none; }
+  .site .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; }
+  .shead { display: flex; gap: 10px; align-items: center; margin-bottom: 7px; }
+  .sicon { flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; }
+  .sicon svg { width: 20px; height: 20px; fill: #fff; display: block; }
+  .sinfo { flex: 1; min-width: 0; }
+  .sinfo h4 { font-size: 15px; line-height: 1.35; }
+  .sdesc { font-size: 11.5px; color: var(--tx2); line-height: 1.5; }
+  .sdesc .ct { color: #8a93ad; }
+  .stags { margin-left: auto; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; flex-shrink: 0; }
+  .stip { font-size: 12.6px; color: #4a4f5e; line-height: 1.68; }
+  .deadguide { margin-top: 8px; font-size: 12px; line-height: 1.6; color: #b03030;
+    background: #fff3f3; border: 1px dashed #f3c1c1; border-radius: 8px; padding: 6px 10px; }
+  .todoguide { margin-top: 8px; font-size: 12px; line-height: 1.6; color: #6a7080;
+    background: #f4f5fa; border: 1px dashed #dcdfe8; border-radius: 8px; padding: 6px 10px; }
+  .slinks { margin-top: auto; padding-top: 9px; display: flex; flex-wrap: wrap;
+    gap: 4px 14px; font-size: 12px; align-items: baseline; }
+  .slinks a { color: var(--acc); text-decoration: none; word-break: break-all; }
+  .slinks a:hover { text-decoration: underline; }
+  .slinks .lbl { color: #9aa0b2; }
+  .slinks .lbl a { color: #7d86c9; }
+
+  footer { text-align: center; margin-top: 44px; color: #9aa0b2; font-size: 12.5px; line-height: 2; }
+
+  @media (max-width: 860px) {
+    .mech { grid-template-columns: 1fr; }
+    .wrap { padding: 0 14px 50px; }
+    .hero h1 { font-size: 24px; }
+    .fbar .fcount { width: 100%; margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 图标库：分类兜底 + 站点专属（全部来自 surfaceSites.js，离线内联） -->
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="ic-cvideo" viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm6 4v8l7-4-7-4Z"/></symbol>
+  <symbol id="ic-cdaily" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm7.9 9h-3.4a15.6 15.6 0 0 0-1.2-5.5A8 8 0 0 1 19.9 11ZM12 4.2c.9 1.2 1.9 3.5 2.4 6.8h-4.8c.5-3.3 1.5-5.6 2.4-6.8ZM4.1 13h3.4c.2 2 .6 3.9 1.2 5.5A8 8 0 0 1 4.1 13Zm3.4-2H4.1a8 8 0 0 1 4.6-5.5A15.6 15.6 0 0 0 7.5 11ZM12 19.8c-.9-1.2-1.9-3.5-2.4-6.8h4.8c-.5 3.3-1.5 5.6-2.4 6.8Zm3.3-1.3c.6-1.6 1-3.5 1.2-5.5h3.4a8 8 0 0 1-4.6 5.5Z"/></symbol>
+  <symbol id="ic-cmusic" viewBox="0 0 24 24"><path d="M20 3v12.2a3.8 3.8 0 1 1-2-3.3V7.4L10 9v9.2a3.8 3.8 0 1 1-2-3.3V5.5L20 3Z"/></symbol>
+  <symbol id="ic-cbook" viewBox="0 0 24 24"><path d="M4 3h7a3 3 0 0 1 3 3v15a2.5 2.5 0 0 0-2.5-2.5H4V3Zm16 0h-4a3 3 0 0 0-3 3v15a2.5 2.5 0 0 1 2.5-2.5H20V3Z"/></symbol>
+  <symbol id="ic-cgame" viewBox="0 0 24 24"><path d="M7 7h10a5 5 0 0 1 5 5c0 3-2 5-4.5 5-1.5 0-2.6-.7-3.5-1.8h-4C9.1 16.3 8 17 6.5 17 4 17 2 15 2 12a5 5 0 0 1 5-5Zm-.5 3v1.5H5V13h1.5v1.5H8V13h1.5v-1.5H8V10H6.5Zm10 .2a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6Zm-2.5 3a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6Z"/></symbol>
+  <symbol id="ic-cai" viewBox="0 0 24 24"><path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2Zm6 12l.9 2.6L21.5 18l-2.6.9L18 21.5l-.9-2.6L14.5 18l2.6-.9L18 14Z"/></symbol>
+  <symbol id="ic-cacademic" viewBox="0 0 24 24"><path d="M12 3 1 9l4 1.9V17c0 1.1 2.7 2.5 7 2.5s7-1.4 7-2.5v-6.1L23 9 12 3Zm0 2.2L19.5 9 12 12.8 4.5 9 12 5.2ZM6 12.5l6 3 6-3v4.9c-.9.8-3.2 1.6-6 1.6s-5.1-.8-6-1.6v-4.9Z"/></symbol>
+  <symbol id="ic-cres" viewBox="0 0 24 24"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4Zm0 4.2 5 2.2v3.6c0 3.6-2.1 6.6-5 7.4-2.9-.8-5-3.8-5-7.4V8.4l5-2.2Z"/></symbol>
+  <symbol id="ic-bili" viewBox="0 0 24 24"><path d="M17.8 4.6l1.8-2.2a.7.7 0 1 1 1.1.9L19 5.5h2.2A2.8 2.8 0 0 1 24 8.3v9.4a2.8 2.8 0 0 1-2.8 2.8H2.8A2.8 2.8 0 0 1 0 17.7V8.3a2.8 2.8 0 0 1 2.8-2.8H5L3.3 3.3a.7.7 0 1 1 1.1-.9l1.8 2.2h12.6ZM6.2 10a1 1 0 0 0-1 1v3.2a1 1 0 1 0 2 0V11a1 1 0 0 0-1-1Zm11.6 0a1 1 0 0 0-1 1v3.2a1 1 0 1 0 2 0V11a1 1 0 0 0-1-1Z"/></symbol>
+  <symbol id="ic-youtube" viewBox="0 0 24 24"><path d="M23.5 7.2a3 3 0 0 0-2.1-2.1C19.5 4.5 12 4.5 12 4.5s-7.5 0-9.4.6A3 3 0 0 0 .5 7.2 31.3 31.3 0 0 0 0 12c0 1.6.2 3.2.5 4.8a3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1c.3-1.6.5-3.2.5-4.8s-.2-3.2-.5-4.8ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z"/></symbol>
+  <symbol id="ic-age" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2.5"/><rect x="22" y="9" width="2.5" height="6" rx="1" opacity=".7"/></symbol>
+  <symbol id="ic-ying" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm0 3.5 5 3-1.6 2.7L12 9.8 8.6 11.2 7 8.5Zm-3 8.3 6 2.2-1 2.4-5.5-1.6Z"/></symbol>
+  <symbol id="ic-douyin" viewBox="0 0 24 24"><path d="M16.6 3c.4 2.3 1.9 3.9 4.4 4.1v3c-1.7 0-3.2-.5-4.4-1.4v6.6c0 3.7-2.6 6.2-6 6.2-3.2 0-5.8-2.5-5.8-5.8 0-3.4 2.9-6 6.4-5.7v3.1c-1.8-.4-3.4.8-3.4 2.6 0 1.6 1.3 2.8 2.8 2.8 1.7 0 3-1.3 3-3.3V3h3Z"/></symbol>
+  <symbol id="ic-xhs" viewBox="0 0 24 24"><rect x="1" y="5" width="22" height="14" rx="3.2"/><text x="12" y="15.5" font-size="7.5" font-weight="bold" fill="#ff2442" text-anchor="middle">小红书</text></symbol>
+  <symbol id="ic-ks" viewBox="0 0 24 24"><circle cx="13.5" cy="12" r="7.5"/><rect x="2" y="7.6" width="3.2" height="8.8" rx="1.6"/></symbol>
+  <symbol id="ic-weibo" viewBox="0 0 24 24"><path d="M10.1 20.6c-3.9.4-7.3-1.4-7.6-4-.3-2.6 2.6-5.1 6.5-5.5 3.9-.4 7.3 1.4 7.6 4 .3 2.7-2.6 5.1-6.5 5.5Zm3.3-4.6c-.4-1.5-2.2-2.3-4.1-1.9-2 .4-3.3 2-2.9 3.5.4 1.5 2.2 2.3 4.1 1.9 2-.4 3.3-2 2.9-3.5ZM18 10.8a.9.9 0 0 1-1.1-.6.9.9 0 0 1 .6-1.1 1.7 1.7 0 0 0 1.1-2.1 1.7 1.7 0 0 0-2.1-1.2.9.9 0 0 1-.5-1.8 3.5 3.5 0 0 1 4.3 2.4A3.5 3.5 0 0 1 18 10.8Zm3.4 1a.9.9 0 0 1-1.1-.7.9.9 0 0 1 .7-1 3.6 3.6 0 0 0 2.7-4.3 3.6 3.6 0 0 0-4.3-2.7.9.9 0 0 1-.4-1.8 5.4 5.4 0 0 1 6.4 4.1 5.4 5.4 0 0 1-4 6.4Z"/></symbol>
+  <symbol id="ic-zhihu" viewBox="0 0 24 24"><path d="M5.7 7.2v9.9H4.9c-.1-1.6-.6-2.9-1.6-3.8l.4-.5c.6.6 1 1.3 1.2 2.1V7.2h.8Zm4.8 8.3c-.4-.4-1-.9-1.7-1.3v1.7H8v-3.4c-.3.5-.7 1-1.1 1.4l-.4-.6c.6-.6 1.1-1.4 1.5-2.3H6.8v-.7h1.2V8.5h.8v1.8h1.3v.7h-1.3v.8c.7.4 1.2.8 1.7 1.2l-.4.5Zm7.6 1.6h-5.6v-8h5.6v8Zm-.8-7.2h-4v6.4h4V9.9Z"/></symbol>
+  <symbol id="ic-m163" viewBox="0 0 24 24"><path d="M12 0a12 12 0 1 0 12 12A12 12 0 0 0 12 0Zm4.9 10.9c-.8 0-1.5-.6-1.5-1.4 0-.5.2-.9.6-1.2a4.6 4.6 0 0 0-3-1.1h-.7l-1.5 8.4a3.6 3.6 0 0 1-3.5 3A3.4 3.4 0 0 1 4 15.2a3.4 3.4 0 0 1 3.4-3.4h.4l.4 1.7a1.5 1.5 0 0 0-.8-.2 1.7 1.7 0 1 0 1.7 2l1.6-8.8.1-.4a6.3 6.3 0 0 1 4.9 1.8 1.5 1.5 0 0 1 .7-.2 1.5 1.5 0 0 1 .5 2.9Z"/></symbol>
+  <symbol id="ic-zlib" viewBox="0 0 24 24"><path d="M12 6c-1.8-1.6-4.2-2.5-7-2.5H2v14h4.5c1.9 0 3.7.6 5.5 1.5 1.8-.9 3.6-1.5 5.5-1.5H22v-14h-3c-2.8 0-5.2.9-7 2.5Zm-3 2.3V19c-1.4-.6-2.9-1-4.5-1V8c1.7 0 3.2.3 4.5 1Zm6.5-1.3c1.3-.7 2.8-1 4.5-1v10c-1.6 0-3.1.4-4.5 1V7.3Z"/></symbol>
+  <symbol id="ic-annas" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6V2Zm8 1.5V8h4.5L14 3.5ZM8 12h8v1.5H8V12Zm0 3h8v1.5H8V15Zm0-6h5v1.5H8V9Z"/></symbol>
+  <symbol id="ic-dxy" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v4h4a3 3 0 0 1 0 6h-4v4a3 3 0 0 1-6 0v-4H5a3 3 0 0 1 0-6h4V5a3 3 0 0 1 3-3Z"/></symbol>
+  <symbol id="ic-pubmed" viewBox="0 0 24 24"><path d="M4 3h13a2 2 0 0 1 2 2v3h-2V5H6v14h5v2H4V3Zm15 7-7 7-3-3 1.4-1.4L13 15.2l4.6-4.6L19 10Z"/></symbol>
+  <symbol id="ic-arxiv" viewBox="0 0 24 24"><path d="M4 3h16v3H4V3Zm0 5h16v2.5H4V8Zm0 4.5h16V15H4v-2.5ZM4 17h10v2.5H4V17Z"/></symbol>
+  <symbol id="ic-cnki" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 6h4v4.5l4 2.5-2 3-3.5-2.2L9 16l-2-3 4-2.5V10.5L8.5 9 10 6Z" fill="#1a5cb0"/></symbol>
+  <symbol id="ic-github" viewBox="0 0 24 24"><path d="M12 1.5A10.5 10.5 0 0 0 8.7 22c.5.1.7-.2.7-.5v-1.8c-3 .6-3.6-1.4-3.6-1.4-.5-1.2-1.2-1.6-1.2-1.6-1-.7 0-.7 0-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.6 1.2 3.2.9.1-.7.4-1.2.7-1.5-2.4-.3-4.9-1.2-4.9-5.3 0-1.2.4-2.1 1.1-2.9-.1-.3-.5-1.4.1-2.9 0 0 1-.3 3.1 1.2a10.7 10.7 0 0 1 5.6 0c2.2-1.5 3.1-1.2 3.1-1.2.6 1.5.2 2.6.1 2.9.7.8 1.1 1.7 1.1 2.9 0 4.1-2.5 5-4.9 5.3.4.3.8 1 .8 2v2.9c0 .3.2.6.7.5A10.5 10.5 0 0 0 12 1.5Z"/></symbol>
+  <symbol id="ic-wiki" viewBox="0 0 24 24"><path d="M12.6 11.7 8.9 3.5H3.2l5.5 12.4a.3.3 0 0 1 0 .1L12.6 11.7Zm1 .3L17.7 20l3.1-7-4.3-9.7-2.9 8.7ZM8.6 18 6.9 14H3.5L8.6 18Z"/></symbol>
+</svg>
+
+<div class="wrap">
+
+  <div class="hero">
+    <span class="badge">站点分类总览 · 2026-09-18</span>
+    <h1>表世界 · 站点分类总览</h1>
+    <p class="sub">本页汇总表世界内置的全部 <b>57 个站点</b>，按 影视·看番 / 常用平台 / 音乐 / 电子书·书源 / 游戏 / AI 制作 / 学术·医学 / 软件·资源社区 八大分类归档。
+    用法一句话：<b>浏览即抓取、下载通用</b>——在表世界里打开任意站点随便逛，页面中出现的视频、图片、音频、文档等媒体会自动进入下载列表，点单条下载或「全部下载」批量保存即可，无需逐站配置。点上方分类按钮可筛选卡片并直达对应区块。</p>
+  </div>
+
+  <!-- 机制说明 -->
+  <div class="mech">
+    <div class="mcard m1">
+      <h3>① GitHub 校验</h3>
+      <p>应用每次启动会自动拉取站点校验表（raw.githubusercontent → jsDelivr 回退）：</p>
+      <ul>
+        <li>有效站（ok）：可被下发新地址，域名变了也能自动跟上</li>
+        <li>失效站（dead）：磁贴置灰「已失效」</li>
+        <li>extra 条目：动态补入新站点磁贴</li>
+        <li>本页展示的是内置 baseline 数据，应用内磁贴以校验合并后的结果为准</li>
+      </ul>
+    </div>
+    <div class="mcard m2">
+      <h3>② 流媒体拼接</h3>
+      <p>网页里播放的 m3u8 / HLS 流可以直接「拼接下载」：</p>
+      <ul>
+        <li>分片自动下载，无需手动抓链接</li>
+        <li>ffmpeg 自动合并为完整 MP4</li>
+        <li>成品保存在 系统下载目录/平台名/ 下</li>
+      </ul>
+    </div>
+    <div class="mcard m3">
+      <h3>③ 通用下载</h3>
+      <p>视频 / 图片 / 音频 / 文档 / 压缩包 / 流媒体通通支持：</p>
+      <ul>
+        <li>单条点「下载」，或多选「全部下载」批量</li>
+        <li>统一落盘系统下载文件夹</li>
+        <li>可在表世界「下载管理」里查看进度与历史</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>角标说明</b>
+    <span><span class="tag proxy">需代理</span> 需开启系统代理才能访问</span>
+    <span><span class="tag dead">已失效</span> 本机探测不通，等待 GitHub 校验表下发新地址</span>
+    <span><span class="tag todo">地址待定</span> 预留空位，校验表下发地址后自动点亮</span>
+  </div>
+
+  <!-- 分类筛选 / 锚点导航 -->
+  <div class="fbar" id="top">
+    <button class="fbtn on" data-filter="all">全部</button>
+    <button class="fbtn" data-filter="video">影视·看番</button>
+    <button class="fbtn" data-filter="daily">常用平台</button>
+    <button class="fbtn" data-filter="music">音乐</button>
+    <button class="fbtn" data-filter="book">电子书·书源</button>
+    <button class="fbtn" data-filter="game">游戏</button>
+    <button class="fbtn" data-filter="ai">AI 制作</button>
+    <button class="fbtn" data-filter="academic">学术·医学</button>
+    <button class="fbtn" data-filter="res">软件·资源社区</button>
+    <span class="fcount">当前显示 <b id="shown">57</b> / 57 站</span>
+  </div>
+
+  <!-- ================= 影视 · 看番 ================= -->
+  <section class="catsec" id="sec-video">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#ff5f8f,#ffb46a)"></span>影视 · 看番<span class="cnt">14 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="video daily">
+        <span class="bar" style="background:linear-gradient(180deg,#fb7299,#ff9eb5)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#fb7299,#ff9eb5)"><svg><use href="#ic-bili"/></svg></span>
+          <div class="sinfo"><h4>哔哩哔哩</h4><p class="sdesc">视频 / 直播 / 番剧 <span class="ct">影视 · 常用平台</span></p></div>
+        </div>
+        <p class="stip">国内最大视频社区。支持专属解析卡：打开视频页自动解析清晰度（登录后更高），可下载 MP4（音视频合并）/ 仅视频 / 仅音频。</p>
+        <div class="slinks"><a href="https://www.bilibili.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#2f6fed,#6fa5ff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#2f6fed,#6fa5ff)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>简云影视</h4><p class="sdesc">无广告影视 · 1080P <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">主打纯净无广告、1080P 高清秒播。覆盖最新电影、电视剧、综艺、动漫、短剧，国产热播/美剧/韩剧都有，每日更新。播放时刷到的 m3u8 流会被捕获，可用「流媒体拼接」下载成 MP4。</p>
+        <div class="slinks"><a href="https://jianyunys.com/" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#e0485f,#ff8f9e)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e0485f,#ff8f9e)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>剧踪影院</h4><p class="sdesc">超清蓝光 · 超前更新 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">主打超清蓝光、海内外 SVIP 超前更新，电影/剧集/动漫/综艺齐全，播放器有独家源/国内源/海外源可切换。域名易失效，记发布页 juzong.vip。</p>
+        <div class="slinks">
+          <a href="https://www.juzong01.me/" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://juzong.vip" target="_blank" rel="noopener">发布页 ↗</a>
+          <span class="lbl">备用：<a href="https://1818dy.org" target="_blank" rel="noopener">1818dy.org</a></span>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#1d9f6e,#5fd9a4)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#1d9f6e,#5fd9a4)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>片库</h4><p class="sdesc">纯净影视 · 高清 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">纯净无广告方向、1080P 高清，电影/电视剧/综艺/动漫都有，更新频率高（有日更统计），支持搜索与分类，适合找完整剧集。主域名 pianku.li 已 410 弃用（2026-09-18 探测），现用 piankuwan.com。</p>
+        <div class="slinks">
+          <a href="https://piankuwan.com" target="_blank" rel="noopener">打开主站 ↗</a>
+          <span class="lbl">备用：<a href="https://www.pianku.li" target="_blank" rel="noopener">www.pianku.li</a></span>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#f0821e,#ffc078)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#f0821e,#ffc078)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>开心影院</h4><p class="sdesc">高清多线路 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">最新电影、热播剧更新及时，多条高清线路（推荐带 BD/YX 字样的源，速度画质更好）。页面较干净，覆盖电影/剧集/短剧/综艺/动漫。防走丢域名 kxyy.app。</p>
+        <div class="slinks">
+          <a href="https://www.kxyytv.com/" target="_blank" rel="noopener">打开主站 ↗</a>
+          <span class="lbl">备用：<a href="https://www.kxyy.app" target="_blank" rel="noopener">www.kxyy.app</a></span>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#f5b400,#ffd76b)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#f5b400,#ffd76b)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>小鸭影音</h4><p class="sdesc">港台影视聚合 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">电影/电视剧/综艺/动漫全覆盖，每日更新，分类清晰（陆剧/韩剧/欧美剧），有人气排行。域名多，搜「小鸭影音 最新」找当前可用；另有小鸭看看港台镜像。</p>
+        <div class="slinks">
+          <a href="https://777tv.ai/" target="_blank" rel="noopener">打开主站 ↗</a>
+          <span class="lbl">备用：<a href="https://hk.xiaoyakankan.io" target="_blank" rel="noopener">hk.xiaoyakankan.io</a> / <a href="https://tw.xiaoyakankan.tv" target="_blank" rel="noopener">tw.xiaoyakankan.tv</a></span>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#5a4fd0,#9d8fff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#5a4fd0,#9d8fff)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>mmov</h4><p class="sdesc">影视聚合 · 多区域 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">综合影视聚合站（港台/大陆多区域镜像），电影剧集综艺动漫都有，每日更新免费在线。搜「mmov 最新」可找当前可用镜像。</p>
+        <div class="slinks">
+          <a href="https://tw.mmov.app/" target="_blank" rel="noopener">打开主站 ↗</a>
+          <span class="lbl">备用：<a href="https://cn.mmov.im" target="_blank" rel="noopener">cn.mmov.im</a></span>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#ff0000,#ff5a5a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#ff0000,#ff5a5a)"><svg><use href="#ic-youtube"/></svg></span>
+          <div class="sinfo"><h4>YouTube</h4><p class="sdesc">海外视频（需代理） <span class="ct">影视</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">全球最大视频平台。需系统代理。播放中的视频流会被捕获；HLS(m3u8) 流用「流媒体拼接」下载合并为 MP4。</p>
+        <div class="slinks"><a href="https://www.youtube.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#ff9f43,#ffc078)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#ff9f43,#ffc078)"><svg><use href="#ic-age"/></svg></span>
+          <div class="sinfo"><h4>AGE动漫</h4><p class="sdesc">动漫 · 番剧（域名常变） <span class="ct">影视</span></p></div>
+          <span class="stags"><span class="tag dead">已失效</span></span>
+        </div>
+        <p class="stip">老牌专注动漫站，新番更新快、老番资源全，支持在线播放。域名因封锁常换：官方发布页 github.com/agefanscom/website（GitHub 校验源），失效时去发布页找最新地址。</p>
+        <p class="deadguide">换域名指引：已失效（本机探测不通）。去官方发布页 github.com/agefanscom/website 找最新地址；应用启动时 GitHub 校验表确认恢复后会自动点亮。</p>
+        <div class="slinks">
+          <a href="https://agefans.ge" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/agefanscom/website" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#ff7eb3,#ffb3c8)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#ff7eb3,#ffb3c8)"><svg><use href="#ic-ying"/></svg></span>
+          <div class="sinfo"><h4>樱花动漫</h4><p class="sdesc">动漫 · 新番（域名常变且当前镜像证书异常（浏览器会警告）） <span class="ct">影视</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">樱花动漫（多镜像），新番更新快，日漫国漫全。域名常变，失效时搜索「樱花动漫 最新」找当前镜像。本机探测仅代理可达。</p>
+        <div class="slinks"><a href="https://www.yhdmp.cc" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#7b5cff,#b39bff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#7b5cff,#b39bff)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>ZzzFun</h4><p class="sdesc">动漫 · 新番 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">新番资讯 + 在线播放，覆盖日漫国漫，更新及时，支持缓存，播放流畅画质不错。域名变动时搜「ZzzFun 最新」确认当前入口。</p>
+        <div class="slinks"><a href="http://www.zzzfun.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#00b8a9,#5fe3d0)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#00b8a9,#5fe3d0)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>OmoFun</h4><p class="sdesc">免费动漫 · 高清 <span class="ct">影视</span></p></div>
+        </div>
+        <p class="stip">专注免费动漫：日漫/国漫/美漫高清播放，界面现代、分类筛选，追求少广告的追番体验，更新跟官方同步。发布页：GitHub omofundm/omofundm（GitHub 校验源）。</p>
+        <div class="slinks">
+          <a href="https://omo.fun" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/omofundm/omofundm" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#e86f8a,#ffb3c1)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e86f8a,#ffb3c1)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>稀饭动漫</h4><p class="sdesc">动漫 · 地址待定 <span class="ct">影视</span></p></div>
+          <span class="stags"><span class="tag todo">地址待定</span></span>
+        </div>
+        <p class="stip">域名多变，当前未锁定可用地址。本磁贴为「留空位」设计：GitHub 校验表（surface_sites.json）下发可用地址后自动点亮。</p>
+        <p class="todoguide">留空位站点：暂无主站链接，GitHub 校验表下发可用地址后此卡自动补上。</p>
+      </article>
+
+      <article class="site" data-cat="video">
+        <span class="bar" style="background:linear-gradient(180deg,#c56f3c,#ffb38a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#c56f3c,#ffb38a)"><svg><use href="#ic-cvideo"/></svg></span>
+          <div class="sinfo"><h4>Anfuns</h4><p class="sdesc">动漫 · 地址待定 <span class="ct">影视</span></p></div>
+          <span class="stags"><span class="tag todo">地址待定</span></span>
+        </div>
+        <p class="stip">域名多变，当前未锁定可用地址。本磁贴为「留空位」设计：GitHub 校验表下发可用地址后自动点亮。</p>
+        <p class="todoguide">留空位站点：暂无主站链接，GitHub 校验表下发可用地址后此卡自动补上。</p>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= 常用平台 ================= -->
+  <section class="catsec" id="sec-daily">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#4a90ff,#7cc4ff)"></span>常用平台<span class="cnt">6 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="daily video">
+        <span class="bar" style="background:linear-gradient(180deg,#161823,#3c415c)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#161823,#3c415c)"><svg><use href="#ic-douyin"/></svg></span>
+          <div class="sinfo"><h4>抖音</h4><p class="sdesc">短视频 / 直播 <span class="ct">常用平台 · 影视</span></p></div>
+        </div>
+        <p class="stip">刷到的无水印视频流会被实时捕获，点下载即可保存（可全选批量）。</p>
+        <div class="slinks"><a href="https://www.douyin.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="daily">
+        <span class="bar" style="background:linear-gradient(180deg,#ff2442,#ff6b7d)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#ff2442,#ff6b7d)"><svg><use href="#ic-xhs"/></svg></span>
+          <div class="sinfo"><h4>小红书</h4><p class="sdesc">图文 / 笔记 <span class="ct">常用平台</span></p></div>
+        </div>
+        <p class="stip">笔记图片与视频会被捕获，图片可单张或批量下载。</p>
+        <div class="slinks"><a href="https://www.xiaohongshu.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="daily video">
+        <span class="bar" style="background:linear-gradient(180deg,#ff5000,#ff8a3d)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#ff5000,#ff8a3d)"><svg><use href="#ic-ks"/></svg></span>
+          <div class="sinfo"><h4>快手</h4><p class="sdesc">短视频 / 直播 <span class="ct">常用平台 · 影视</span></p></div>
+        </div>
+        <p class="stip">短视频流实时捕获，支持批量下载。</p>
+        <div class="slinks"><a href="https://www.kuaishou.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="daily">
+        <span class="bar" style="background:linear-gradient(180deg,#e6162d,#f5606f)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e6162d,#f5606f)"><svg><use href="#ic-weibo"/></svg></span>
+          <div class="sinfo"><h4>微博</h4><p class="sdesc">热搜 / 图文视频 <span class="ct">常用平台</span></p></div>
+        </div>
+        <p class="stip">热搜页/时间线的图片与视频会被捕获。</p>
+        <div class="slinks"><a href="https://weibo.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="daily academic">
+        <span class="bar" style="background:linear-gradient(180deg,#0066ff,#4d94ff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#0066ff,#4d94ff)"><svg><use href="#ic-zhihu"/></svg></span>
+          <div class="sinfo"><h4>知乎</h4><p class="sdesc">问答 / 专栏 <span class="ct">常用平台 · 学术</span></p></div>
+        </div>
+        <p class="stip">问答与专栏长文可一键「存为 Word」（文字/表格/图片按原位置导出）。</p>
+        <div class="slinks"><a href="https://www.zhihu.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="daily music">
+        <span class="bar" style="background:linear-gradient(180deg,#c20c0c,#e85656)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#c20c0c,#e85656)"><svg><use href="#ic-m163"/></svg></span>
+          <div class="sinfo"><h4>网易云</h4><p class="sdesc">音乐 / MV <span class="ct">常用平台 · 音乐</span></p></div>
+        </div>
+        <p class="stip">评论区氛围最强，免费内容多。MV/封面媒体会被捕获下载；黑胶 VIP 曲目仅能抓到试听片段。</p>
+        <div class="slinks"><a href="https://music.163.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= 音乐 ================= -->
+  <section class="catsec" id="sec-music">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#6a5bff,#a08fff)"></span>音乐<span class="cnt">6 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="music">
+        <span class="bar" style="background:linear-gradient(180deg,#1fae6a,#6fe3a8)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#1fae6a,#6fe3a8)"><svg><use href="#ic-cmusic"/></svg></span>
+          <div class="sinfo"><h4>铜钟音乐</h4><p class="sdesc">极简在线听歌 <span class="ct">音乐</span></p></div>
+          <span class="stags"><span class="tag dead">已失效</span></span>
+        </div>
+        <p class="stip">开源极简在线听歌站：搜索歌曲/播放列表/滚动歌词/创建歌单，无广告无社交干扰。注意原 tonzhon.com 已非正版，用 whamon 镜像。播放的音频流可直接捕获下载。</p>
+        <p class="deadguide">换域名指引：已失效（本机探测不通）。原 tonzhon.com 已非正版，搜索「铜钟音乐」确认 whamon 等当前镜像；GitHub 校验表确认恢复后自动点亮。</p>
+        <div class="slinks"><a href="https://tonzhon.whamon.com/" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="music">
+        <span class="bar" style="background:linear-gradient(180deg,#f06292,#ffa4c3)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#f06292,#ffa4c3)"><svg><use href="#ic-cmusic"/></svg></span>
+          <div class="sinfo"><h4>歌曲宝</h4><p class="sdesc">全网搜歌 · 导出 <span class="ct">音乐</span></p></div>
+        </div>
+        <p class="stip">全网歌曲搜索试听 + 多格式导出下载，适合快速找歌。下载链接（mp3/flac）会被捕获。</p>
+        <div class="slinks"><a href="https://www.gequbao.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="music">
+        <span class="bar" style="background:linear-gradient(180deg,#8a6fd1,#c0aef0)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#8a6fd1,#c0aef0)"><svg><use href="#ic-cmusic"/></svg></span>
+          <div class="sinfo"><h4>HiFiNi</h4><p class="sdesc">无损音乐分享 <span class="ct">音乐</span></p></div>
+          <span class="stags"><span class="tag dead">已失效</span></span>
+        </div>
+        <p class="stip">音乐磁场：FLAC/APE 无损分享社区，资源质量高，需注册/积分下载。下载附件会被捕获。</p>
+        <p class="deadguide">换域名指引：已失效（本机探测不通）。搜索「HiFiNi 音乐磁场 最新」找当前域名；GitHub 校验表确认恢复后自动点亮。</p>
+        <div class="slinks"><a href="https://www.hifini.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="music">
+        <span class="bar" style="background:linear-gradient(180deg,#3b82f6,#8fb8ff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#3b82f6,#8fb8ff)"><svg><use href="#ic-cmusic"/></svg></span>
+          <div class="sinfo"><h4>Listen1</h4><p class="sdesc">聚合播放器(开源) <span class="ct">音乐</span></p></div>
+        </div>
+        <p class="stip">开源聚合播放器（GitHub 校验源 listen1_chrome_extension / listen1_desktop）：聚合网易云/QQ/酷狗/咪咕/B站等的免费内容，播放失败自动切源，插件版+桌面版。只聚合各平台免费内容，非破解。</p>
+        <div class="slinks">
+          <a href="https://listen1.github.io/listen1/" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/listen1/listen1_chrome_extension" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+      <article class="site" data-cat="music">
+        <span class="bar" style="background:linear-gradient(180deg,#7209b7,#b57bee)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#7209b7,#b57bee)"><svg><use href="#ic-cmusic"/></svg></span>
+          <div class="sinfo"><h4>洛雪音乐</h4><p class="sdesc">开源音乐 · 音源 <span class="ct">音乐</span></p></div>
+        </div>
+        <p class="stip">开源跨平台音乐播放器（GitHub 校验源 lyswhut/lx-music-desktop）：配合社区音源插件实现标准/无损/Hi-Res 直链下载，无广告无需登录。音源需另行导入（社区维护）。</p>
+        <div class="slinks">
+          <a href="https://github.com/lyswhut/lx-music-desktop" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/lyswhut/lx-music-desktop" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+      <article class="site" data-cat="music ai">
+        <span class="bar" style="background:linear-gradient(180deg,#e84393,#fd79a8)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e84393,#fd79a8)"><svg><use href="#ic-cmusic"/></svg></span>
+          <div class="sinfo"><h4>苏诺之音</h4><p class="sdesc">AI 生成歌曲 <span class="ct">音乐 · AI</span></p></div>
+        </div>
+        <p class="stip">国内 Suno AI 站点：用文字描述生成歌曲，适合玩 AI 音乐创作。生成的音频可捕获下载。</p>
+        <div class="slinks"><a href="https://www.suno.cn" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= 电子书 · 书源 ================= -->
+  <section class="catsec" id="sec-book">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#e8a33d,#f0c987)"></span>电子书 · 书源<span class="cnt">6 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="book">
+        <span class="bar" style="background:linear-gradient(180deg,#e8a33d,#f5c26b)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e8a33d,#f5c26b)"><svg><use href="#ic-cbook"/></svg></span>
+          <div class="sinfo"><h4>鸠摩搜书</h4><p class="sdesc">电子书搜聚合（直连） <span class="ct">电子书</span></p></div>
+        </div>
+        <p class="stip">电子书搜索聚合引擎：输入书名聚合各网盘/站点资源（pdf/epub/mobi），直连可用。搜到的文档链接会被捕获为「文档」类可下载。</p>
+        <div class="slinks"><a href="https://www.jiumodiary.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="book">
+        <span class="bar" style="background:linear-gradient(180deg,#1a73c9,#5aa2e8)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#1a73c9,#5aa2e8)"><svg><use href="#ic-zlib"/></svg></span>
+          <div class="sinfo"><h4>Z-Library</h4><p class="sdesc">电子书（需代理） <span class="ct">电子书</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span><span class="tag dead">已失效</span></span>
+        </div>
+        <p class="stip">全球最大电子书库之一，需系统代理。域名常变；PDF/EPUB 下载会被捕获。</p>
+        <div class="slinks"><a href="https://z-library.sk" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="book">
+        <span class="bar" style="background:linear-gradient(180deg,#7c3aed,#a78bfa)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)"><svg><use href="#ic-annas"/></svg></span>
+          <div class="sinfo"><h4>Anna's Archive</h4><p class="sdesc">全网书聚合（需代理） <span class="ct">电子书</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span><span class="tag dead">已失效</span></span>
+        </div>
+        <p class="stip">聚合全球图书馆/书站资源的开源搜索引擎（影子图书馆），需系统代理。PDF/EPUB 下载会被捕获。</p>
+        <p class="deadguide">换域名指引：已失效（本机探测不通）。搜索「Anna's Archive 最新地址」或从镜像入口进入；GitHub 校验表确认恢复后自动点亮。</p>
+        <div class="slinks"><a href="https://annas-archive.org" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="book">
+        <span class="bar" style="background:linear-gradient(180deg,#d35400,#f0a05a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#d35400,#f0a05a)"><svg><use href="#ic-cbook"/></svg></span>
+          <div class="sinfo"><h4>aoaostar书源</h4><p class="sdesc">书源 3900+ 一站式 <span class="ct">电子书</span></p></div>
+        </div>
+        <p class="stip">Legado（阅读3.0 App）书源聚合仓库（GitHub 校验源 aoaostar/legado）：全量书源约 3900+ 条每日同步检测，含精品/破冰/关耳女频等，网页上一键导入到阅读 App。书源 = JSON 规则，导入后在手机/桌面阅读 App 里搜书读正文。</p>
+        <div class="slinks">
+          <a href="https://legado.aoaostar.com" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/aoaostar/legado" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+      <article class="site" data-cat="book">
+        <span class="bar" style="background:linear-gradient(180deg,#16a085,#5fd9c0)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#16a085,#5fd9c0)"><svg><use href="#ic-cbook"/></svg></span>
+          <div class="sinfo"><h4>XIU2书源</h4><p class="sdesc">精品书源 · 少而精 <span class="ct">电子书</span></p></div>
+        </div>
+        <p class="stip">XIU2 精品书源（GitHub 校验源 XIU2/Yuedu）：作者自用精选 20+ 条，更新稳定、失效少、解析质量高，适合不想导太多源的用户。网络导入地址见页面（jsDelivr/Bitbucket 多 CDN）。</p>
+        <div class="slinks">
+          <a href="https://yuedu.xiu2.xyz" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/XIU2/Yuedu" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+      <article class="site" data-cat="book">
+        <span class="bar" style="background:linear-gradient(180deg,#0096fa,#66c2ff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#0096fa,#66c2ff)"><svg><use href="#ic-cbook"/></svg></span>
+          <div class="sinfo"><h4>Pixiv书源</h4><p class="sdesc">Pixiv 小说导入阅读 <span class="ct">电子书</span></p></div>
+        </div>
+        <p class="stip">专为阅读 App 设计的 Pixiv 小说书源（GitHub 校验源 DowneyRem/PixivSource）：搜索作者/发现/书签/登录检测。配合本软件里世界的 Pixiv 登录使用体验更佳。教程站含快速开始与功能手册。</p>
+        <div class="slinks">
+          <a href="https://pixivsource.pages.dev" target="_blank" rel="noopener">打开主站 ↗</a>
+          <a href="https://github.com/DowneyRem/PixivSource" target="_blank" rel="noopener">GitHub 校验源 ↗</a>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= 游戏 ================= -->
+  <section class="catsec" id="sec-game">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#21b573,#5fd9a4)"></span>游戏<span class="cnt">7 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#fa5c5c,#ff9d9d)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#fa5c5c,#ff9d9d)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>itch.io</h4><p class="sdesc">独立游戏 · 免费 <span class="ct">游戏</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">全球独立游戏宝藏：大量开发者免费游戏/试玩版，「Name your own price」可填 0，创意多无套路。本机探测仅代理可达（部分地区可直连）。游戏包（zip）会被捕获下载。</p>
+        <div class="slinks"><a href="https://itch.io" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#2a2a2a,#6b6b6b)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#2a2a2a,#6b6b6b)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>Epic 喜加一</h4><p class="sdesc">每周限免 <span class="ct">游戏</span></p></div>
+        </div>
+        <p class="stip">Epic 每周固定送 1-2 款游戏（常有 3A 大作），领取后永久拥有，国区基本可用。周四更新，记得每周来看。</p>
+        <div class="slinks"><a href="https://store.epicgames.com/free-games" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#1b2838,#4c6b8a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#1b2838,#4c6b8a)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>Steam</h4><p class="sdesc">免费游戏 · 特惠 <span class="ct">游戏</span></p></div>
+        </div>
+        <p class="stip">大量 F2P 永久免费游戏 + 限时免费（Free to Keep）+ 免费周末试玩，社区评价真实。</p>
+        <div class="slinks"><a href="https://store.steampowered.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#ff7597,#ffb3c6)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#ff7597,#ffb3c6)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>KrzACG</h4><p class="sdesc">Galgame 汉化 <span class="ct">游戏</span></p></div>
+        </div>
+        <p class="stip">每日更新绅士向 ACG / Galgame 汉化资源，分类清晰资源较全，适合找日系 RPG/SLG/ADV。下载前建议杀毒扫描。</p>
+        <div class="slinks"><a href="https://www.krzacg.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#0abde3,#6bd9f0)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#0abde3,#6bd9f0)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>鲲 Galgame</h4><p class="sdesc">Gal 资源社区 <span class="ct">游戏</span></p></div>
+        </div>
+        <p class="stip">开源 Galgame 资源社区：免费下载列表丰富（PC/模拟器），更新活跃，强调分享，二次元圈口碑好。</p>
+        <div class="slinks"><a href="https://www.kungal.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#596275,#97a5c0)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#596275,#97a5c0)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>2DFan</h4><p class="sdesc">Gal 补丁 · 汉化 <span class="ct">游戏</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">Galgame 补丁/汉化资源讨论社区，找汉化补丁与存档修改的首选。本机探测仅代理可达。</p>
+        <div class="slinks"><a href="https://2dfan.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="game">
+        <span class="bar" style="background:linear-gradient(180deg,#4a69bd,#82a0e8)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#4a69bd,#82a0e8)"><svg><use href="#ic-cgame"/></svg></span>
+          <div class="sinfo"><h4>3DM</h4><p class="sdesc">老牌游戏资源 <span class="ct">游戏</span></p></div>
+        </div>
+        <p class="stip">老牌游戏站：免费汉化/补丁/单机资源多，社区活跃。广告较多，建议配合广告拦截；口碑两极，资源全。</p>
+        <div class="slinks"><a href="https://www.3dmgame.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= AI 制作 ================= -->
+  <section class="catsec" id="sec-ai">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#8a4fff,#c29bff)"></span>AI 制作<span class="cnt">6 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="ai">
+        <span class="bar" style="background:linear-gradient(180deg,#2a5fd0,#6f9bff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#2a5fd0,#6f9bff)"><svg><use href="#ic-cai"/></svg></span>
+          <div class="sinfo"><h4>Civitai</h4><p class="sdesc">最大 AI 模型库（需代理） <span class="ct">AI</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">全球最大 AI 绘画模型社区：底模/LoRA/Embedding/ControlNet/工作流最全（15万+），有评分/触发词/推荐设置。下载 safetensors 格式，注意许可证。需系统代理；模型文件下载会被捕获。</p>
+        <div class="slinks"><a href="https://civitai.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="ai">
+        <span class="bar" style="background:linear-gradient(180deg,#ffd21e,#ffe98a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e8b400,#ffd76b)"><svg><use href="#ic-cai"/></svg></span>
+          <div class="sinfo"><h4>Hugging Face</h4><p class="sdesc">官方模型权重（需代理） <span class="ct">AI</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">官方与研究级模型首选：SDXL/Flux/Wan2.1/HunyuanVideo 等开源权重+量化版，许可证清晰。国内可改用镜像 hf-mirror.com 加速。需系统代理。</p>
+        <div class="slinks"><a href="https://huggingface.co" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="ai">
+        <span class="bar" style="background:linear-gradient(180deg,#6c5ce7,#a99cff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#6c5ce7,#a99cff)"><svg><use href="#ic-cai"/></svg></span>
+          <div class="sinfo"><h4>LiblibAI</h4><p class="sdesc">国内 AI 绘画社区 <span class="ct">AI</span></p></div>
+        </div>
+        <p class="stip">哩布哩布 AI：国内最大 AI 绘画模型社区（免翻墙），10万+ 模型，国风/二次元/写实 LoRA 丰富，仿 C 站界面，支持在线生图/云端训练，网盘直链下载快。</p>
+        <div class="slinks"><a href="https://www.liblib.art" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="ai">
+        <span class="bar" style="background:linear-gradient(180deg,#6a5acd,#9d8fff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#6a5acd,#9d8fff)"><svg><use href="#ic-cai"/></svg></span>
+          <div class="sinfo"><h4>魔搭社区</h4><p class="sdesc">阿里系模型 <span class="ct">AI</span></p></div>
+        </div>
+        <p class="stip">阿里 ModelScope：Wan2.1/通义系等开源模型权重完整，国内下载快，镜像友好。</p>
+        <div class="slinks"><a href="https://modelscope.cn" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="ai">
+        <span class="bar" style="background:linear-gradient(180deg,#e17055,#f5a582)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e17055,#f5a582)"><svg><use href="#ic-cai"/></svg></span>
+          <div class="sinfo"><h4>OpenArt</h4><p class="sdesc">ComfyUI 工作流（需代理） <span class="ct">AI</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">高质量 ComfyUI 工作流分享：节点图 + 配套模型推荐，直接导入 ComfyUI 使用。需系统代理。</p>
+        <div class="slinks"><a href="https://openart.ai/workflows" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="ai">
+        <span class="bar" style="background:linear-gradient(180deg,#0984e3,#74b9ff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#0984e3,#74b9ff)"><svg><use href="#ic-cai"/></svg></span>
+          <div class="sinfo"><h4>Tensor.Art</h4><p class="sdesc">在线生图 · 模型库 <span class="ct">AI</span></p></div>
+        </div>
+        <p class="stip">在线生成 + 模型库一体，二次元向模型多，LoRA 社区活跃，免费额度日常够用。</p>
+        <div class="slinks"><a href="https://tensor.art" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= 学术 · 医学 ================= -->
+  <section class="catsec" id="sec-academic">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#3268ac,#7fb0e0)"></span>学术 · 医学<span class="cnt">5 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="academic">
+        <span class="bar" style="background:linear-gradient(180deg,#0e9488,#5eead4)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#0e9488,#5eead4)"><svg><use href="#ic-dxy"/></svg></span>
+          <div class="sinfo"><h4>丁香园</h4><p class="sdesc">医学 · 药学（直连） <span class="ct">学术</span></p></div>
+        </div>
+        <p class="stip">国内医学药学专业社区：用药参考、文献、指南。文章可「存为 Word」。</p>
+        <div class="slinks"><a href="https://www.dxy.cn" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="academic">
+        <span class="bar" style="background:linear-gradient(180deg,#3268ac,#6b9bd6)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#3268ac,#6b9bd6)"><svg><use href="#ic-pubmed"/></svg></span>
+          <div class="sinfo"><h4>PubMed</h4><p class="sdesc">医学文献（需代理） <span class="ct">学术</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">美国国立医学图书馆生物医学文献库，医学检索权威。需系统代理；部分全文 PDF 可捕获。</p>
+        <div class="slinks"><a href="https://pubmed.ncbi.nlm.nih.gov" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="academic">
+        <span class="bar" style="background:linear-gradient(180deg,#4285f4,#7aa7ff)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#4285f4,#7aa7ff)"><svg><use href="#ic-cacademic"/></svg></span>
+          <div class="sinfo"><h4>Google 学术</h4><p class="sdesc">学术搜索（需代理） <span class="ct">学术</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">学术文献搜索引擎：引用/版本/相关文章。需系统代理。</p>
+        <div class="slinks"><a href="https://scholar.google.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="academic">
+        <span class="bar" style="background:linear-gradient(180deg,#b31b1b,#e06666)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#b31b1b,#e06666)"><svg><use href="#ic-arxiv"/></svg></span>
+          <div class="sinfo"><h4>arXiv</h4><p class="sdesc">科学预印本（需代理） <span class="ct">学术</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">物理/数学/CS 预印本库，论文 PDF 免费下载（会被捕获为「文档」）。需系统代理。</p>
+        <div class="slinks"><a href="https://arxiv.org" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="academic">
+        <span class="bar" style="background:linear-gradient(180deg,#1a5cb0,#5a8ad6)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#1a5cb0,#5a8ad6)"><svg><use href="#ic-cnki"/></svg></span>
+          <div class="sinfo"><h4>中国知网</h4><p class="sdesc">学术文献（直连） <span class="ct">学术</span></p></div>
+        </div>
+        <p class="stip">国内最大中文学术文献库，硕博论文/期刊/会议。正文下载一般需机构权限。</p>
+        <div class="slinks"><a href="https://www.cnki.net" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ================= 软件 · 资源社区 ================= -->
+  <section class="catsec" id="sec-res">
+    <h2 class="cat"><span class="dot" style="background:linear-gradient(135deg,#4d6b8a,#8aa8c4)"></span>软件 · 资源社区<span class="cnt">7 站</span></h2>
+    <div class="grid">
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#24292e,#57606a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#24292e,#57606a)"><svg><use href="#ic-github"/></svg></span>
+          <div class="sinfo"><h4>GitHub</h4><p class="sdesc">开源资源（代理/直连） <span class="ct">资源社区</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">全球最大开源托管平台：软件/脚本/模型发布页。Release 附件下载会被捕获。本软件的站点校验表也托管在 GitHub 上。</p>
+        <div class="slinks"><a href="https://github.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#4d4d4d,#8c8c8c)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#4d4d4d,#8c8c8c)"><svg><use href="#ic-wiki"/></svg></span>
+          <div class="sinfo"><h4>维基百科</h4><p class="sdesc">百科知识（需代理） <span class="ct">资源社区</span></p></div>
+          <span class="stags"><span class="tag proxy">需代理</span></span>
+        </div>
+        <p class="stip">自由百科全书，条目可「存为 Word」离线阅读。需系统代理。</p>
+        <div class="slinks"><a href="https://zh.wikipedia.org" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#e67e22,#f5b06a)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#e67e22,#f5b06a)"><svg><use href="#ic-cres"/></svg></span>
+          <div class="sinfo"><h4>果核剥壳</h4><p class="sdesc">绿色软件 · 更新快 <span class="ct">资源社区</span></p></div>
+        </div>
+        <p class="stip">绿色/免安装软件站，覆盖 PC 和安卓，资源更新快、相对干净、无过多捆绑。</p>
+        <div class="slinks"><a href="https://www.ghxi.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#27ae60,#6fd79f)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#27ae60,#6fd79f)"><svg><use href="#ic-cres"/></svg></span>
+          <div class="sinfo"><h4>小众软件</h4><p class="sdesc">小众实用工具 <span class="ct">资源社区</span></p></div>
+        </div>
+        <p class="stip">偏小众实用工具推荐博客，文章详细，下载链接靠谱，发现好工具的首选。</p>
+        <div class="slinks"><a href="https://www.appinn.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#c0392b,#e67e6b)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#c0392b,#e67e6b)"><svg><use href="#ic-cres"/></svg></span>
+          <div class="sinfo"><h4>吾爱破解</h4><p class="sdesc">技术社区 · 资源 <span class="ct">资源社区</span></p></div>
+        </div>
+        <p class="stip">国内知名技术社区：去广告/绿色版/逆向讨论多。资源需自行判断（论坛性质），下载后建议杀毒扫描。</p>
+        <div class="slinks"><a href="https://www.52pojie.cn" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#2980b9,#6db3e8)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#2980b9,#6db3e8)"><svg><use href="#ic-cres"/></svg></span>
+          <div class="sinfo"><h4>423Down</h4><p class="sdesc">老牌软件站 <span class="ct">资源社区</span></p></div>
+        </div>
+        <p class="stip">老牌软件站：办公/设计/系统工具多，审核较严，绿色版质量较高。</p>
+        <div class="slinks"><a href="https://www.423down.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+      <article class="site" data-cat="res">
+        <span class="bar" style="background:linear-gradient(180deg,#16a085,#5fd9c0)"></span>
+        <div class="shead">
+          <span class="sicon" style="background:linear-gradient(135deg,#16a085,#5fd9c0)"><svg><use href="#ic-cres"/></svg></span>
+          <div class="sinfo"><h4>殁漂遥</h4><p class="sdesc">绿色便携软件 <span class="ct">资源社区</span></p></div>
+        </div>
+        <p class="stip">专注绿色便携软件的下载站，免安装解压即用。</p>
+        <div class="slinks"><a href="https://www.mpyit.com" target="_blank" rel="noopener">打开主站 ↗</a></div>
+      </article>
+
+    </div>
+  </section>
+
+  <footer>
+    小小下载器 · 表世界站点分类总览 · 离线内置页（数据日期 2026-09-18）<br>
+    失效判定来自本机连通性探测 + GitHub 校验表，域名常变的站以应用内实际校验为准。
+  </footer>
+</div>
+
+<script>
+(function () {
+  var chips = Array.prototype.slice.call(document.querySelectorAll('.fbtn'));
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.site'));
+  var secs = Array.prototype.slice.call(document.querySelectorAll('.catsec'));
+  var shown = document.getElementById('shown');
+
+  function apply(f, scroll) {
+    var n = 0;
+    chips.forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-filter') === f); });
+    cards.forEach(function (c) {
+      var cats = (c.getAttribute('data-cat') || '').split(/\s+/);
+      var vis = (f === 'all') || cats.indexOf(f) >= 0;
+      c.classList.toggle('hide', !vis);
+      if (vis) n++;
+    });
+    secs.forEach(function (s) {
+      var visCnt = s.querySelectorAll('.site:not(.hide)').length;
+      s.classList.toggle('hide', visCnt === 0);
+      var cnt = s.querySelector('.cnt');
+      if (cnt) cnt.textContent = visCnt + ' 站';
+    });
+    if (shown) shown.textContent = n;
+    if (scroll) {
+      if (f === 'all') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        var sec = document.getElementById('sec-' + f);
+        if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }
+
+  chips.forEach(function (b) {
+    b.addEventListener('click', function () { apply(b.getAttribute('data-filter'), true); });
+  });
+
+  // 支持 #sec-music 这类锚点直达（打开页面时按 hash 预筛选）
+  if (location.hash.indexOf('#sec-') === 0) {
+    var key = location.hash.replace('#sec-', '');
+    if (key && key !== 'all') apply(key, false);
+  }
+})();
+</script>
+</body>
+</html>

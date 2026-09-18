@@ -10,7 +10,7 @@
         </n-icon>
       </div>
       <div class="login-text">
-        <div class="login-title">小小下载器</div>
+        <div class="login-title">小小浏览器</div>
         <div class="login-subtitle">{{ loginSubtitle }}</div>
       </div>
       <div class="login-actions">
@@ -152,6 +152,51 @@
 
       <!-- 未登录：登录表单 + 登录引导（打开登录页 / 一键抓取浏览器 Cookie） -->
       <template v-else>
+        <!-- 综合资源站点：统一登录卡（leakedzone 过盾 / 其余三站免登录说明） -->
+        <div v-if="['leakedzone', 'coomerst', 'coomerfans', 'fapello'].includes(site)" class="pawchive-login-form">
+          <div class="login-hint" style="margin-bottom: 6px">
+            {{ site === 'leakedzone'
+              ? 'Leakedzone 需要 Cloudflare 过盾（等同于登录）：'
+              : (site === 'coomerfans'
+                ? 'CoomerFans 无需账号，自动 PoW 过盾：'
+                : '本站无需登录，装好通用代理即可直接浏览：') }}
+          </div>
+          <template v-if="site === 'leakedzone'">
+            <n-button size="small" type="success" block @click="emit('leak-edge-login')">
+              ① 用系统 Edge 过盾登录（推荐·一次就过）
+            </n-button>
+            <n-button
+              size="small"
+              type="info"
+              block
+              style="margin-top: 6px"
+              :disabled="!leakEdgeRunning"
+              @click="emit('leak-edge-harvest')"
+            >
+              ② 我已过盾，抓取 Cookie
+            </n-button>
+            <n-button size="small" quaternary block style="margin-top: 6px" @click="emit('site-oauth-login', site)">
+              备用：内置浏览器过盾（验证可能循环）
+            </n-button>
+            <div class="login-hint">
+              过盾流程：点①在弹出的 Edge 里完成人机验证（出现网站内容）→ 回来点②，
+              Cookie+UA 自动保存并验证。Edge 窗口之后可关可留（保留则下次免验证）。
+            </div>
+          </template>
+          <template v-else>
+            <n-button size="small" quaternary block @click="emit('site-oauth-login', site)">
+              打开内置浏览器（浏览/刷新会话）
+            </n-button>
+            <div class="login-hint">
+              {{ site === 'fapello'
+                ? 'Fapello 免登录直连；图片走媒体代理，需通用代理（默认 10809）在线。'
+                : (site === 'coomerfans'
+                  ? 'CoomerFans 免登录；首次访问自动完成 PoW 过盾，需通用代理在线。'
+                  : 'Coomer 免登录；走 kemono 接口，需通用代理在线。') }}
+            </div>
+          </template>
+        </div>
+
         <!-- Pawchive 用户名密码登录（完整登录套件） -->
         <div v-if="site === 'pawchive'" class="pawchive-login-form">
           <n-input
@@ -178,8 +223,12 @@
             :disabled="!loginUsername.trim() || !loginPassword"
             @click="handleLogin"
           >
-            {{ loginLoading ? '登录中...' : '登录' }}
-          </n-button>
+            </n-button>
+          <div v-if="loginLoading" style="margin-top: 4px; text-align: center">
+            <n-button size="tiny" quaternary type="warning" @click="emit('cancel-login', 'pawchive')">
+              ✕ 网络不佳？点击取消转圈
+            </n-button>
+          </div>
           <n-button
             size="small"
             block
@@ -324,8 +373,12 @@
             :disabled="!iwaraEmailInput.trim() || !iwaraPasswordInput"
             @click="handleIwaraLogin"
           >
-            {{ iwaraLoginLoading ? '登录中...' : '登录' }}
-          </n-button>
+            </n-button>
+          <div v-if="iwaraLoginLoading" style="margin-top: 4px; text-align: center">
+            <n-button size="tiny" quaternary type="warning" @click="emit('cancel-login', 'iwara')">
+              ✕ 网络不佳？点击取消转圈
+            </n-button>
+          </div>
           <n-button
             size="small"
             block
@@ -388,8 +441,12 @@
             :disabled="!hanimeEmailInput.trim() || !hanimePasswordInput"
             @click="handleHanimeLogin"
           >
-            {{ hanimeLoginLoading ? '登录中...' : '登录' }}
-          </n-button>
+            </n-button>
+          <div v-if="hanimeLoginLoading" style="margin-top: 4px; text-align: center">
+            <n-button size="tiny" quaternary type="warning" @click="emit('cancel-login', 'hanime')">
+              ✕ 网络不佳？点击取消转圈
+            </n-button>
+          </div>
           <n-button
             size="small"
             block
@@ -416,8 +473,12 @@
             :loading="pixivLoginLoading"
             @click="handlePixivLogin"
           >
-            {{ pixivLoginLoading ? '登录中...' : '打开内置浏览器登录（推荐）' }}
-          </n-button>
+            </n-button>
+          <div v-if="pixivLoginLoading" style="margin-top: 4px; text-align: center">
+            <n-button size="tiny" quaternary type="warning" @click="emit('cancel-login', 'pixiv')">
+              ✕ 网络不佳？点击取消转圈
+            </n-button>
+          </div>
           <div class="login-hint">
             在弹出的内置浏览器中完成 Pixiv 登录，程序自动提取授权码换取长期 Refresh Token（加密存本机）；
             登录后可搜索/浏览 R-18、关注作者、收藏作品、发评论、发布作品；Token 失效需重新点按钮登录
@@ -450,8 +511,12 @@
             :disabled="!asmrNameInput.trim() || !asmrPasswordInput"
             @click="handleAsmrLogin"
           >
-            {{ asmrLoginLoading ? '登录中...' : '登录' }}
-          </n-button>
+            </n-button>
+          <div v-if="asmrLoginLoading" style="margin-top: 4px; text-align: center">
+            <n-button size="tiny" quaternary type="warning" @click="emit('cancel-login', 'asmr')">
+              ✕ 网络不佳？点击取消转圈
+            </n-button>
+          </div>
           <n-button
             size="small"
             block
@@ -486,6 +551,7 @@
           </div>
         </div>
 
+
         <!-- XVideos webview 浏览器登录（和 EX 站相同操作） -->
         <div v-if="site === 'xvideos'" class="pawchive-login-form">
           <n-button
@@ -500,6 +566,37 @@
             XVideos 点上方按钮在弹出的浏览器内登录（邮箱密码 / Google 授权皆可，首次可能有人机验证，按提示完成），
             登录后点弹窗下方"确认"自动抓取 Cookie；cookie 加密长期保存。
             已在设置中登录谷歌邮箱时，选"使用 Google 登录"会自动带入凭据
+          </div>
+        </div>
+
+        <!-- FC2 登录会话（webview 登录 + 账号密码保存；未登录也可浏览/看免费视频） -->
+        <div v-if="site === 'fc2'" class="pawchive-login-form">
+          <n-input v-model:value="fc2EmailInput" size="small" placeholder="FC2 ID（邮箱）" />
+          <n-input
+            v-model:value="fc2PasswordInput"
+            size="small"
+            type="password"
+            show-password-on="click"
+            placeholder="密码"
+          />
+          <n-button
+            size="small"
+            type="primary"
+            block
+            @click="emit('site-oauth-login', 'fc2')"
+          >
+            打开内置浏览器登录（推荐）
+          </n-button>
+          <n-button size="small" block @click="handleSiteSaveCred('fc2', fc2EmailInput, fc2PasswordInput)">
+            仅保存账号密码（加密存本机，登录页自动预填）
+          </n-button>
+          <n-button size="small" block tertiary type="error" @click="emit('site-logout', 'fc2')">
+            清除登录信息（退出）
+          </n-button>
+          <div class="login-hint">
+            FC2 点上方按钮在弹出的浏览器内登录 FC2 ID（免费邮箱注册，账号密码自动预填），
+            登录后点弹窗下方"确认"自动抓取 Cookie。不登录也可浏览/播放免费视频；
+            付费内容匿名只能看 sample 预览（界面会明确提示）
           </div>
         </div>
 
@@ -526,13 +623,14 @@
             block
             @click="handleJdbLogin"
           >
-            登录（弹窗内完成人机验证）
+            打开内置浏览器登录（推荐）
           </n-button>
           <n-button size="small" block @click="handleSiteSaveCred('javdb', jdbEmailInput, jdbPasswordInput)">
             仅保存账号密码（加密存本机）
           </n-button>
           <div class="login-hint">
-            JavDB 有 Cloudflare 验证，点登录后请在弹窗内完成验证并点击网站登录按钮；cookie 加密保存，约 7 天有效。
+            JavDB 有 Cloudflare 验证，点上方按钮后请在内置浏览器里完成验证、登录并点击"同意"；
+            然后点弹窗底部"确定"抓取 cookie 并自动关闭弹窗。cookie 加密保存，约 7 天有效。
             邮箱密码也会加密记录在本机，下次打开自动回填（登录成功时自动保存，无需重复输入）
           </div>
         </div>
@@ -604,7 +702,7 @@
         </div>
 
         <!-- 登录引导：打开登录页 -->
-        <div v-if="site !== 'oreno3d' && site !== 'erommdtube'" class="login-guide">
+        <div v-if="site !== 'oreno3d' && site !== 'erommdtube' && site !== 'javdb'" class="login-guide">
           <n-button size="small" block secondary @click="emit('open-login-page', site)">
             打开登录页（浏览器）
           </n-button>
@@ -621,7 +719,9 @@
                       ? '点上方"打开内置浏览器登录"在弹窗内登录（邮箱或 X 授权皆可），登录后点"确认"自动抓取 Cookie'
                       : site === 'xvideos'
                         ? '点上方"打开内置浏览器登录"在弹窗内登录（首次可能有人机验证），登录后点"确认"自动抓取 Cookie'
-                        : site === 'javdb'
+                        : site === 'fc2'
+                          ? '点上方"打开内置浏览器登录"在弹窗内登录 FC2 ID，登录后点"确认"自动抓取 Cookie；国内需先在下方设置 FC2 代理'
+                          : site === 'javdb'
                           ? '推荐用上方邮箱密码登录（自动预填 + 弹窗内完成 Cloudflare 验证）；国内必须配置下方 JavDB 代理'
                           : '推荐点上方"打开内置浏览器登录"在弹窗内登录 exhentai.org，登录后点"确认"自动抓取' }}
           </div>
@@ -664,7 +764,13 @@
         </div>
         <div v-for="t in followTags" :key="t.name" class="follow-tag-group">
           <div class="follow-tag-parent">
-            <span class="follow-tag-name">{{ t.name }}</span>
+            <span class="follow-tag-name follow-tag-clickable" :title="`点开查看「${t.name}」里归类的博主`"
+                  @click="toggleTagOpen(t.name)">
+              {{ t.name }}<span class="follow-tag-count">（{{ memberCount(t.name) }}）</span>
+            </span>
+            <n-button size="tiny" quaternary type="primary"
+                      :title="(openTag === t.name ? '收起' : `查看「${t.name}」里归类的博主`)"
+                      @click="toggleTagOpen(t.name)">{{ openTag === t.name ? '收起' : '查看' }}</n-button>
             <n-button
               size="tiny"
               quaternary
@@ -678,9 +784,29 @@
               v-for="c in t.children"
               :key="c"
               size="small"
-              closable
-              @close="emit('tw-delete-follow-tag', t.name, c)"
-            >{{ c }}</n-tag>
+              :type="openTag === t.name && openChild === c ? 'primary' : 'default'"
+              :title="`点开查看子类「${c}」里归类的博主`"
+              style="cursor: pointer"
+              @click="toggleChildFilter(t.name, c)"
+              @close.stop="emit('tw-delete-follow-tag', t.name, c)"
+            >{{ c }}（{{ childCount(t.name, c) }}）</n-tag>
+          </div>
+          <!-- 成员列表（点开母类后显示；子类 tag 可过滤） -->
+          <div v-if="openTag === t.name" class="follow-tag-members">
+            <div v-for="m in tagMembers(t.name)" :key="m.user_id" class="follow-tag-member"
+                 :title="`进入 @${m.screen_name} 的主页`"
+                 @click="openMember(m)">
+              <img v-if="m.thumbnail" class="follow-tag-avatar" :src="memberAvatar(m.thumbnail)" referrerpolicy="no-referrer" loading="lazy" />
+              <span v-else class="follow-tag-avatar follow-tag-avatar-ph">{{ (m.screen_name || '?')[0].toUpperCase() }}</span>
+              <div class="follow-tag-member-info">
+                <div class="follow-tag-member-name">{{ m.name || '@' + m.screen_name }}</div>
+                <div class="follow-tag-member-sub">@{{ m.screen_name }} · {{ m.tag }}</div>
+              </div>
+              <span class="follow-tag-member-go">主页 →</span>
+            </div>
+            <div v-if="!tagMembers(t.name).length" class="follow-tag-empty" style="padding: 4px 0">
+              该{{ openChild ? '子类' : '母类' }}还没有归类的博主（在右侧"关注列表"点用户卡片的"分类"按钮归类）
+            </div>
           </div>
         </div>
       </div>
@@ -758,6 +884,24 @@
           </svg>
         </n-icon>
       </button>
+      <!-- 手动抓取（资源嗅探，复刻 res-downloader）：独立全量窗口，浏览网页实时捕获媒体 -->
+      <button
+        class="round-btn"
+        title="手动抓取（打开资源嗅探窗口：内置浏览器浏览网页，视频/音频/图片实时捕获，勾选下载）"
+        @click="$emit('sniffer-open')"
+      >
+        <n-icon size="20">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v4"/>
+            <path d="M12 19v4"/>
+            <path d="M1 12h4"/>
+            <path d="M19 12h4"/>
+          </svg>
+        </n-icon>
+      </button>
+      <!-- 热门平台里模式：无界面按钮，连按 3 次 Alt 切换（App 全局手势） -->
     </div>
 
     <!-- 识图面板：粘贴窗口（存放搜出来的结果）+ 代理设置 -->
@@ -778,12 +922,33 @@
           </div>
         </div>
         <div class="setting-item">
-          <div class="setting-label">识图代理地址（Google / Yandex 国内必须；其他站一般直连）</div>
+          <div class="setting-label">识图代理地址（Lenso.ai 国内必须；其他站一般直连）</div>
           <n-input
             :value="settings.reverse_proxy"
             placeholder="如 http://127.0.0.1:10809，留空直连"
             size="small"
-            @change="v => emit('reverse-set-proxy', v)"
+            @change="v => emit('reverse-set-proxy', v, settings.reverse_proxy_all)"
+          />
+          <div style="margin-top: 8px">
+            <n-checkbox
+              size="small"
+              :checked="!!settings.reverse_proxy_all"
+              @update:checked="v => update('reverse_proxy_all', v)"
+            >
+              所有识图站点都走该代理
+            </n-checkbox>
+            <div class="switch-hint" style="margin-top: 4px">
+              关闭时仅 Lenso.ai 走代理，其余站点（trace.moe / SauceNAO / IQDB）直连
+            </div>
+          </div>
+        </div>
+        <div class="setting-item">
+          <div class="setting-label">SauceNAO API Key（可选；免费注册获取，可提升每日配额）</div>
+          <n-input
+            :value="settings.reverse_saucenao_api_key"
+            placeholder="留空 = 使用免费配额（saucenao.com 账号页获取 Key）"
+            size="small"
+            @change="v => update('reverse_saucenao_api_key', v)"
           />
         </div>
         <div class="setting-item">
@@ -1039,8 +1204,8 @@
     </div>
 
     <!-- 设置区（默认收起，点击"设置"展开） -->
-    <div v-show="activePanel === 'settings'" class="settings-section">
-      <n-scrollbar style="max-height: calc(100vh - 140px)">
+    <div v-show="activePanel === 'settings'" class="settings-section settings-full">
+      <n-scrollbar class="settings-full-scroll">
         <div class="settings-content">
           <div class="section-title">下载设置</div>
 
@@ -1056,6 +1221,27 @@
               />
               <n-button @click="selectFolder" type="primary" ghost>
                 选择
+              </n-button>
+            </n-input-group>
+          </div>
+
+          <!-- 表世界保存位置（仅影响美好世界） -->
+          <div class="setting-item">
+            <div class="setting-label">
+              表世界保存位置（仅影响「美好世界」的下载 / 视频流下载整片 / Word 导出）
+            </div>
+            <n-input-group>
+              <n-input
+                :value="settings.surface_save_path"
+                placeholder="默认: 用户下载文件夹"
+                readonly
+                style="flex: 1"
+              />
+              <n-button @click="selectSurfaceFolder" type="primary" ghost>
+                选择
+              </n-button>
+              <n-button v-if="settings.surface_save_path" ghost @click="update('surface_save_path', '')">
+                恢复默认
               </n-button>
             </n-input-group>
           </div>
@@ -1107,6 +1293,29 @@
               :max="20"
               style="width: 100%"
             />
+          </div>
+
+          <n-divider style="margin: 8px 0" />
+
+          <!-- 通用代理（默认代理与端口）：Pornhub 更新 / 新站默认出口 / leakedzone 过盾共用 -->
+          <div class="setting-item">
+            <div class="section-title">通用代理（默认代理与端口）</div>
+            <div class="setting-label">
+              Pornhub 更新检查、leakedzone 过盾、Coomer/CoomerFans/Fapello 等新站默认出口共用；留空 = 默认 http://127.0.0.1:10809，填 off = 直连
+            </div>
+            <n-input-group>
+              <n-input
+                :value="commonProxyDraft"
+                placeholder="http://127.0.0.1:10809（留空=默认，off=直连）"
+                @update:value="v => commonProxyDraft = v"
+                @keyup.enter="$emit('common-proxy', commonProxyDraft.trim())"
+              />
+              <n-button type="primary" @click="$emit('common-proxy', commonProxyDraft.trim())">保存</n-button>
+              <n-button @click="commonProxyDraft = ''; $emit('common-proxy', '')">恢复默认</n-button>
+            </n-input-group>
+            <div class="switch-hint" style="margin-top: 4px">
+              改完点「保存」立即生效（无需重启）；「恢复默认」回到 http://127.0.0.1:10809
+            </div>
           </div>
 
           <n-divider style="margin: 8px 0" />
@@ -1209,6 +1418,16 @@
                 @change="v => update('twitter_folder_template', v)"
               />
               <div class="switch-hint" style="margin-top: 4px">变量：{date}=年月 {date_full}=年月日 {title}=推文内容 {id}=推文ID</div>
+            </div>
+            <div class="setting-switch">
+              <div>
+                <div class="switch-label">MD5 查重</div>
+                <div class="switch-hint">同内容的图片/视频在多条推文重复出现时只保留一份（最早发布的），自动删除重复副本；对已下载过的旧文件同样生效</div>
+              </div>
+              <n-switch
+                :value="settings.twitter_md5_dedup !== false"
+                @update:value="v => update('twitter_md5_dedup', v)"
+              />
             </div>
           </template>
 
@@ -1359,6 +1578,20 @@
                 @change="v => $emit('site-set-proxy', 'xvideos', v)"
               />
               <div class="switch-hint" style="margin-top: 4px">XVideos 全球可直连；如登录被风控或访问慢再填代理</div>
+            </div>
+          </template>
+
+          <!-- FC2 专属设置（代理，国内必须） -->
+          <template v-if="site === 'fc2'">
+            <div class="setting-item">
+              <div class="setting-label">FC2 代理地址（登录 + 浏览 + 下载都走此代理）</div>
+              <n-input
+                :value="settings.fc2_proxy"
+                placeholder="如 http://127.0.0.1:10809"
+                size="small"
+                @change="v => $emit('site-set-proxy', 'fc2', v)"
+              />
+              <div class="switch-hint" style="margin-top: 4px">⚠️ 国内必须配置代理；FC2 API 有 IP 级风控限流，提示限流时稍等自愈</div>
             </div>
           </template>
 
@@ -1631,6 +1864,34 @@
             >
               清除缓存（缩略图 + 相册信息）
             </n-button>
+            <n-button
+              block
+              secondary
+              style="margin-top: 8px"
+              title="软件使用导览（可视化说明：双世界/功能地图/登录/排查）"
+              @click="openHelpPage('software-guide.html')"
+            >
+              📖 软件使用导览
+            </n-button>
+            <n-button
+              block
+              secondary
+              style="margin-top: 8px"
+              title="本次重大更新可视化说明"
+              @click="openHelpPage('changelog-20260918b.html')"
+            >
+              📜 更新说明（可视化）
+            </n-button>
+            <n-button
+              block
+              secondary
+              type="info"
+              style="margin-top: 8px"
+              title="还原嗅探网络设置→结束后端→自动重新启动应用（界面模式随设置恢复）"
+              @click="emit('restart-app')"
+            >
+              🔄 重启应用（登录卡死 / 网络异常时使用）
+            </n-button>
           </div>
 
           <!-- P3 设置功能 -->
@@ -1799,7 +2060,8 @@
           当前：<span class="shortcut-current-big">{{ formatShortcut(shortcutRecorder.current) || '未设置' }}</span>
         </div>
         <div class="shortcut-recorder-status" :class="{ recording: shortcutRecorder.recording }">
-          <span v-if="shortcutRecorder.recording">请按下快捷键...</span>
+          <span v-if="shortcutRecorder.recording && shortcutRecorder.hint">{{ shortcutRecorder.hint }}</span>
+          <span v-else-if="shortcutRecorder.recording">请按下快捷键组合，再次按下相同组合即完成录入...</span>
           <span v-else-if="shortcutRecorder.candidate">已捕获：<strong>{{ formatShortcut(shortcutRecorder.candidate) }}</strong></span>
           <span v-else>点击下方"开始录入"按钮</span>
         </div>
@@ -1826,8 +2088,8 @@
           >完成</n-button>
         </div>
         <div class="shortcut-recorder-hint">
-          支持组合键（Ctrl/Shift/Alt+字母/数字/F键）；组合键显示用空格分隔。<br>
-          示例：Ctrl + Shift + M
+          录入方法：连续两次按下<strong>相同</strong>的组合键即完成（防止误录），如 Ctrl + Shift + M 按两次。<br>
+          也支持纯单键（如 F5 按两次，或单键 M 按两次）。5 秒内未按第二次将自动作废，Esc 取消。
         </div>
       </div>
     </n-modal>
@@ -1876,8 +2138,9 @@ const props = defineProps({
   asmrLoginLoading: { type: Boolean, default: false },
   // 识图（反向图片搜索）：粘贴板内容（后端 cache/reverse_paste.txt 持久化）
   reversePaste: { type: String, default: '' },
-  // 通用 webview OAuth 三站登录用户名（xhamster/pornhub/xvideos）
+  // 通用 webview OAuth 站点登录用户名（xhamster/pornhub/xvideos/fc2）
   xhamsterUser: { type: String, default: '' },
+  fc2User: { type: String, default: '' },
   pornhubUser: { type: String, default: '' },
   xvideosUser: { type: String, default: '' },
   // JavDB 登录用户名
@@ -1907,6 +2170,11 @@ const props = defineProps({
   localFavorites: { type: Array, default: () => [] },
   // X 关注分类（母子 tag）：[{name, children: []}]
   followTags: { type: Array, default: () => [] },
+  // X 已归类博主映射（twitter_follows 事件）：[{user_id, screen_name, name, thumbnail, parent, child, tag}]
+  twFollows: { type: Array, default: () => [] },
+  // 本地媒体代理端口（头像走代理加载）
+  mediaProxyPort: { type: Number, default: 0 },
+  leakEdgeRunning: { type: Boolean, default: false },  // Leakedzone：专用 Edge 调试实例是否已打开
   // 界面主题：dark=夜间 / light=日间
   themeMode: { type: String, default: 'dark' },
   // 有道翻译结果：{ok, translation, query, error, raw} 或 null（翻译中）
@@ -1928,6 +2196,10 @@ const emit = defineEmits([
   'clear-cache',
   'toggle-downloads',
   'toggle-float',
+  'cancel-login',          // 取消登录转圈等待（参数：站点 key）
+  'restart-app',           // 重启应用（还原网络→杀后端→relaunch，界面模式随设置恢复）
+  'leak-edge-login',       // Leakedzone：用系统 Edge 过盾（打开带调试端口的专用 Edge 窗口）
+  'leak-edge-harvest',     // Leakedzone：用户过盾后，经 CDP 抓取 Cookie+UA 保存
   'pawchive-login',
   'pawchive-logout',
   'pawchive-favorites',
@@ -1958,7 +2230,10 @@ const emit = defineEmits([
   'reverse-set-proxy',    // 修改识图代理（参数：代理地址，空=直连）
   // Oreno3D（O3D）/ EroMMDTube（E站）
   'oreno-set-proxy',       // 修改 O3D/E站 代理（参数：代理地址, 可选 site_key 'erommdtube'，空=直连）
+  'common-proxy',         // 通用代理地址变更（Pornhub / GitHub 更新共用）
   'tw-add-follow-tag',    // 新增关注分类（参数：母类, 子类）
+  'tw-open-user',         // 从分类管理点开博主 → 进 TA 的主页（参数：用户对象）
+  'tw-get-follows',       // 展开分类时拉取已归类博主列表
   'tw-delete-follow-tag', // 删除关注分类（参数：母类, 子类）
   'tw-clear-cache',       // 清除 Twitter 专属缓存
   'toggle-theme',         // 切换日间/夜间模式
@@ -2002,6 +2277,13 @@ const emit = defineEmits([
 
 const message = useMessage()
 
+// 通用代理（默认代理与端口）草稿：进入设置面板时从 settings 初始化一次
+const commonProxyDraft = ref(props.settings.common_proxy || '')
+watch(() => props.settings.common_proxy, (v) => {
+  commonProxyDraft.value = v || ''
+})
+
+
 // 当前展开的面板：'' | 'settings' | 'history' | 'favorites'
 const activePanel = ref('')
 
@@ -2019,7 +2301,7 @@ watch(() => props.reversePaste, (v) => {
 // ============================
 // 登录状态（账号卡片）
 // ============================
-const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'pixiv', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube'].includes(props.site))
+const needsLogin = computed(() => ['pawchive', 'twitter', 'exhentai', 'iwara', 'hanime', 'pixiv', 'asmr', 'xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube', 'fc2', 'leakedzone', 'coomerst', 'coomerfans', 'fapello'].includes(props.site))
 
 // O3D / E站（Oreno3D / EroMMDTube）：无账号体系，登录 = 保存站点会话（Cloudflare 免重复验证）
 const isOrenoSite = computed(() => props.site === 'oreno3d' || props.site === 'erommdtube')
@@ -2038,6 +2320,9 @@ const siteLoggedIn = computed(() => {
   if (props.site === 'javdb') return !!props.javdbUser
   if (props.site === 'oreno3d') return !!props.oreno3dUser
   if (props.site === 'erommdtube') return !!props.erommdtubeUser
+  if (props.site === 'fc2') return !!props.fc2User || !!props.loginInfo?.fc2?.logged_in
+  if (props.site === 'leakedzone') return !!props.loginInfo?.leakedzone?.logged_in
+  if (props.site === 'coomerst' || props.site === 'coomerfans' || props.site === 'fapello') return true  // 免登录站
   return false
 })
 
@@ -2050,6 +2335,7 @@ const loginSubtitle = computed(() => {
   if (props.site === 'hanime') return props.hanimeUser ? `H站已登录: ${props.hanimeUser}` : 'Hanime1 未登录'
   if (props.site === 'pixiv') return props.pixivUser ? `P站已登录: ${props.pixivUser}` : 'Pixiv 未登录'
   if (props.site === 'asmr') return props.asmrUser ? `音声站已登录: ${props.asmrUser}` : 'ASMR-100 未登录'
+  if (props.site === 'fc2') return props.fc2User ? `FC2 已登录: ${props.fc2User}` : 'FC2 未登录（免费视频无需登录）'
   if (props.site === 'xhamster') return props.xhamsterUser ? `xHamster 已登录: ${props.xhamsterUser}` : 'xHamster 未登录'
   if (props.site === 'pornhub') return props.pornhubUser ? `Pornhub 已登录: ${props.pornhubUser}` : 'Pornhub 未登录'
   if (props.site === 'xvideos') return props.xvideosUser ? `XVideos 已登录: ${props.xvideosUser}` : 'XVideos 未登录'
@@ -2065,6 +2351,7 @@ const siteUsername = computed(() => {
   if (props.site === 'twitter' && props.twitterUser) return props.twitterUser
   if (props.site === 'pawchive' && props.pawchiveUser) return props.pawchiveUser
   if (props.site === 'asmr' && props.asmrUser) return props.asmrUser
+  if (props.site === 'fc2' && props.fc2User) return props.fc2User
   if (props.site === 'xhamster' && props.xhamsterUser) return props.xhamsterUser
   if (props.site === 'pornhub' && props.pornhubUser) return props.pornhubUser
   if (props.site === 'xvideos' && props.xvideosUser) return props.xvideosUser
@@ -2089,7 +2376,12 @@ const accountOptions = computed(() => {
 // 各站点首页地址（"打开网站"按钮）
 const SITE_URLS = {
   bunkr: 'https://bunkr.sk',
+  coomerst: 'https://coomer.st',
+  coomerfans: 'https://coomerfans.com',
+  fapello: 'https://fapello.com',
+  leakedzone: 'https://leakedzone.com',
   coomer: 'https://xxxcoomer.com',
+  fc2: 'https://video.fc2.com/a/',
   pawchive: 'https://pawchive.pw',
   exhentai: 'https://exhentai.org',
   twitter: 'https://x.com',
@@ -2103,6 +2395,7 @@ const SITE_URLS = {
   pornhub: 'https://jp.pornhub.com',
   xvideos: 'https://www.xvideos.com',
   javdb: 'https://javdb.com',
+  pixiv: 'https://www.pixiv.net',
 }
 
 // 浏览器选择（默认 = 系统默认浏览器）
@@ -2144,6 +2437,39 @@ async function openSiteInBrowser() {
 
 // 各站点使用技巧（帮助弹窗内容，可复制）
 const SITE_HELP_TIPS = {
+  coomerst: `🐱 Coomer 使用技巧（综合资源站点 · OnlyFans/Fansly 归档）
+
+1. 点上方「热门创作者」浏览，或在搜索框输入创作者名称（支持模糊匹配）。
+2. 点创作者卡片 → 自动解析 TA 的全部帖子媒体，出文件列表后勾选下载。
+3. 也可直接粘贴链接：coomer.st/onlyfans/user/{创作者ID}
+4. 该站必须走代理（已默认走系统代理 10809）；站方 CDN 节点偶发不可用，
+   届时可搜索浏览但下载会失败，稍后再试即可。
+5. 反扒机制：接口需特殊 Accept 头（已内置处理，无需手动配置）。`,
+  coomerfans: `🐱 CoomerFans 使用技巧（综合资源站点 · OnlyFans/Fansly/CandFans 归档）
+
+1. 点上方「最新帖子」浏览最新内容，或在搜索框输入关键词搜索。
+2. 点帖子卡片 → 解析该帖全部媒体（图片/视频），勾选下载。
+3. 也可直接粘贴链接：coomerfans.com/p/{创作者ID}/{帖子ID}/{服务}
+4. 该站有 PoW 反爬挑战（应用已自动破解，无需手动操作）；
+   若频繁 503 说明触发限流，等几分钟再试。
+5. 媒体必须走代理+会话 Cookie（已内置处理，走本地媒体代理下载）。`,
+  fapello: `📷 Fapello 使用技巧（综合资源站点 · 模型图集）
+
+1. 点上方「最新模型」浏览最新图集，或在搜索框输入模型名称。
+2. 点模型卡片 → 自动翻页解析 TA 的全部图片（每页自动追加），勾选下载。
+3. 也可直接粘贴链接：fapello.com/{模型名}/
+4. 图片直链经本地媒体代理转发（该站必须走代理，已默认 10809）。
+5. 大模型图集较多，解析需要一些时间，耐心等待文件列表出现。`,
+  leakedzone: `🔒 Leakedzone 使用技巧（综合资源站点）
+
+⚠️ 该站有 Cloudflare 盾：首次使用需先过盾——
+   点左侧「打开内置浏览器」→ 在弹窗内等页面加载完成（出现内容）→ 关闭弹窗。
+   过盾 Cookie 会自动保存，之后正常使用。
+
+1. 点上方「最新内容」浏览，或在搜索框输入关键词。
+2. 点内容卡片 → 解析图片列表，勾选下载。
+3. 若提示"需要过 Cloudflare 盾"，重复上述登录步骤即可（盾 Cookie 有有效期）`,
+
   bunkr: `📁 关于 Bunkr 与 Gofile 网盘
 
 这两个网盘在国外免费文件分享社区中非常流行，常被用于存储和分发以下内容：
@@ -2390,7 +2716,8 @@ function handleSiteLogout() {
   else if (props.site === 'iwara') emit('iwara-logout')
   else if (props.site === 'hanime') emit('hanime-logout')
   else if (props.site === 'asmr') emit('asmr-logout')
-  else if (['xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube'].includes(props.site)) emit('site-logout', props.site)
+  else if (props.site === 'pixiv') emit('pixiv-logout')
+  else if (['xhamster', 'pornhub', 'xvideos', 'javdb', 'oreno3d', 'erommdtube', 'fc2', 'leakedzone'].includes(props.site)) emit('site-logout', props.site)
 }
 
 // 清除 Twitter 专属缓存（确认后执行，保留登录与关注分类）
@@ -2507,6 +2834,8 @@ function handleGoogleSave() {
 const oreno3dEmailInput = ref('')
 const oreno3dPasswordInput = ref('')
 const erommdtubeEmailInput = ref('')
+const fc2EmailInput = ref('')
+const fc2PasswordInput = ref('')
 const erommdtubePasswordInput = ref('')
 
 // 凭据回填：login_info 里带保存的账号密码时自动填入表单（仅空值时回填，不打断手动输入）
@@ -2543,7 +2872,10 @@ function handleOrenoLogin(siteKey) {
 }
 
 function handleJdbLogin() {
-  if (!jdbEmailInput.value.trim() || !jdbPasswordInput.value) return
+  if (!jdbEmailInput.value.trim() || !jdbPasswordInput.value) {
+    window.alert('请先输入 JavDB 登录邮箱和密码（免费注册：javdb.com）')
+    return
+  }
   // 触发 App.vue 的 webview 登录弹窗（登录页自动预填邮箱密码，用户只需完成 Cloudflare 验证并点登录）
   emit('site-oauth-login', 'javdb', {
     email: jdbEmailInput.value.trim(),
@@ -2733,6 +3065,64 @@ function handleAddFollowTag() {
   newTagChild.value = ''
 }
 
+// ---------- 分类管理查看（点开母类/子类 → 归类博主列表 → 进入主页） ----------
+const openTag = ref('')     // 当前展开的母类
+const openChild = ref('')   // 当前过滤的子类（空=全部）
+
+function toggleTagOpen(name) {
+  if (!props.twFollows.length) emit('tw-get-follows')
+  if (openTag.value === name) {
+    openTag.value = ''
+    openChild.value = ''
+  } else {
+    openTag.value = name
+    openChild.value = ''
+  }
+}
+
+function toggleChildFilter(parent, child) {
+  if (!props.twFollows.length) emit('tw-get-follows')
+  if (openTag.value !== parent) openTag.value = parent
+  openChild.value = openChild.value === child ? '' : child
+}
+
+function memberCount(parent) {
+  return props.twFollows.filter(m => m.parent === parent).length
+}
+
+function childCount(parent, child) {
+  return props.twFollows.filter(m => m.parent === parent && m.child === child).length
+}
+
+function tagMembers(parent) {
+  const list = props.twFollows.filter(m => m.parent === parent)
+  return openChild.value ? list.filter(m => m.child === openChild.value) : list
+}
+
+function memberAvatar(url) {
+  if (!url) return ''
+  if (url.startsWith('thumb://') || (props.mediaProxyPort && url.startsWith('http'))) {
+    return props.mediaProxyPort && url.startsWith('http')
+      ? `http://127.0.0.1:${props.mediaProxyPort}/media?url=${encodeURIComponent(url)}`
+      : url
+  }
+  return url
+}
+
+function openMember(m) {
+  emit('tw-open-user', {
+    screen_name: m.screen_name,
+    name: m.name,
+    thumbnail: m.thumbnail,
+    album_url: m.album_url || `https://x.com/${m.screen_name}`,
+    user_id: m.user_id,
+  })
+}
+
+function openHelpPage(file) {
+  window.api && window.api.openHelpWindow && window.api.openHelpWindow(file)
+}
+
 function handleClearCache() {
   emit('clear-cache')
 }
@@ -2748,6 +3138,8 @@ const shortcutRecorder = reactive({
   current: '',                         // 当前已保存的 accelerator（Electron "+" 格式）
   candidate: '',                       // 本次录入捕获的 candidate
   recording: false,                    // 是否在录入
+  hint: '',                            // 录入提示（"请再次按下相同组合确认"）
+  resetTimer: null,                    // 两步录入超时重置定时器
   keydownHandler: null,
 })
 const shortcutLabels = {
@@ -2760,47 +3152,30 @@ function formatShortcut(accelerator) {
   if (!accelerator) return ''
   return String(accelerator).split('+').map(s => s.trim()).filter(Boolean).join(' + ')
 }
-// KeyboardEvent → Electron accelerator 字符串
-function keyEventToAccelerator(e) {
-  const parts = []
-  if (e.ctrlKey) parts.push('Ctrl')
-  if (e.shiftKey) parts.push('Shift')
-  if (e.altKey) parts.push('Alt')
-  if (e.metaKey) parts.push('Super')
-  // 不让单独的修饰键作为快捷键（单按 Ctrl/Shift/Alt/Win 时忽略，等用户按出完整组合）
+// KeyboardEvent → 主键名（不含修饰键部分；修饰键/无法识别返回 ''）
+function mainKeyFromEvent(e) {
   const code = e.code || ''
-  if (!code) return ''
-  if (/^(Control|Shift|Alt|Meta|OS)(Left|Right)?$/.test(code)) return ''
-  let key = ''
-  if (/^Digit\dd?$/.test(code) || /^Digit[0-9]$/.test(code)) {
-    key = code.replace('Digit', '')
-  } else if (/^Key[A-Z]$/.test(code)) {
-    key = code.replace('Key', '')
-  } else if (/^F[1-9]\d?$/.test(code)) {
-    key = code
-  } else if (code === 'Space') {
-    key = 'Space'
-  } else if (code === 'Enter') {
-    key = 'Return'
-  } else if (code === 'Escape') {
-    return ''  // Esc 不作为快捷键
-  } else if (code === 'Backspace') {
-    key = 'Backspace'
-  } else if (code === 'Tab') {
-    key = 'Tab'
-  } else if (/^Arrow(Up|Down|Left|Right)$/.test(code)) {
-    key = code.replace('Arrow', '')
-  } else if (code.startsWith('Numpad')) {
-    key = 'Num' + code.replace('Numpad', '')
-  } else {
-    // 其他特殊键，用 key 名（小写转大写）
-    key = (e.key || '').toUpperCase()
+  // 兜底：部分注入/驱动环境 keydown 无 e.code（只有 e.key）——按 e.key 推断主键，
+  // 否则这类按键全部被忽略（"快捷键录入一直不可用"的第二根因）
+  if (!code) {
+    const k = (e.key || '').toUpperCase()
+    if (/^[A-Z]$/.test(k)) return k
+    if (/^F([1-9]|1[0-9])$/.test(k)) return k
+    if (/^[0-9]$/.test(k)) return k
+    return ''
   }
-  if (!key) return ''
-  // 至少要有修饰键或非可打印字符（避免单字母触发）
-  if (parts.length === 0 && /^[A-Z0-9]$/.test(key)) return ''
-  parts.push(key)
-  return parts.join('+')
+  if (/^(Control|Shift|Alt|Meta|OS)(Left|Right)?$/.test(code)) return ''
+  if (/^Digit[0-9]$/.test(code)) return code.replace('Digit', '')
+  if (/^Key[A-Z]$/.test(code)) return code.replace('Key', '')
+  if (/^F[1-9]\d?$/.test(code)) return code
+  if (code === 'Space') return 'Space'
+  if (code === 'Enter') return 'Return'
+  if (code === 'Escape') return ''
+  if (code === 'Backspace') return 'Backspace'
+  if (code === 'Tab') return 'Tab'
+  if (/^Arrow(Up|Down|Left|Right)$/.test(code)) return code.replace('Arrow', '')
+  if (code.startsWith('Numpad')) return 'Num' + code.replace('Numpad', '')
+  return (e.key || '').toUpperCase()
 }
 function openShortcutRecorder(action) {
   shortcutRecorder.action = action
@@ -2817,9 +3192,38 @@ function toggleRecording() {
     startRecording()
   }
 }
-function startRecording() {
+// 两步录入：第二次按下相同组合即确认；5 秒内未按第二次自动作废
+function armStepTimeout() {
+  if (shortcutRecorder.resetTimer) clearTimeout(shortcutRecorder.resetTimer)
+  shortcutRecorder.resetTimer = setTimeout(() => {
+    if (shortcutRecorder.candidate) {
+      shortcutRecorder.candidate = ''
+      shortcutRecorder.hint = '（超时）已作废，请重新录入'
+    }
+  }, 5000)
+}
+function resetStepState() {
+  if (shortcutRecorder.resetTimer) {
+    clearTimeout(shortcutRecorder.resetTimer)
+    shortcutRecorder.resetTimer = null
+  }
+  shortcutRecorder.hint = ''
+}
+async function startRecording() {
+  console.log('[快捷键录入] startRecording 开始, suspendShortcuts =', typeof window.api?.suspendShortcuts)
   shortcutRecorder.recording = true
   shortcutRecorder.candidate = ''
+  resetStepState()
+  // 先挂起已注册的全局快捷键：否则按下的组合若与已注册快捷键相同，
+  // 会被主进程 globalShortcut 在系统层拦截，渲染进程收不到 keydown（第二个键录不上的根因）
+  if (window.api && window.api.suspendShortcuts) {
+    try {
+      const rr = await window.api.suspendShortcuts()
+      console.log('[快捷键录入] 已挂起全局快捷键', JSON.stringify(rr))
+    } catch (e) {
+      console.log('[快捷键录入] 挂起失败', String(e))
+    }
+  }
   // 用原生 keydown 监听器（Naive UI 内部拦截可能影响组合键）
   if (shortcutRecorder.keydownHandler) {
     document.removeEventListener('keydown', shortcutRecorder.keydownHandler, true)
@@ -2827,23 +3231,51 @@ function startRecording() {
   shortcutRecorder.keydownHandler = (e) => {
     // 忽略系统按键自动重复（长按/键盘重复率导致的重复 keydown）
     if (e.repeat) return
-    // 不阻止修饰键的默认行为，避免影响输入
+    console.log('[快捷键录入] keydown', e.code, e.key, 'ctrl=' + e.ctrlKey, 'shift=' + e.shiftKey, 'alt=' + e.altKey)
     e.preventDefault()
     e.stopPropagation()
-    const acc = keyEventToAccelerator(e)
-    if (acc) {
-      shortcutRecorder.candidate = acc
-      // 捕获后自动停止录入
+    if (e.code === 'Escape') {
       stopRecording()
+      return
     }
+    const key = mainKeyFromEvent(e)
+    if (!key) return
+    // 本次按键自带的修饰键
+    const mods = []
+    if (e.ctrlKey) mods.push('Ctrl')
+    if (e.shiftKey) mods.push('Shift')
+    if (e.altKey) mods.push('Alt')
+    if (e.metaKey) mods.push('Super')
+    const combo = [...mods, key].join('+')
+    if (combo === shortcutRecorder.candidate) {
+      // 第二次按下相同组合：确认并保存
+      console.log('[快捷键录入] 二次确认成功:', combo)
+      const acc = combo
+      stopRecording()
+      emit('shortcut-change', shortcutRecorder.action, acc)
+      shortcutRecorder.current = acc
+      message.success(`快捷键已保存：${formatShortcut(acc)}`)
+      shortcutRecorder.show = false
+      return
+    }
+    // 第一次按下（或换了组合）：记为候选，等待再次按下相同组合
+    shortcutRecorder.candidate = combo
+    console.log('[快捷键录入] 已捕获候选:', combo)
+    shortcutRecorder.hint = `已捕获 ${formatShortcut(combo)}，请再次按下相同按键以确认`
+    armStepTimeout()
   }
   document.addEventListener('keydown', shortcutRecorder.keydownHandler, true)
 }
 function stopRecording() {
   shortcutRecorder.recording = false
+  resetStepState()
   if (shortcutRecorder.keydownHandler) {
     document.removeEventListener('keydown', shortcutRecorder.keydownHandler, true)
     shortcutRecorder.keydownHandler = null
+  }
+  // 恢复已注册的全局快捷键
+  if (window.api && window.api.resumeShortcuts) {
+    window.api.resumeShortcuts().catch(() => {})
   }
 }
 function clearShortcut() {
@@ -2891,7 +3323,7 @@ function enterMimicMode() {
 }
 
 // 站点显示名
-const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站', asmr: 'ASMR', xhamster: 'xHamster', pornhub: 'Pornhub', xvideos: 'XVideos', javdb: 'JavDB' }
+const siteNames = { bunkr: 'Bunkr', coomerst: 'Coomer', coomerfans: 'CoomerFans', fapello: 'Fapello', leakedzone: 'Leakedzone', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', oreno3d: 'O3D', erommdtube: 'E站', asmr: 'ASMR', xhamster: 'xHamster', pornhub: 'Pornhub', xvideos: 'XVideos', javdb: 'JavDB' }
 function siteName(s) {
   return siteNames[s] || (s ? String(s) : '未知')
 }
@@ -2920,6 +3352,15 @@ async function selectFolder() {
   const folder = await window.api.selectFolder()
   if (folder) {
     update('custom_path', folder)
+  }
+}
+
+// 表世界专属保存位置：只写 surface_save_path，不碰 custom_path，
+// 因此里世界与各站点下载路径完全不受影响
+async function selectSurfaceFolder() {
+  const folder = await window.api.selectFolder()
+  if (folder) {
+    update('surface_save_path', folder)
   }
 }
 </script>
@@ -3139,6 +3580,33 @@ html.light-mode .site-help-modal .site-help-pre {
 }
 
 /* X 关注分类管理（母子 tag） */
+.follow-tag-clickable { cursor: pointer; }
+.follow-tag-clickable:hover { color: #63e2b7; }
+.follow-tag-count { color: #8a8d99; font-size: 11px; }
+.follow-tag-members { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+.follow-tag-member {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 4px; border-radius: 6px; cursor: pointer;
+}
+.follow-tag-member:hover { background: rgba(99, 226, 183, 0.08); }
+.follow-tag-avatar {
+  width: 26px; height: 26px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+  background: #2d2d33; color: #8a8d99;
+  font-size: 12px; font-weight: 700; line-height: 26px; text-align: center;
+}
+.follow-tag-avatar-ph { display: inline-block; }
+.follow-tag-member-info { flex: 1; min-width: 0; }
+.follow-tag-member-name {
+  font-size: 12px; color: #d0d0d6;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.follow-tag-member-sub {
+  font-size: 10px; color: #8a8d99;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.follow-tag-member-go { font-size: 10px; color: #63e2b7; flex-shrink: 0; }
+
 .follow-tag-section {
   margin-top: 10px;
   padding-top: 8px;
@@ -3283,7 +3751,7 @@ html.light-mode .site-help-modal .site-help-pre {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;  /* 手动抓取（第二行）与下载按钮（第一行首列）垂直对齐 */
   flex-wrap: wrap;
   gap: 12px;
   padding: 14px 8px;
@@ -3368,6 +3836,32 @@ html.light-mode .round-btn-active {
 .settings-section {
   flex: 1;
   overflow: hidden;
+}
+
+/* 设置大屏模式：覆盖主内容区（与"下载管理"视图同级观感，替代左列窄条）。
+   左面板定宽 340px；底部 212px 留给下载进度条。 */
+.settings-section.settings-full {
+  position: fixed;
+  left: 340px;
+  top: 0;
+  right: 0;
+  bottom: 212px;
+  z-index: 200;
+  background: #1e1e22;
+  border-left: 1px solid #2d2d33;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+html.light-mode .settings-section.settings-full {
+  background: #f7f7fa;
+  border-left-color: #e0e0e6;
+}
+
+.settings-full-scroll {
+  flex: 1;
+  min-height: 0;
 }
 
 .settings-content {

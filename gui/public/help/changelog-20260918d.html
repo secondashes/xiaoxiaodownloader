@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>更新说明 · 返回不重播 / B站链接 / Word 落点（v1.2.51）</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --line: #e6e9f2;
+    --tx: #23262f;
+    --tx2: #6a7080;
+    --acc: #5b7cfa;
+    --acc2: #8f6bff;
+    --ok: #21c58b;
+    --warn: #f5a623;
+    --bad: #e0554d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(165deg, #eef1fa 0%, #f6f4fb 50%, #eefaf5 100%);
+    color: var(--tx);
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.75;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 30px 70px; }
+
+  .hero {
+    padding: 54px 0 36px; text-align: center; margin-bottom: 38px;
+    background: radial-gradient(700px 260px at 25% 0%, rgba(91,124,250,.16), transparent 70%),
+                radial-gradient(600px 240px at 75% 10%, rgba(33,197,139,.12), transparent 70%);
+  }
+  .hero .badge {
+    display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 2px;
+    color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2));
+    padding: 6px 20px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h1 { font-size: 32px; font-weight: 800; line-height: 1.35; }
+  .hero p.sub { color: var(--tx2); margin-top: 12px; font-size: 14.5px; }
+
+  section { margin-bottom: 46px; }
+  h2.sec {
+    font-size: 21px; font-weight: 800; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2.sec .ico { font-size: 24px; }
+
+  .big {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 26px 28px; margin-bottom: 18px;
+  }
+  .big h3 { font-size: 17px; margin-bottom: 10px; }
+  .big h3 .em { color: var(--acc); }
+  .big p { font-size: 13.5px; color: #4a4f5e; }
+  .big p + p { margin-top: 9px; }
+  .big ul { list-style: none; margin-top: 10px; }
+  .big li { font-size: 13.5px; padding: 5px 0 5px 22px; position: relative; }
+  .big li::before { content: '✓'; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip {
+    font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 999px;
+    background: #f0f2fb; color: var(--tx2); border: 1px solid var(--line);
+  }
+  .chip.on {
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    color: #fff; border-color: transparent;
+  }
+  .chip.new { background: #e9fbf3; color: #12915f; border-color: #b6ecd4; }
+
+  .fixes { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .fixrow { display: grid; grid-template-columns: 1.2fr 1.6fr; border-bottom: 1px solid var(--line); }
+  .fixrow:last-child { border-bottom: none; }
+  .fixrow > div { padding: 12px 18px; font-size: 13px; }
+  .fixrow.head { background: #f4f5fa; font-weight: 700; font-size: 12.5px; color: var(--tx2); }
+  .fixrow .was { color: var(--bad); }
+  .fixrow .now { color: var(--ok); font-weight: 600; }
+
+  .flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .flow .node {
+    background: #f7f8fd; border: 1px solid var(--line); border-radius: 12px;
+    padding: 9px 16px; font-size: 13px; font-weight: 600;
+  }
+  .flow .node.hi { background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff; border-color: transparent; }
+  .flow .node.kill { background: #fdeceb; color: var(--bad); border-color: #f7cdc9; }
+  .flow .arw { color: var(--tx2); font-weight: 800; }
+
+  .probe { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  .probe .pcell { flex: 1; min-width: 130px; border-radius: 14px; padding: 14px 16px; color: #fff; text-align: center; }
+  .probe .p1 { background: linear-gradient(150deg, #1fa36a, #4fc98f); }
+  .probe .p2 { background: linear-gradient(150deg, #2a5fd0, #6f9bff); }
+  .probe .p3 { background: linear-gradient(150deg, #8a93ad, #b7bdd0); }
+  .probe .pcell b { display: block; font-size: 22px; line-height: 1.3; }
+  .probe .pcell span { font-size: 12px; opacity: .92; }
+
+  .know {
+    background: #fff8ea; border: 1px solid #f5e3bd; border-radius: 16px;
+    padding: 20px 24px; font-size: 13px;
+  }
+  .know b { color: #b07b1a; }
+  .know ul { list-style: none; margin-top: 8px; }
+  .know li { padding: 4px 0 4px 20px; position: relative; }
+  .know li::before { content: '·'; position: absolute; left: 6px; font-weight: 900; color: #b07b1a; }
+
+  footer { text-align: center; margin-top: 46px; color: #9aa0b2; font-size: 12.5px; line-height: 2; }
+  @media (max-width: 820px) { .fixrow { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="badge">修复更新 · 2026-09-18 / v1.2.51</span>
+    <h1>返回不再重播 · B站链接能点开<br>Word 落了地，位置还能自己改</h1>
+    <p class="sub">上一版把「返回逻辑」做成了记住网址再回去，但回去时页面还是整页重载 —— 正在看的片子从头缓冲。这一版换了做法：返回时干脆不碰播放中的网页。</p>
+  </div>
+
+  <!-- 1 返回不再重播 -->
+  <section>
+    <h2 class="sec"><span class="ico">🎬</span>一、返回不再重新缓存、重新播放</h2>
+    <div class="big">
+      <h3>从「销毁再重建」改成 <span class="em">盖一层覆盖层</span></h3>
+      <p>「下载管理」以前是和浏览页互斥的两个界面：一进下载管理，承载网页的那个控件就被从界面里拿掉了。网页控件一被拿掉，Chromium 会把整个网页（包括播放器）销毁；点返回时重新建一个，于是页面重载、视频从头缓冲。记住网址也没用 —— 网址对得上，页面是新的。</p>
+      <p>本版把下载管理改成<b>盖在浏览页上面的一层</b>：网页从头到尾挂在原地不动，只是在它上面铺一层白色的下载列表。返回 = 把那层拿走，网页一直是原来那个，播放进度接着走。</p>
+      <div class="flow">
+        <span class="node">正在播放</span>
+        <span class="arw">→</span>
+        <span class="node kill">旧做法：拆掉网页，重建</span>
+        <span class="arw">→</span>
+        <span class="node kill">整页重载 · 从头缓冲</span>
+      </div>
+      <div class="flow">
+        <span class="node">正在播放</span>
+        <span class="arw">→</span>
+        <span class="node hi">新做法：盖一层</span>
+        <span class="arw">→</span>
+        <span class="node hi">拿走那层，原样接着放</span>
+      </div>
+    </div>
+
+    <div class="big">
+      <h3>这个做法不是拍脑袋，是实测出来的</h3>
+      <p>为了确认「一层不透明的东西能不能真的盖住网页控件」以及「被盖住的时候视频会不会被暂停」，写了一个真实浏览器的对照实验：载入一个真实播放页，等它确实在播（进度 > 1 秒），再铺上一层不透明覆盖层。</p>
+      <div class="probe">
+        <div class="pcell p1"><b>✅ 能盖住</b><span>覆盖后截屏取中心像素，取到的是覆盖层的颜色，不是播放画面</span></div>
+        <div class="pcell p1"><b>+7.09 秒</b><span>被盖住 6 秒期间，播放进度真实前进了 7.09 秒 → 没被暂停</span></div>
+        <div class="pcell p1"><b>接续播放</b><span>撤掉覆盖层后进度从 18.76 秒继续，没有回到起点</span></div>
+      </div>
+      <p style="margin-top:12px">顺带也测了「把网页整个隐藏起来」这种更省事的做法：视频同样不会被暂停。两种做法都可行，最终选了覆盖层，因为返回时播放画面是连着的，观感更自然。</p>
+      <div class="chips">
+        <span class="chip new">实测通过</span>
+        <span class="chip">覆盖层能盖住网页控件</span>
+        <span class="chip">被盖住不停播</span>
+        <span class="chip">返回接续播放</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 B站链接 -->
+  <section>
+    <h2 class="sec"><span class="ico">🔗</span>二、B站这种「新开一页」的链接，现在点得开了</h2>
+    <div class="big">
+      <h3>不是没跳转，是<span class="em">点击根本没被我们收到</span></h3>
+      <p>B站（以及不少站点）的视频卡片是「新标签页打开」的链接。在内置浏览器里点它，既不开新页、也不在当前页跳转 —— 因为承载网页的控件当时缺一个「允许弹出」的开关，浏览器内核压根不把这类点击事件交给我们，我们既没机会拦截、也没机会处理，于是表现为「点了没反应」，自然也就永远进不了播放页、抓不到正片。</p>
+      <p>对照实验（同一页面，只改这一个开关）：</p>
+      <div class="probe">
+        <div class="pcell p3"><b>0 次</b><span>没有这个开关：拦截回调一次都没被触发，点击被直接吞掉</span></div>
+        <div class="pcell p2"><b>2 次</b><span>加上这个开关：回调正常触发，链接能拿到、能处理</span></div>
+      </div>
+      <p style="margin-top:12px">修复 = 补上这个开关，并把拿到的链接<b>在当前网页里打开</b>（保持登录状态与抓取连续）。同时加了一条「同站才跳」的保护：</p>
+      <ul>
+        <li>站内的链接（例如 B站视频之间的跳转）→ 当前页直接打开，能正常看、正常抓</li>
+        <li>站外的链接（点播放时弹出来的广告窗之类）→ 照旧忽略，不会被顶走正在看的片子</li>
+      </ul>
+    </div>
+    <div class="know">
+      <b>说明：</b>「同站才跳」是为了不帮倒忙 —— 允许一切弹窗的话，某些站点在点播放时会弹出广告页，反而把正要看的视频挤掉。如果遇到某个站用短链域名（和主站不同域）放正片，反馈一下站名，把它加进放行名单即可。
+    </div>
+  </section>
+
+  <!-- 3 Word 保存位置 -->
+  <section>
+    <h2 class="sec"><span class="ico">📄</span>三、存为 Word：现在告诉你存到哪了</h2>
+    <div class="big">
+      <h3>弹窗直接带上<span class="em">完整保存目录</span></h3>
+      <p>以前导出 Word 只提示「成功」，文件落在哪全靠猜。现在成功提示会直接把目录写出来，并且停留时间加长，方便看清、抄下来。</p>
+      <div class="flow">
+        <span class="node">点「存为 Word」</span>
+        <span class="arw">→</span>
+        <span class="node hi">提示：已导出 xxx.docx · 保存于 &lt;完整目录&gt;</span>
+      </div>
+      <div class="chips">
+        <span class="chip on">提示带目录</span>
+        <span class="chip on">停留 10 秒</span>
+        <span class="chip on">没带目录时自动兜底补上</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 下载记录 -->
+  <section>
+    <h2 class="sec"><span class="ico">📥</span>四、存为 Word 会出现在「下载管理」里</h2>
+    <div class="big">
+      <h3>导出的文档，和下载的视频<span class="em">同一条命</span></h3>
+      <p>导出的 Word 会作为一条「已完成」记录登记进美好世界的下载管理，和媒体下载排在同一个列表里，可以直接「打开文件夹」，也能单独清除记录。</p>
+      <ul>
+        <li>列表里显示文件名、完整保存目录、文件数</li>
+        <li>「打开文件夹」直接定位到文档所在目录</li>
+        <li>「清除记录」只清列表条目，<b>不会删除已导出的文件</b></li>
+      </ul>
+    </div>
+    <div class="know">
+      <b>放心：</b>清除记录只针对记录本身，不会去动你硬盘上的文档；这条记录也不参与下载队列，不会占用下载线程。
+    </div>
+  </section>
+
+  <!-- 5 保存位置 -->
+  <section>
+    <h2 class="sec"><span class="ico">📁</span>五、美好世界的保存位置可以自己改</h2>
+    <div class="big">
+      <h3>设置里新增「<span class="em">表世界保存位置</span>」，<b>只影响美好世界</b></h3>
+      <p>位置：设置 → 下载设置 → 「表世界保存位置（仅影响「美好世界」的下载 / 视频流下载整片 / Word 导出）」。留空即用系统默认的下载文件夹。</p>
+      <div class="fixes">
+        <div class="fixrow head"><div>产物</div><div>落盘位置</div></div>
+        <div class="fixrow"><div>美好世界的媒体下载</div><div class="now">跟随「表世界保存位置」</div></div>
+        <div class="fixrow"><div>美好世界的视频流「下载整片」</div><div class="now">跟随「表世界保存位置」</div></div>
+        <div class="fixrow"><div>美好世界的「存为 Word」</div><div class="now">跟随「表世界保存位置」/Word导出</div></div>
+        <div class="fixrow"><div>里世界与各站点下载</div><div>不受影响，沿用原路径规则</div></div>
+      </div>
+      <div class="chips">
+        <span class="chip on">仅影响美好世界</span>
+        <span class="chip">留空 = 系统下载文件夹</span>
+        <span class="chip">一键恢复默认</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    小小浏览器 / 美好世界 · v1.2.51 · 2026-09-18<br>
+    以上四项交互改动建议先用真实站点试一遍：播放视频 → 进下载管理 → 返回，看是否不再重缓冲。
+  </footer>
+
+</div>
+</body>
+</html>

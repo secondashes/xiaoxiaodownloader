@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>更新说明 · 表世界大扩充 + 站点校验 + 流媒体拼接（v1.2.43）</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --line: #e6e9f2;
+    --tx: #23262f;
+    --tx2: #6a7080;
+    --acc: #5b7cfa;
+    --acc2: #8f6bff;
+    --ok: #21c58b;
+    --warn: #f5a623;
+    --bad: #e0554d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(165deg, #eef1fa 0%, #f6f4fb 50%, #eefaf5 100%);
+    color: var(--tx);
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.75;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 30px 70px; }
+
+  .hero {
+    padding: 54px 0 36px; text-align: center; margin-bottom: 38px;
+    background: radial-gradient(700px 260px at 25% 0%, rgba(91,124,250,.16), transparent 70%),
+                radial-gradient(600px 240px at 75% 10%, rgba(33,197,139,.12), transparent 70%);
+  }
+  .hero .badge {
+    display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 2px;
+    color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2));
+    padding: 6px 20px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h1 { font-size: 32px; font-weight: 800; line-height: 1.35; }
+  .hero p.sub { color: var(--tx2); margin-top: 12px; font-size: 14.5px; }
+
+  section { margin-bottom: 46px; }
+  h2.sec {
+    font-size: 21px; font-weight: 800; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  h2.sec .ico { font-size: 24px; }
+
+  .big {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 26px 28px; margin-bottom: 18px;
+  }
+  .big h3 { font-size: 17px; margin-bottom: 10px; }
+  .big h3 .em { color: var(--acc); }
+  .big p { font-size: 13.5px; color: #4a4f5e; }
+  .big ul { list-style: none; margin-top: 10px; }
+  .big li { font-size: 13.5px; padding: 5px 0 5px 22px; position: relative; }
+  .big li::before { content: '✓'; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip {
+    font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 999px;
+    background: #f0f2fb; color: var(--tx2); border: 1px solid var(--line);
+  }
+  .chip.on {
+    background: linear-gradient(135deg, var(--acc), var(--acc2));
+    color: #fff; border-color: transparent;
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .tag {
+    font-size: 12px; background: #f4f5fa; border: 1px solid var(--line);
+    border-radius: 8px; padding: 3px 11px; color: #4a4f5e;
+  }
+
+  .steps { counter-reset: st; }
+  .step {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 20px; margin-bottom: 12px; display: flex; gap: 16px; align-items: flex-start;
+  }
+  .step .sn {
+    counter-increment: st; flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 800;
+  }
+  .step .sn::before { content: counter(st); }
+  .step h3 { font-size: 14.5px; margin-bottom: 3px; }
+  .step p { font-size: 12.5px; color: var(--tx2); }
+
+  .fixes { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .fixrow { display: grid; grid-template-columns: 1.2fr 1.6fr; border-bottom: 1px solid var(--line); }
+  .fixrow:last-child { border-bottom: none; }
+  .fixrow > div { padding: 12px 18px; font-size: 13px; }
+  .fixrow.head { background: #f4f5fa; font-weight: 700; font-size: 12.5px; color: var(--tx2); }
+  .fixrow .was { color: var(--bad); }
+  .fixrow .now { color: var(--ok); font-weight: 600; }
+
+  .know {
+    background: #fff8ea; border: 1px solid #f5e3bd; border-radius: 16px;
+    padding: 20px 24px; font-size: 13px;
+  }
+  .know b { color: #b07b1a; }
+  .know ul { list-style: none; margin-top: 8px; }
+  .know li { padding: 4px 0 4px 20px; position: relative; }
+  .know li::before { content: '·'; position: absolute; left: 6px; font-weight: 900; color: #b07b1a; }
+
+  footer { text-align: center; margin-top: 46px; color: #9aa0b2; font-size: 12.5px; line-height: 2; }
+  @media (max-width: 820px) { .fixrow { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="badge">重大更新 · 2026-09-18 / v1.2.43</span>
+    <h1>表世界近百个站点一站直达<br>8 大分类 · 每站都有说明</h1>
+    <p class="sub">GitHub 自动校验站点死活、流媒体（m3u8）拼接下载、「全部下载」批量一键全下——这一版把「站点多、找得到、下得动」一次做齐。</p>
+  </div>
+
+  <!-- 1 站点 20 → 57 -->
+  <section>
+    <h2 class="sec"><span class="ico">🧭</span>一、站点 20 → 57，8 个分类</h2>
+    <div class="big">
+      <h3>首页磁贴大扩充，<span class="em">分类 chips 点一下就能过滤</span></h3>
+      <p>在哪看：表世界首页。磁贴按分类排布，顶部一排分类 chips——点「音乐」只看音乐站，点「全部」一键恢复。</p>
+      <ul>
+        <li>新增「音乐」「游戏」「AI 制作」三大全新分类，「软件·资源社区」同步大幅扩容——现在共 <b>8 个分类、57 个站点</b></li>
+        <li><b>鼠标悬停任意磁贴</b>：弹出完整说明——这个站是干嘛的、要不要开代理、域名失效了怎么办，悬停即知</li>
+        <li>影视、动漫老朋友都在，新伙伴覆盖追剧、听歌、玩游戏、玩 AI 的日常需求</li>
+      </ul>
+      <div class="chips">
+        <span class="chip on">全部 57</span>
+        <span class="chip">影视</span>
+        <span class="chip">动漫</span>
+        <span class="chip">音乐</span>
+        <span class="chip">游戏</span>
+        <span class="chip">AI 制作</span>
+        <span class="chip">电子书</span>
+        <span class="chip">学术医学</span>
+        <span class="chip">软件·资源社区</span>
+      </div>
+      <div class="tags">
+        <span class="tag">简云影视</span>
+        <span class="tag">剧踪影院</span>
+        <span class="tag">片库</span>
+        <span class="tag">AGE动漫</span>
+        <span class="tag">OmoFun</span>
+        <span class="tag">铜钟音乐</span>
+        <span class="tag">歌曲宝</span>
+        <span class="tag">Listen1</span>
+        <span class="tag">aoaostar书源</span>
+        <span class="tag">itch.io</span>
+        <span class="tag">Epic喜加一</span>
+        <span class="tag">Civitai</span>
+        <span class="tag">LiblibAI</span>
+        <span class="tag">果核剥壳</span>
+        <span class="tag">吾爱破解</span>
+        <span class="tag">…… 等共 57 站</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 GitHub 站点校验 -->
+  <section>
+    <h2 class="sec"><span class="ico">🩺</span>二、GitHub 站点校验：自动判死活，域名失效不用愁</h2>
+    <div class="big">
+      <h3>应用一启动就自动拉取校验表，<span class="em">你什么都不用做</span></h3>
+      <ul>
+        <li><b>直连上游源头（全自动）</b>：动漫看 <b>github.com/agefanscom/website</b> 官方发布页的「最新域名」；影视看 <b>awesome-zhuiju-free</b> 的每日自动检测结果（117 个资源 GitHub Actions 天天测）；书源按书源清单里的活端点自动验证（XIU2 / aoaostar / Pixiv 书源）——源更新了，应用跟着更新，你什么都不用做</li>
+        <li><b>死活自动标</b>：上游标记失效的自动置灰「已失效」并给换域名指引；域名换了直接下发新地址，磁贴原地更新（例：AGE动漫 已自动跟到 agedm.io、片库已自动跟到新地址）</li>
+        <li><b>空位不显示</b>：还没锁定地址的站点只在后台"留空位"，磁贴不显示；哪天上游下发了可用地址，它才出现</li>
+        <li><b>三层兜底</b>：上游 GitHub 直取 → 运营校验表 → 本地缓存 + 随包表——断网也能用，联网自动校准</li>
+        <li><b>顶栏「🔄 同步站点」</b>：随时手动强制重拉校验源，完成提示有效/失效/新增统计</li>
+        <li><b>「🙈 隐藏失效」</b>：不想看到失效站？一键隐藏（偏好自动记住），随时再点恢复</li>
+        <li><b>官方站永远在前</b>：B站/抖音/快手等官方主流站排最前，白嫖站靠后，动态新增垫底</li>
+        <li>一句话：打开应用 → 自动同步上游 → 磁贴就是最新状态</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3 流媒体拼接下载 -->
+  <section>
+    <h2 class="sec"><span class="ico">🎞</span>三、流媒体拼接下载：m3u8 一键拼成完整 MP4</h2>
+    <div class="big">
+      <h3>动漫站 / 影视站最常见的 HLS 流，<span class="em">现在能真正下成完整文件了</span></h3>
+      <p>以前网页里的 m3u8 流只能拿到一堆碎片地址；现在点一下「拼接下载」，分片自动下载并合并成完整 MP4。表世界和手动抓取窗口都可用。</p>
+    </div>
+    <div class="steps" style="margin-top: 18px;">
+      <div class="step"><div class="sn"></div><div><h3>正常播放，自动捕获</h3><p>在表世界打开动漫站 / 影视站播放视频，捕获列表自动出现「HLS (m3u8)」条目——手动抓取窗口里同样会出现。</p></div></div>
+      <div class="step"><div class="sn"></div><div><h3>点「拼接下载」</h3><p>分片自动逐个下载，按钮上实时显示进度（分片 i/N），下到哪一目了然。</p></div></div>
+      <div class="step"><div class="sn"></div><div><h3>自动合并成完整 MP4</h3><p>全部分片下完自动无缝拼接，文件存到「下载目录 / 平台名 /」文件夹里，直接双击观看。</p></div></div>
+    </div>
+  </section>
+
+  <!-- 4 下载全通用 + 批量 -->
+  <section>
+    <h2 class="sec"><span class="ico">📦</span>四、下载全通用 + 批量：一键全下</h2>
+    <div class="big">
+      <h3>直链 + HLS 全都支持，<span class="em">「全部下载」不用一个个点</span></h3>
+      <ul>
+        <li><b>全类型直链</b>：视频 / 图片 / 音频 / 文档 / 压缩包，直链直接下载；HLS 流自动走拼接</li>
+        <li><b>批量一键全下</b>：捕获到一批资源？点「全部下载」一次全下，逐个排队不遗漏</li>
+        <li><b>表世界「📥 下载管理」</b>：只看本世界的任务，进度 / 结果一目了然，不被其他窗口干扰</li>
+        <li><b>落盘有规矩</b>：文件统一存到系统下载文件夹，按平台分文件夹，找文件不用翻</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 5 站点总览页 -->
+  <section>
+    <h2 class="sec"><span class="ico">🌐</span>五、站点总览页：57 站说明一页看全</h2>
+    <div class="big">
+      <h3>顶栏新按钮「🌐 站点」，<span class="em">相当于内置的站点使用手册</span></h3>
+      <ul>
+        <li><b>在哪点</b>：表世界顶栏新按钮「🌐 站点」，点一下就打开</li>
+        <li><b>看什么</b>：8 个分类、57 个站点的说明总览——每站是干嘛的、要不要代理、有什么注意事项</li>
+        <li><b>怎么找</b>：支持分类筛选，点分类只看该类站点，找站更快</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 6 修复清单 -->
+  <section>
+    <h2 class="sec"><span class="ico">🛠</span>六、底层修复</h2>
+    <div class="fixes">
+      <div class="fixrow head"><div>问题</div><div>修复</div></div>
+      <div class="fixrow"><div class="was">流媒体拼接底层解析缺失，功能上线以来一直真正不可用</div><div class="now">解析补齐：m3u8 主清单自动选最高清、相对地址补全、AES-128 加密流明确提示不支持——拼接首次真正可用</div></div>
+      <div class="fixrow"><div class="was">跨会话任务合并会「吞」世界标记：表世界重下同一来源时任务落错目录、下载管理不显示</div><div class="now">已修：合并时以本次提交为准，世界标记不再丢失</div></div>
+      <div class="fixrow"><div class="was">HLS 拼接失败时，捕获列表的按钮偶发不复原（点不了）</div><div class="now">已修：结果事件全分支带上来源，失败也能正常恢复按钮</div></div>
+    </div>
+  </section>
+
+  <!-- 7 已知边界 -->
+  <section>
+    <h2 class="sec"><span class="ico">📋</span>七、已知边界（诚实说明）</h2>
+    <div class="know">
+      <b>这些情况如实告诉你，软件不会假装成功：</b>
+      <ul>
+        <li>GitHub 校验表当前使用本地探测缓存，推送到发布仓库后自动对全体用户生效</li>
+        <li>AES-128 加密流与直播流不支持拼接（会明确提示，不会卡着不动）</li>
+        <li>YouTube / Z-Library 等站点需要开系统代理才能访问</li>
+        <li>域名常变的站点以应用内实际校验结果为准，磁贴说明里都有换域名指引</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    小小下载器 · 可视化更新说明 · 本页为离线单文件页（无外部资源，随安装包分发，无需联网即可查看）<br>
+    制度说明：每次重大更新发版前都会产出同款可视化更新页（表世界顶栏「📜 更新」随时可看）<br>
+    数据日期：2026-09-18 · 版本 v1.2.43
+  </footer>
+</div>
+</body>
+</html>

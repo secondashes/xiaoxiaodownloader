@@ -14,7 +14,7 @@
 
     <!-- 顶部：站点切换 + 搜索/链接输入 + 按钮 -->
     <div class="url-bar">
-      <!-- 站点切换：竖排三类（二次元 / 三次元 / 综合类） -->
+      <!-- 站点切换：竖排三类（二次元 / 三次元 / 综合资源站点） -->
       <div class="site-switch-groups">
         <div class="site-group">
           <span class="site-group-label">二次元</span>
@@ -33,9 +33,9 @@
           <div class="site-group-btns">
             <button
               class="site-chip"
-              :class="{ on: site === 'coomer' }"
-              @click="switchSite('coomer')"
-            >Coomer</button>
+              :class="{ on: site === 'fc2' }"
+              @click="switchSite('fc2')"
+            >FC2</button>
             <button
               v-for="s in ['xhamster', 'pornhub', 'xvideos', 'javdb']"
               :key="s"
@@ -46,15 +46,15 @@
           </div>
         </div>
         <div class="site-group">
-          <span class="site-group-label">综合类</span>
+          <span class="site-group-label">综合资源站点</span>
           <div class="site-group-btns">
             <button
-              v-for="s in ['bunkr', 'twitter']"
+              v-for="s in ['bunkr', 'coomerst', 'coomerfans', 'fapello', 'leakedzone', 'twitter']"
               :key="s"
               class="site-chip"
               :class="{ on: site === s }"
               @click="switchSite(s)"
-            >{{ s === 'bunkr' ? 'Bunkr' : 'X' }}</button>
+            >{{ s === 'bunkr' ? 'Bunkr' : (s === 'coomerst' ? 'Coomer' : (s === 'coomerfans' ? 'CoomerFans' : (s === 'fapello' ? 'Fapello' : (s === 'leakedzone' ? 'Leakedzone' : 'X')))) }}</button>
           </div>
         </div>
       </div>
@@ -67,6 +67,24 @@
         class="search-mode-select"
         @update:value="v => $emit('update:search-mode', v)"
       />
+      <!-- JavDB 搜索类型折叠卡片：置于搜索框左侧，点击展开切换搜索类型（f= 参数） -->
+      <n-popover v-if="site === 'javdb'" trigger="click" placement="bottom-start" :show-arrow="false">
+        <template #trigger>
+          <button class="jt-type-trigger" :title="`搜索类型：${javdbFieldLabel}（点击展开切换）`">
+            类型·{{ javdbFieldLabel }} ▾
+          </button>
+        </template>
+        <div class="jt-type-body">
+          <button
+            v-for="f in javdbSearchFields"
+            :key="f.key"
+            class="ex-cat-chip"
+            :class="{ on: javdbSearchField === f.key }"
+            :title="`按「${f.label}」搜索`"
+            @click="$emit('javdb-search-field', f.key)"
+          >{{ f.label }}</button>
+        </div>
+      </n-popover>
       <n-input
         :value="searchQuery"
         @update:value="$emit('update:search-query', $event)"
@@ -105,105 +123,44 @@
       </n-button>
     </div>
 
-    <!-- ExHentai 搜索选项栏：复刻原版搜索页过滤按钮（分类复选/评分/仅种子/页数范围），
-         改动后自动按新条件重新搜索（汉化按钮） -->
-    <div v-if="site === 'exhentai' && fileList.length === 0 && !exGalleryDetail" class="ex-search-options">
-      <div class="ex-cats">
-        <span class="ex-cats-label">分类：</span>
-        <button
-          v-for="c in exCategories"
-          :key="c.key"
-          class="ex-cat-chip"
-          :class="{ on: exCats.includes(c.key) }"
-          :title="c.label"
-          @click="exToggleCat(c.key)"
-        >{{ c.label }}</button>
-        <button class="ex-cat-chip ex-cat-all" title="恢复全部分类" @click="exSelectAllCats">全选</button>
-        <button
-          class="ex-cat-chip ex-fav-btn"
-          :class="{ on: exFavMode }"
-          title="查看我在 ExHentai 收藏的画廊"
-          @click="$emit('ex-favorites', 1)"
-        >★ 我的收藏</button>
-        <button
-          class="ex-cat-chip ex-hide-tag-btn"
-          :class="{ on: exHidePanel }"
-          title="设置不想显示的标签（含该标签的画廊会被隐藏）"
-          @click="exHidePanel = !exHidePanel"
-        >🚫 隐藏标签{{ exHiddenTags.length ? `（${exHiddenTags.length}）` : '' }}</button>
-      </div>
-      <!-- 隐藏标签管理面板：手动输入标签名长期保存，× 删除 -->
-      <div v-if="exHidePanel" class="ex-hide-panel">
-        <div class="ex-hide-input-row">
-          <n-input
-            v-model:value="exHideTagInput"
-            size="tiny"
-            clearable
-            placeholder="输入标签名，如 female:x 或直接填 x"
-            class="ex-hide-input"
-            @keyup.enter="exAddHiddenTag"
-          />
-          <n-button size="tiny" type="primary" @click="exAddHiddenTag">添加</n-button>
-        </div>
-        <div class="ex-hide-tags" v-if="exHiddenTags.length">
-          <span
-            v-for="t in exHiddenTags"
-            :key="t"
-            class="ex-hide-chip"
-            :title="`点击删除隐藏标签：${t}`"
-          >{{ t }}<span class="ex-hide-chip-x" @click.stop="$emit('ex-delete-hidden-tag', t)">×</span></span>
-        </div>
-        <div v-else class="ex-hide-empty">尚未设置隐藏标签。填 "xxx" 会隐藏所有命名空间下的 xxx；填 "female:xxx" 只隐藏 female 下的 xxx。</div>
-      </div>
-      <div class="ex-filters">
-        <div class="ex-filter-item">
-          <span class="ex-filter-label">最低评分</span>
-          <n-select
-            :value="exMinRating"
-            :options="exRatingOptions"
-            size="tiny"
-            class="ex-rating-select"
-            @update:value="v => emitExSearch({ exhentai_min_rating: v })"
-          />
-        </div>
-        <div class="ex-filter-item">
-          <span class="ex-filter-label">仅显示有种子</span>
-          <n-switch
-            :value="exTorrentsOnly"
-            size="small"
-            @update:value="v => emitExSearch({ exhentai_torrents_only: v })"
-          />
-        </div>
-        <div class="ex-filter-item">
-          <span class="ex-filter-label">页数范围</span>
-          <n-input-number
-            :value="exPageMin || null"
-            size="tiny"
-            :min="0"
-            :max="9999"
-            placeholder="最小"
-            clearable
-            class="ex-page-input"
-            @update:value="v => emitExSearch({ exhentai_page_min: v || 0 })"
-          />
-          <span class="ex-filter-sep">-</span>
-          <n-input-number
-            :value="exPageMax || null"
-            size="tiny"
-            :min="0"
-            :max="9999"
-            placeholder="最大"
-            clearable
-            class="ex-page-input"
-            @update:value="v => emitExSearch({ exhentai_page_max: v || 0 })"
-          />
-        </div>
-      </div>
-    </div>
+    <!-- JavDB 工具栏（已拆分到 JavdbView.vue mode="toolbar"，重构 f3） -->
+    <JavdbView
+      v-if="site === 'javdb' && !javdbDetail && !javdbDetailLoading"
+      mode="toolbar"
+      :site="site"
+      :javdb-user="javdbUser"
+      :javdb-hot="javdbHot"
+      :javdb-tags-vocab="javdbTagsVocab"
+      :javdb-tags-mode="javdbTagsMode"
+      :javdb-mode-recommend="javdbModeRecommend"
+      :translated-titles="translatedTitles"
+      @javdb-logout="$emit('javdb-logout')"
+      @javdb-hot="$emit('javdb-hot', $event)"
+      @javdb-mode="$emit('javdb-mode', $event)"
+      @javdb-open-detail="$emit('javdb-open-detail', $event)"
+      @javdb-open-list="(a, b) => $emit('javdb-open-list', a, b)"
+      @javdb-search-tag="$emit('javdb-search-tag', $event)"
+      @javdb-dir="(a) => $emit('javdb-dir', a)"
+    />
 
-    <!-- X (Twitter) 工具栏：浏览模式 / 关注列表 / 关注我的人 / 我的分类（需登录）
-         常驻显示（此前文件列表/搜索结果非空时整条消失，导致无法进入浏览模式） -->
-    <div v-if="site === 'twitter' && !twFollowMode" class="tw-toolbar">
+    <!-- ExHentai 搜索选项栏（已拆分到 ExhentaiView.vue mode="options"，重构 f2） -->
+    <ExhentaiView
+      v-if="site === 'exhentai' && fileList.length === 0 && !exGalleryDetail"
+      mode="options"
+      :site="site"
+      :settings="settings"
+      :ex-fav-mode="exFavMode"
+      :ex-hidden-tags="exHiddenTags"
+      @update:ex-search="$emit('update:ex-search', $event)"
+      @ex-favorites="$emit('ex-favorites', $event)"
+      @ex-add-hidden-tag="$emit('ex-add-hidden-tag', $event)"
+      @ex-delete-hidden-tag="$emit('ex-delete-hidden-tag', $event)"
+    />
+
+    <!-- X (Twitter) 工具栏：浏览模式 / 关注列表 / 关注我的人 / 我的分类 + 本地搜索
+         常驻吸顶（进入任何视图后也保持在上方可点，随时切换；此前 !twFollowMode
+         条件使进入视图后整条消失，只能靠视图内"← 返回"） -->
+    <div v-if="site === 'twitter'" class="tw-toolbar tw-toolbar-sticky">
       <n-button
         size="small"
         :type="twFollowMode === 'browse' ? 'primary' : 'default'"
@@ -283,8 +240,9 @@
         @click="$emit('iw-friends', 1)"
       >我的好友</n-button>
       <n-button
+        class="batch-cta"
         size="small"
-        :type="iwBatchMode ? 'warning' : 'default'"
+        :type="iwBatchMode ? 'warning' : 'primary'"
         :title="iwBatchMode ? '退出勾选模式' : '点击后当前列表进入勾选模式，勾选要下载的用户/视频'"
         @click="toggleIwBatch"
       >{{ iwBatchMode ? '取消勾选' : '批量解析下载' }}</n-button>
@@ -297,105 +255,40 @@
         :title="`开始下载勾选的 ${iwBatchChecked.size} 项（每个用户单独建任务）`"
         @click="startIwBatch"
       >开始下载{{ iwBatchChecked.size ? `(${iwBatchChecked.size})` : '' }}</n-button>
+      <template v-if="iwBatchMode">
+        <n-button size="tiny" title="勾选当前列表全部项" @click="selectIwBatch('all')">全选</n-button>
+        <n-button size="tiny" title="勾选状态反转" @click="selectIwBatch('invert')">反选</n-button>
+        <n-button size="tiny" title="清空全部勾选" @click="selectIwBatch('clear')">清空</n-button>
+      </template>
       <span v-if="iwBatchRunning" class="tw-toolbar-hint iw-batch-progress">
         {{ iwBatchProgress.message || '准备中...' }}（{{ iwBatchProgress.done }}/{{ iwBatchProgress.total }}）
       </span>
       <span v-else class="tw-toolbar-hint">主页看最近更新；点视频卡片看完整信息；点作者可关注 / 进主页</span>
     </div>
 
-    <!-- Hanime1 (H站) 搜索选项栏：分类 + 排序 + 主页/用户中心（分类浏览复刻原版分类按钮） -->
-    <div v-if="site === 'hanime' && fileList.length === 0 && haView !== 'detail'" class="ex-search-options">
-      <div class="ex-cats">
-        <span class="ex-cats-label">分类：</span>
-        <button
-          class="ex-cat-chip"
-          :class="{ on: !settings.hanime_genre }"
-          title="全部分类（回到主页分区）"
-          @click="setHaGenre('')"
-        >全部</button>
-        <button
-          v-for="g in haGenres"
-          :key="g"
-          class="ex-cat-chip"
-          :class="{ on: settings.hanime_genre === g }"
-          :title="`按「${g}」分类浏览`"
-          @click="setHaGenre(g)"
-        >{{ g }}</button>
-        <div class="ex-filter-item ha-sort-item">
-          <span class="ex-filter-label">排序</span>
-          <n-select
-            :value="settings.hanime_sort"
-            :options="haSortOptions"
-            size="tiny"
-            class="ha-sort-select"
-            placeholder="默認"
-            @update:value="v => setHaSort(v || '')"
-          />
-        </div>
-      </div>
-      <div class="ex-cats">
-        <n-button
-          size="tiny"
-          :type="haView === 'home' ? 'primary' : 'default'"
-          :loading="haHomeLoading && haView === 'home'"
-          title="回到主页各分区（最新上市/最新上傳 + 分类）"
-          @click="$emit('ha-home')"
-        >主页</n-button>
-        <n-button
-          size="tiny"
-          :type="haView === 'user' && haUserTab === 'history' ? 'primary' : 'default'"
-          :loading="haUserLoading && haView === 'user' && haUserTab === 'history'"
-          title="我看过的视频（需登录）"
-          @click="$emit('hanime-user-videos', 'history')"
-        >觀看紀錄</n-button>
-        <n-button
-          size="tiny"
-          :type="haView === 'user' && haUserTab === 'saves' ? 'primary' : 'default'"
-          :loading="haUserLoading && haView === 'user' && haUserTab === 'saves'"
-          title="收藏（稍後觀看）的视频（需登录）"
-          @click="$emit('hanime-user-videos', 'saves')"
-        >稍後觀看</n-button>
-        <n-button
-          size="tiny"
-          :type="haView === 'user' && haUserTab === 'likes' ? 'primary' : 'default'"
-          :loading="haUserLoading && haView === 'user' && haUserTab === 'likes'"
-          title="我点赞过的视频（需登录）"
-          @click="$emit('hanime-user-videos', 'likes')"
-        >讚好的影片</n-button>
-        <n-button
-          size="tiny"
-          :type="haView === 'user' && haUserTab === 'uploaded' ? 'primary' : 'default'"
-          :loading="haUserLoading && haView === 'user' && haUserTab === 'uploaded'"
-          title="我上传的视频（需登录）"
-          @click="$emit('hanime-user-videos', 'uploaded')"
-        >上傳的影片</n-button>
-        <n-button
-          size="tiny"
-          :type="haView === 'user' && haUserTab === 'uploading' ? 'primary' : 'default'"
-          :loading="haUserLoading && haView === 'user' && haUserTab === 'uploading'"
-          title="审核中的视频（需登录）"
-          @click="$emit('hanime-user-videos', 'uploading')"
-        >審核中</n-button>
-        <n-button
-          size="tiny"
-          :type="haBatchMode ? 'warning' : 'default'"
-          :title="haBatchMode ? '退出勾选模式' : '点击后当前列表进入勾选模式，勾选要下载的视频'"
-          @click="toggleHaBatch"
-        >{{ haBatchMode ? '取消勾选' : '批量下载' }}</n-button>
-        <n-button
-          v-if="haBatchMode"
-          size="tiny"
-          type="error"
-          :disabled="!haBatchChecked.size"
-          :loading="haBatchRunning"
-          :title="`开始下载勾选的 ${haBatchChecked.size} 个视频（自动取最高画质）`"
-          @click="startHaBatch"
-        >开始下载{{ haBatchChecked.size ? `(${haBatchChecked.size})` : '' }}</n-button>
-        <span v-if="haBatchRunning" class="iw-batch-progress ha-batch-progress">
-          {{ haBatchProgress.message || '准备中...' }}（{{ haBatchProgress.done }}/{{ haBatchProgress.total }}）
-        </span>
-      </div>
-    </div>
+    <!-- Hanime1 搜索选项栏（已拆分到 HanimeView.vue mode="options"，重构 f3） -->
+    <HanimeView
+      v-if="site === 'hanime' && fileList.length === 0 && haView !== 'detail'"
+      mode="options"
+      :site="site"
+      :settings="settings"
+      :ha-view="haView"
+      :ha-genres="haGenres"
+      :ha-sorts="haSorts"
+      :ha-home-loading="haHomeLoading"
+      :ha-user-loading="haUserLoading"
+      :ha-user-tab="haUserTab"
+      :ha-batch-mode="haBatchMode"
+      :ha-batch-checked="haBatchChecked"
+      :ha-batch-running="haBatchRunning"
+      :ha-batch-progress="haBatchProgress"
+      @ha-home="$emit('ha-home')"
+      @hanime-user-videos="(...args) => $emit('hanime-user-videos', ...args)"
+      @update:ha-search="$emit('update:ha-search', $event)"
+      @toggle-ha-batch="toggleHaBatch"
+      @start-ha-batch="startHaBatch"
+        @select-ha-batch="selectHaBatch"
+    />
 
     <!-- Oreno3D (O3D) / EroMMDTube (E站) 工具栏：主页 + 排序 + 角色列表/人気作者/热门分类 + 收藏（无需登录） -->
     <div v-if="isOrenoSite && fileList.length === 0 && orView !== 'detail'" class="tw-toolbar">
@@ -441,8 +334,9 @@
         @click="$emit('or-favorites')"
       >♥ 我的收藏</n-button>
       <n-button
+        class="batch-cta"
         size="small"
-        :type="orBatchMode ? 'warning' : 'default'"
+        :type="orBatchMode ? 'warning' : 'primary'"
         :title="orBatchMode ? '退出勾选模式' : '点击后当前列表进入勾选模式，勾选要下载的视频'"
         @click="toggleOrBatch"
       >{{ orBatchMode ? '取消勾选' : '批量下载' }}</n-button>
@@ -455,82 +349,43 @@
         :title="`开始下载勾选的 ${orBatchChecked.size} 个视频（iwara 源最高画质）`"
         @click="startOrBatch"
       >开始下载{{ orBatchChecked.size ? `(${orBatchChecked.size})` : '' }}</n-button>
+      <template v-if="orBatchMode">
+        <n-button size="tiny" title="勾选当前列表全部视频" @click="selectOrBatch('all')">全选</n-button>
+        <n-button size="tiny" title="勾选状态反转" @click="selectOrBatch('invert')">反选</n-button>
+        <n-button size="tiny" title="清空全部勾选" @click="selectOrBatch('clear')">清空</n-button>
+      </template>
       <span v-if="orBatchRunning" class="tw-toolbar-hint iw-batch-progress">
         {{ orBatchProgress.message || '准备中...' }}（{{ orBatchProgress.done }}/{{ orBatchProgress.total }}）
       </span>
       <span v-else class="tw-toolbar-hint">点视频卡片看详情与播放；点角色/作者/标签查看同类作品</span>
     </div>
 
-    <!-- ASMR 音声站工具栏：热门作品 / 媒体库（排序+仅带字幕）/ 我的收藏 / 社团·标签·声优索引 / 批量下载 -->
-    <div v-if="site === 'asmr' && fileList.length === 0 && asmrView !== 'detail'" class="ex-search-options">
-      <div class="ex-cats">
-        <span class="ex-cats-label">分类：</span>
-        <n-button
-          size="tiny"
-          :type="asmrView === 'popular' ? 'primary' : 'default'"
-          :loading="asmrListLoading && asmrView === 'popular'"
-          title="热门作品（每页 100 个，可加载更多）"
-          @click="$emit('asmr-popular', 1)"
-        >热门作品</n-button>
-        <n-button
-          size="tiny"
-          :type="asmrView === 'works' && !asmrFilter.id ? 'primary' : 'default'"
-          :loading="asmrListLoading && asmrView === 'works'"
-          title="媒体库（最新入库 + 排序 + 筛选）"
-          @click="$emit('asmr-works', 1)"
-        >媒体库</n-button>
-        <n-button
-          size="tiny"
-          :type="asmrView === 'favorites' ? 'primary' : 'default'"
-          :loading="asmrListLoading && asmrView === 'favorites'"
-          title="我的收藏（需登录）"
-          @click="$emit('asmr-favorites', 1)"
-        >我的收藏</n-button>
-        <div class="ex-filter-item ha-sort-item">
-          <span class="ex-filter-label">排序</span>
-          <n-select
-            :value="settings.asmr_order"
-            :options="asmrOrderOptions"
-            size="tiny"
-            class="ha-sort-select"
-            placeholder="最新入库"
-            @update:value="v => $emit('update:asmr-search', { asmr_order: v })"
-          />
-        </div>
-        <div class="ex-filter-item asmr-subtitle-item">
-          <n-checkbox
-            :checked="!!settings.asmr_subtitle"
-            size="small"
-            title="只显示带中文字幕的作品"
-            @update:checked="v => $emit('update:asmr-search', { asmr_subtitle: !!v })"
-          >仅带字幕</n-checkbox>
-        </div>
-      </div>
-      <div class="ex-cats">
-        <n-button size="tiny" tertiary title="按社团浏览作品" @click="showAsmrIndex('circles')">社团</n-button>
-        <n-button size="tiny" tertiary title="按标签浏览作品" @click="showAsmrIndex('tags')">标签</n-button>
-        <n-button size="tiny" tertiary title="按声优浏览作品" @click="showAsmrIndex('vas')">声优</n-button>
-        <n-button
-          size="tiny"
-          :type="asmrBatchMode ? 'warning' : 'default'"
-          :title="asmrBatchMode ? '退出勾选模式' : '点击后当前列表进入勾选模式，勾选要下载的作品'"
-          @click="toggleAsmrBatch"
-        >{{ asmrBatchMode ? '取消勾选' : '批量下载' }}</n-button>
-        <n-button
-          v-if="asmrBatchMode"
-          size="tiny"
-          type="error"
-          :disabled="!asmrBatchChecked.size"
-          :loading="asmrBatchRunning"
-          :title="`开始下载勾选的 ${asmrBatchChecked.size} 个作品（整包下载全部音轨）`"
-          @click="startAsmrBatch"
-        >开始下载{{ asmrBatchChecked.size ? `(${asmrBatchChecked.size})` : '' }}</n-button>
-        <span v-if="asmrBatchRunning" class="iw-batch-progress">
-          {{ asmrBatchProgress.message || '准备中...' }}（{{ asmrBatchProgress.done }}/{{ asmrBatchProgress.total }}）
-        </span>
-        <span v-else class="tw-toolbar-hint">点作品卡片查看音轨列表并在线试听；可按社团/标签/声优筛选</span>
-      </div>
-    </div>
+    <!-- ASMR 工具栏（已拆分到 AsmrView.vue mode="options"，重构 f3；索引弹窗随迁） -->
+    <AsmrView
+      v-if="site === 'asmr' && fileList.length === 0 && asmrView !== 'detail'"
+      mode="options"
+      :site="site"
+      :settings="settings"
+      :asmr-view="asmrView"
+      :asmr-list-loading="asmrListLoading"
+      :asmr-orders="asmrOrders"
+      :asmr-index-items="asmrIndexItems"
+      :asmr-index-loading="asmrIndexLoading"
+      :asmr-batch-mode="asmrBatchMode"
+      :asmr-batch-checked="asmrBatchChecked"
+      :asmr-batch-running="asmrBatchRunning"
+      :asmr-batch-progress="asmrBatchProgress"
+      @asmr-popular="$emit('asmr-popular', $event)"
+      @asmr-works="$emit('asmr-works', $event)"
+      @asmr-favorites="$emit('asmr-favorites', $event)"
+      @update:asmr-search="$emit('update:asmr-search', $event)"
+      @asmr-index="$emit('asmr-index', $event)"
+      @asmr-index-pick="(a, b, c) => $emit('asmr-index-pick', a, b, c)"
+      @toggle-asmr-batch="toggleAsmrBatch"
+      @start-asmr-batch="startAsmrBatch"
+        @asmr-video-preview="handleAsmrVideoPreview"
+        @select-asmr-batch="selectAsmrBatch"
+    />
 
     <!-- Oreno3D / EroMMDTube 热门分类弹窗：分类组（tag-groups）+ 全部标签；点击分类组查看组内标签 -->
     <n-modal
@@ -587,38 +442,6 @@
       </div>
     </n-modal>
 
-    <!-- ASMR 社团/标签/声优索引弹窗：点击进入对应筛选列表 -->
-    <n-modal
-      v-model:show="asmrIndexModal"
-      preset="card"
-      class="or-tags-modal"
-      :title="`ASMR ${asmrIndexTitle}`"
-      style="width: 560px; max-width: 92vw"
-    >
-      <n-input
-        v-model:value="asmrIndexFilter"
-        size="small"
-        clearable
-        :placeholder="`🔍 输入文字过滤${asmrIndexTitle}`"
-        style="margin-bottom: 8px"
-      />
-      <div class="or-tags-body">
-        <div v-if="asmrIndexLoading && !filteredAsmrIndex.length" class="tw-follow-empty">
-          <n-spin size="medium" />
-          <span>正在获取{{ asmrIndexTitle }}列表...</span>
-        </div>
-        <template v-else>
-          <span
-            v-for="t in filteredAsmrIndex"
-            :key="t.id"
-            class="or-tag-chip"
-            :title="`点击查看「${t.name}」的作品${t.count ? `（共 ${t.count} 部）` : ''}`"
-            @click="pickAsmrIndex(t)"
-          >{{ t.name }}<span v-if="t.count" class="or-chip-count">{{ t.count }}</span></span>
-          <div v-if="!filteredAsmrIndex.length" class="or-tags-empty">没有匹配的{{ asmrIndexTitle}}</div>
-        </template>
-      </div>
-    </n-modal>
 
     <!-- 解析进度 -->
     <div v-if="inspecting" class="inspect-progress">
@@ -629,7 +452,7 @@
         processing
       />
       <span class="progress-text">
-        正在解析文件列表... {{ inspectProgress.current }} / {{ inspectProgress.total }}
+        {{ inspectProgress.filename || '正在解析文件列表...' }}<template v-if="inspectProgress.total"> {{ inspectProgress.current }} / {{ inspectProgress.total }}</template>
       </span>
     </div>
 
@@ -638,7 +461,7 @@
       <!-- 识图视图：拖拽/选择图片 → 多站点并发识图 → 全部返回后展示结果（占用整个内容区） -->
       <div v-if="reverseActive" class="reverse-view">
         <!-- 拖拽/选择图片 -->
-        <div v-if="!(reverseSites || []).length" class="reverse-dropzone" :class="{ 'drop-over': reverseDragOver }"
+        <div v-if="!reverseRunning && !(reverseSites || []).length" class="reverse-dropzone" :class="{ 'drop-over': reverseDragOver }"
              @click="reversePickFile()"
              @dragover.prevent="reverseDragOver = true"
              @dragleave.prevent="reverseDragOver = false"
@@ -648,59 +471,109 @@
           <div class="reverse-dropzone-title">把图片拖到这里开始识图</div>
           <div class="reverse-dropzone-tip">也可以点击此处选择图片（JPG / PNG / WebP）</div>
           <div class="reverse-dropzone-sites">
-            将同时查询：trace.moe · SauceNAO · IQDB · ascii2d · 搜图bot酱 · Google · Yandex · Lenso.ai · Whos.tv<br>
-            （全部网站返回后展示结果，失效网站自动移除；Google / Yandex 需在左侧设置代理）
+            将同时查询：trace.moe · SauceNAO · IQDB · Lenso.ai（需 Token）<br>
+            （全部网站返回后展示结果；Lenso.ai 需在左侧设置填 Token，并走识图代理）
           </div>
         </div>
-        <!-- 搜索中：各站进度 -->
-        <div v-else-if="reverseRunning" class="reverse-progress">
-          <div class="reverse-progress-title">识图中，请稍候...（全部网站返回后自动展示结果）</div>
-          <div v-for="s in reverseSites" :key="s.key" class="reverse-progress-item">
-            <span class="reverse-progress-name">{{ s.name }}</span>
-            <span v-if="s.status === 'running'" class="reverse-progress-running">查询中...</span>
-            <span v-else-if="s.status === 'done'" class="reverse-progress-ok">✓ {{ (s.results || []).length }} 条</span>
-            <span v-else class="reverse-progress-fail">✕ 失败</span>
-          </div>
-        </div>
-        <!-- 结果展示（全部网站返回后） -->
-        <div v-else class="reverse-results">
-          <div class="reverse-results-header">
-            <span class="reverse-results-title">识图结果（{{ reverseTotalCount }} 条）</span>
-            <n-button size="small" quaternary @click="$emit('reverse-reset')">↺ 重新识图</n-button>
-          </div>
-          <div v-for="s in reverseDoneSites" :key="s.key" class="reverse-site-block">
-            <div class="reverse-site-header">
-              <span class="reverse-site-name">{{ s.name }}</span>
-              <span class="reverse-site-count">{{ (s.results || []).length }} 条结果</span>
-              <a v-if="s.url" class="reverse-site-link" href="javascript:void(0)" @click="reverseOpenExternal(s.url)">打开网站 ↗</a>
+        <!-- 进行中：进度总览 + 已完成站点结果流式展示（覆盖完整展示区） -->
+        <!-- 完成：同一布局切到结果展示 -->
+        <template v-else>
+          <div class="reverse-progress" :class="{ done: !reverseRunning }">
+            <div class="reverse-progress-top">
+              <span class="reverse-progress-title">
+                <template v-if="reverseRunning">🔍 识图中 · 已完成 {{ reverseDoneCount }}/{{ (reverseSites || []).length }} 站 · 已出 {{ reverseTotalCount }} 条结果</template>
+                <template v-else>识图结果（{{ reverseTotalCount }} 条）</template>
+              </span>
+              <div class="reverse-view-tabs">
+                <button class="reverse-tab" :class="{ active: reverseViewMode === 'site' }" @click="reverseViewMode = 'site'">按站点</button>
+                <button class="reverse-tab" :class="{ active: reverseViewMode === 'merged' }" :disabled="reverseRunning" @click="reverseViewMode = 'merged'">
+                  聚合排序 <span class="reverse-tab-badge">{{ (reverseMerged || []).length }}</span>
+                </button>
+              </div>
+              <n-button v-if="reverseRunning" size="small" type="warning" quaternary @click="$emit('reverse-cancel')">取消</n-button>
+              <n-button v-else size="small" quaternary @click="$emit('reverse-reset')">↺ 重新识图</n-button>
             </div>
-            <div class="reverse-item-list">
-              <div v-for="(it, idx) in s.results" :key="idx" class="reverse-item"
-                   :class="{ clickable: !!it.url }"
-                   @click="it.url && reverseOpenExternal(it.url)">
-                <div class="reverse-item-thumb">
-                  <img v-if="it.thumbnail" :src="it.thumbnail" loading="lazy" referrerpolicy="no-referrer" />
-                  <span v-else class="reverse-item-thumb-empty">无图</span>
-                </div>
-                <div class="reverse-item-info">
-                  <div class="reverse-item-title">{{ it.title || '未知结果' }}</div>
-                  <div v-if="it.subtitle" class="reverse-item-subtitle">{{ it.subtitle }}</div>
-                  <div class="reverse-item-meta">
-                    <n-tag v-if="it.similarity" size="tiny" type="success" round>{{ it.similarity }}</n-tag>
-                    <span v-if="it.url" class="reverse-item-url">{{ it.url }}</span>
+            <div class="reverse-progress-chips">
+              <span v-for="s in reverseSites" :key="s.key" class="rp-chip" :class="s.status" :title="s.error || ''">
+                <span class="rp-dot" />{{ s.name }}<b v-if="s.status === 'done'"> {{ (s.results || []).length }}</b>
+                <i v-if="s.status === 'failed'" title="失败（鼠标悬停解析卡查看原因）">✕</i>
+              </span>
+            </div>
+          </div>
+
+          <!-- 结果区：进行中即流式展示已完成站点 -->
+          <div class="reverse-results">
+          <!-- 按站点视图 -->
+          <template v-if="reverseViewMode === 'site'">
+            <div v-for="s in reverseDoneSites" :key="s.key" class="reverse-site-block">
+              <div class="reverse-site-header">
+                <span class="reverse-site-name">{{ s.name }}</span>
+                <span class="reverse-site-count">{{ (s.results || []).length }} 条结果</span>
+                <a v-if="s.url" class="reverse-site-link" href="javascript:void(0)" @click="reverseOpenExternal(s.url)">打开网站 ↗</a>
+              </div>
+              <div class="reverse-item-list">
+                <div v-for="(it, idx) in s.results" :key="idx" class="reverse-item"
+                     :class="{ clickable: !!it.url }"
+                     @click="it.url && reverseOpenExternal(it.url)">
+                  <div class="reverse-item-thumb">
+                    <img v-if="it.thumbnail" :src="it.thumbnail" loading="lazy" referrerpolicy="no-referrer" />
+                    <span v-else class="reverse-item-thumb-empty">无图</span>
                   </div>
-                </div>
-                <div class="reverse-item-actions" @click.stop>
-                  <n-button v-if="it.url" size="tiny" quaternary @click="reverseCopyText(it.url)">复制</n-button>
-                  <n-button v-if="it.url" size="tiny" quaternary @click="reverseOpenExternal(it.url)">打开</n-button>
+                  <div class="reverse-item-info">
+                    <div class="reverse-item-title">{{ it.title || '未知结果' }}</div>
+                    <div v-if="it.subtitle" class="reverse-item-subtitle">{{ it.subtitle }}</div>
+                    <div class="reverse-item-meta">
+                      <n-tag v-if="it.similarity" size="tiny" type="success" round>{{ it.similarity }}</n-tag>
+                      <span v-if="it.url" class="reverse-item-url">{{ it.url }}</span>
+                    </div>
+                  </div>
+                  <div class="reverse-item-actions" @click.stop>
+                    <n-button v-if="it.downloadable" size="tiny" type="primary" tertiary @click="emit('reverse-download', it.url)">下载</n-button>
+                    <n-button v-if="it.url" size="tiny" quaternary @click="reverseCopyText(it.url)">复制</n-button>
+                    <n-button v-if="it.url" size="tiny" quaternary @click="reverseOpenExternal(it.url)">打开</n-button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div v-if="!reverseDoneSites.length" class="reverse-empty">
-            所有网站均未返回结果（可能图片无匹配、被限流或网络不通；Google / Yandex 请配置代理）
-          </div>
+            <div v-if="!reverseDoneSites.length" class="reverse-empty">
+              <template v-if="reverseRunning">🔍 各站点查询中…已完成的结果会实时出现在这里</template>
+              <template v-else>所有网站均未返回结果（可能图片无匹配、被限流或网络不通；Lenso.ai 需 Token 并走识图代理）</template>
+            </div>
+          </template>
+
+          <!-- 聚合排序视图：跨站去重 + 相似度降序 -->
+          <template v-else>
+            <div v-for="(it, idx) in reverseMerged" :key="idx" class="reverse-item"
+                 :class="{ clickable: !!it.url }"
+                 @click="it.url && reverseOpenExternal(it.url)">
+              <div class="reverse-item-thumb">
+                <img v-if="it.thumbnail" :src="it.thumbnail" loading="lazy" referrerpolicy="no-referrer" />
+                <span v-else class="reverse-item-thumb-empty">无图</span>
+              </div>
+              <div class="reverse-item-info">
+                <div class="reverse-item-title">{{ it.title || '未知结果' }}</div>
+                <div v-if="it.subtitle" class="reverse-item-subtitle">{{ it.subtitle }}</div>
+                <div class="reverse-item-meta">
+                  <n-tag v-if="it.similarity" size="tiny" type="success" round>{{ it.similarity }}</n-tag>
+                  <n-tag v-if="(it.sources || []).length" size="tiny" type="info" round>{{ (it.sources || []).length }} 站命中</n-tag>
+                  <span v-if="it.url" class="reverse-item-url">{{ it.url }}</span>
+                </div>
+                <div v-if="(it.sources || []).length" class="reverse-item-sources">
+                  来源：{{ (it.sources || []).join(' · ') }}
+                </div>
+              </div>
+              <div class="reverse-item-actions" @click.stop>
+                <n-button v-if="it.downloadable" size="tiny" type="primary" tertiary @click="emit('reverse-download', it.url)">下载</n-button>
+                <n-button v-if="it.url" size="tiny" quaternary @click="reverseCopyText(it.url)">复制</n-button>
+                <n-button v-if="it.url" size="tiny" quaternary @click="reverseOpenExternal(it.url)">打开</n-button>
+              </div>
+            </div>
+            <div v-if="!reverseMerged.length" class="reverse-empty">没有可聚合的结果</div>
+          </template>
+
+          <div v-if="reverseCached" class="reverse-cache-hint">本次结果来自本地缓存，未消耗站点配额</div>
         </div>
+        </template><!-- /进行中与完成共用的结果容器 -->
       </div>
       <!-- 文件列表视图（后台批量收集期间与完成后均不切换：保持当前视图，静默后台下载）；
            EX 内联详情模式下不显示独立文件列表（内容追加在搜索结果下方） -->
@@ -748,6 +621,12 @@
             </n-input>
           </div>
           <div class="list-actions">
+            <!-- 画廊图片总数（解析自画廊页 gpc 计数） -->
+            <span
+              v-if="site === 'exhentai' && exGalleryDetail && (exGalleryDetail.length || exGalleryDetail.image_count)"
+              class="ex-total-badge"
+              title="本画廊图片总数"
+            >共 {{ exGalleryDetail.length || exGalleryDetail.image_count }} 张</span>
             <!-- EX 画廊信息切换：自动解析后保留元数据可见（点开链接自动解析展示） -->
             <n-button
               v-if="site === 'exhentai' && exGalleryDetail"
@@ -757,10 +636,28 @@
               :title="showExGalleryInfo ? '收起画廊信息' : '展开画廊信息（上传者/时间/评分/标签）'"
               @click="showExGalleryInfo = !showExGalleryInfo"
             >ℹ️ 画廊信息</n-button>
+            <!-- 磁力弹窗：画廊种子列表 + btih 磁力链接（EX 解析后的文件列表界面可见） -->
+            <n-button
+              v-if="site === 'exhentai' && exGalleryDetail && exGalleryDetail.url"
+              size="small"
+              quaternary
+              type="warning"
+              title="查看画廊附带的种子与磁力链接"
+              @click="onExTorrents(exGalleryDetail.url)"
+            >🧲 磁力</n-button>
             <n-button size="small" quaternary @click="selectAll">全选</n-button>
             <n-button size="small" quaternary @click="selectNone">取消全选</n-button>
             <n-button size="small" quaternary @click="invertSelection">反选</n-button>
             <n-button size="small" quaternary @click="selectByType('ok')">仅选可下载</n-button>
+            <n-button
+              size="small"
+              type="primary"
+              secondary
+              :disabled="checkedKeys.length === 0"
+              :loading="downloading"
+              title="下载当前勾选的文件"
+              @click="handleDownload"
+            >{{ downloading ? '下载中...' : `下载选中 (${checkedKeys.length})` }}</n-button>
             <!-- 显示模式切换：小方格 / 横向详细 -->
             <n-button
               size="small"
@@ -790,6 +687,15 @@
           v-if="site === 'exhentai' && exGalleryDetail && showExGalleryInfo"
           class="ex-inline-info"
         >
+          <!-- 封面（发布者信息上方，点击放大） -->
+          <div class="ex-inline-cover">
+            <img
+              :src="exGalleryDetail.thumbnail"
+              referrerpolicy="no-referrer"
+              :alt="exGalleryDetail.title"
+              @click="exInlineCoverZoom = !exInlineCoverZoom"
+            />
+          </div>
           <div class="ex-inline-row">
             <span v-if="exGalleryDetail.uploader" class="ex-inline-field">
               <span class="ex-inline-label">发布者</span>
@@ -861,7 +767,10 @@
               @contextmenu.prevent="openFileCtxMenu($event, f)"
             >
               <div class="grid-thumb">
-                <img v-if="f.thumbnail" :src="f.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
+                <!-- EX 精灵图缩略图（同页共用一张拼图，按偏移切片显示） -->
+                <div v-if="f.thumb_w" class="grid-sprite"
+                     :style="{ width: f.thumb_w + 'px', height: f.thumb_h + 'px', backgroundImage: 'url(' + f.thumbnail + ')', backgroundPosition: '-' + f.thumb_x + 'px -' + f.thumb_y + 'px' }"></div>
+                <img v-else-if="f.thumbnail" :src="f.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
                 <img v-else-if="f.file_icon" :src="f.file_icon" class="grid-icon" alt="" />
                 <span v-else class="grid-type">{{ f.file_type || '文件' }}</span>
                 <span v-if="f.is_new" class="grid-new">新</span>
@@ -869,11 +778,11 @@
                 <span v-if="checkedKeys.includes(f.item_page)" class="grid-check">✓</span>
                 <!-- 在线预览/播放按钮（点击弹窗，不与勾选冲突） -->
                 <span
-                  v-if="f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f))"
+                  v-if="f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f) || isAudioItem(f))"
                   class="grid-preview-btn"
-                  :title="isVideoItem(f) ? '在线播放' : '查看大图'"
+                  :title="isVideoItem(f) ? '在线播放' : (isAudioItem(f) ? '试听' : '查看大图')"
                   @click.stop="openPreview(f)"
-                >{{ isVideoItem(f) ? '▶' : '👁' }}</span>
+                >{{ isVideoItem(f) ? '▶' : (isAudioItem(f) ? '♪' : '👁') }}</span>
               </div>
               <div class="grid-name">{{ f.filename }}</div>
               <div class="grid-size">{{ f.size_text || '—' }}</div>
@@ -899,92 +808,136 @@
         </div>
       </div>
 
-      <!-- EX 画廊详情视图：完整信息（标题/发布者/时间/父画廊/大小/页数/收藏数/评分）+ 分组标签可点击 + 种子入口 -->
-      <!-- 文件列表加载完成后自动隐藏（让位给文件列表视图，点击"后退"可回到此处）；
-           内联详情模式下不显示独立详情视图（内容追加在搜索结果下方） -->
-      <div v-else-if="site === 'exhentai' && (exGalleryDetail || exDetailLoading) && fileList.length === 0 && !exInlineDetail" class="ex-detail">
-        <div class="ex-detail-toolbar">
-          <n-button size="small" quaternary type="primary" @click="$emit('ex-close-detail')">← 后退</n-button>
-          <span class="ex-detail-toolbar-title">画廊详情</span>
-        </div>
-        <n-scrollbar class="ex-detail-scroll">
-          <div v-if="exDetailLoading && !exGalleryDetail" class="ex-detail-loading">
-            <n-spin size="medium" />
-            <span>正在获取画廊信息...</span>
-          </div>
-          <template v-else-if="exGalleryDetail">
-            <div class="ex-detail-head">
-              <div class="ex-detail-cover">
-                <img
-                  v-if="exGalleryDetail.thumbnail"
-                  :src="exGalleryDetail.thumbnail"
-                  referrerpolicy="no-referrer"
-                  :alt="exGalleryDetail.title"
-                />
-                <span v-else class="ex-thumb-empty">EX</span>
-              </div>
-              <div class="ex-detail-info">
-                <div class="ex-detail-name" :title="exGalleryDetail.title">{{ exGalleryDetail.title }}</div>
-                <div
-                  v-if="exGalleryDetail.title_jp && exGalleryDetail.title_jp !== exGalleryDetail.title"
-                  class="ex-detail-name-jp"
-                >{{ exGalleryDetail.title_jp }}</div>
-                <table class="ex-detail-meta">
-                  <tr v-if="exGalleryDetail.uploader"><td>发布者</td><td>{{ exGalleryDetail.uploader }}</td></tr>
-                  <tr v-if="exGalleryDetail.posted"><td>发布时间</td><td>{{ exGalleryDetail.posted }}</td></tr>
-                  <tr v-if="exGalleryDetail.parent">
-                    <td>父画廊</td>
-                    <td>
-                      <a class="ex-detail-link" title="点击查看父画廊" @click="$emit('ex-open-gallery', exGalleryDetail.parent)">{{ exGalleryDetail.parent }}</a>
-                    </td>
-                  </tr>
-                  <tr v-if="exGalleryDetail.visible"><td>可见性</td><td>{{ exGalleryDetail.visible }}</td></tr>
-                  <tr v-if="exGalleryDetail.language"><td>语言</td><td>{{ exGalleryDetail.language }}</td></tr>
-                  <tr v-if="exGalleryDetail.file_size"><td>文件大小</td><td>{{ exGalleryDetail.file_size }}</td></tr>
-                  <tr v-if="exGalleryDetail.length"><td>页数</td><td>{{ exGalleryDetail.length }}</td></tr>
-                  <tr v-if="exGalleryDetail.favorited"><td>收藏数</td><td>{{ exGalleryDetail.favorited }}</td></tr>
-                  <tr v-if="exGalleryDetail.rating">
-                    <td>评分</td>
-                    <td>⭐ {{ exGalleryDetail.rating }}<span v-if="exGalleryDetail.rating_count">（{{ exGalleryDetail.rating_count }} 人评分）</span></td>
-                  </tr>
-                </table>
-                <div class="ex-detail-actions">
-                  <n-button
+      <!-- ExHentai 主视图（已拆分到 ExhentaiView.vue，重构 f2：画廊详情/浏览器/搜索结果三子视图，
+           按原链序在组件内部切换；下方文件列表为全站共用设施，经插槽由本组件提供） -->
+      <ExhentaiView
+        v-else-if="exMainViewActive"
+        mode="main"
+        :site="site"
+        :search-results="searchResults"
+        :search-page="searchPage"
+        :search-total-pages="searchTotalPages"
+        :search-has-more="searchHasMore"
+        :searching="searching"
+        :search-total-results="searchTotalResults"
+        :inspecting="inspecting"
+        :inspect-progress="inspectProgress"
+        :album-info="albumInfo"
+        :file-list="fileList"
+        :batch-file-collected="batchFileCollected"
+        :ex-gallery-detail="exGalleryDetail"
+        :ex-detail-loading="exDetailLoading"
+        :ex-inline-detail="exInlineDetail"
+        :ex-batch-running="exBatchRunning"
+        :ex-batch-progress="exBatchProgress"
+        :ex-fav-mode="exFavMode"
+        :exhentai-user="exhentaiUser"
+        :ex-view-mode="exViewMode"
+        :torrent-loading="torrentLoading"
+        :translated-titles="translatedTitles"
+        @ex-open-gallery="$emit('ex-open-gallery', $event)"
+        @ex-close-detail="$emit('ex-close-detail')"
+        @ex-torrents="onExTorrents"
+        @open-album="$emit('open-album', $event)"
+        @ex-batch-download="$emit('ex-batch-download', $event)"
+        @ex-batch-cancel="$emit('ex-batch-cancel')"
+        @show-collected-files="$emit('show-collected-files')"
+        @clear-batch-tasks="$emit('clear-batch-tasks')"
+        @go-page="p => $emit('go-page', p)"
+        @back-to-search="$emit('back-to-search')"
+        @add-favorite="$emit('add-favorite', $event)"
+        @ex-parse-gallery="$emit('ex-parse-gallery', $event)"
+        @ex-sync-cookies="$emit('ex-sync-cookies')"
+        @ex-set-viewmode="exViewMode = $event"
+        @ex-show-browser="exShowBrowser"
+        @update:search-query="$emit('update:search-query', $event)"
+        @search="$emit('search')"
+      >
+        <template #inline-filelist>
+                <div v-if="fileList.length > 0" class="ex-inline-file-list">
+                  <div class="list-toolbar">
+                    <div class="album-info">
+                      <span class="album-name">{{ albumInfo.album_name || '未知相册' }}</span>
+                      <n-tag size="small" :type="albumInfo.is_album ? 'info' : 'warning'" round>
+                        {{ albumInfo.is_album ? '相册' : '单文件' }}
+                      </n-tag>
+                      <span class="file-count">共 {{ fileList.length }} 个文件</span>
+                    </div>
+                    <div class="list-actions">
+                      <n-button size="small" quaternary @click="selectAll">全选</n-button>
+                      <n-button size="small" quaternary @click="selectNone">取消全选</n-button>
+                      <n-button size="small" quaternary @click="invertSelection">反选</n-button>
+                      <n-button size="small" quaternary @click="selectByType('ok')">仅选可下载</n-button>
+                      <n-button
+                        size="small"
+                        quaternary
+                        :title="viewMode === 'grid' ? '切换为横向详细列表' : '切换为小方格排列'"
+                        @click="toggleViewMode"
+                      >{{ viewMode === 'grid' ? '列表' : '方格' }}</n-button>
+                    </div>
+                  </div>
+  
+                  <n-data-table
+                    v-if="viewMode === 'list'"
+                    :columns="columns"
+                    :data="filteredFileList"
+                    :row-key="row => row.item_page"
+                    :row-props="fileRowProps"
+                    v-model:checked-row-keys="checkedKeys"
+                    :max-height="tableHeight"
+                    :scroll-x="700"
                     size="small"
-                    type="primary"
-                    title="解析画廊全部图片并进入文件列表"
-                    @click="$emit('open-album', { album_url: exGalleryDetail.url, album_name: exGalleryDetail.title })"
-                  >解析图片列表</n-button>
-                  <n-button
-                    size="small"
-                    type="warning"
-                    ghost
-                    :loading="torrentLoading"
-                    title="查看画廊附带的种子（可获取磁力或保存种子文件）"
-                    @click="exDetailTorrents(exGalleryDetail.url)"
-                  >种子 / 磁力</n-button>
+                    striped
+                  />
+                  <div v-else class="file-grid">
+                    <div
+                      v-for="f in filteredFileList"
+                      :key="f.item_page"
+                      class="file-grid-item"
+                      :class="{ 'grid-selected': checkedKeys.includes(f.item_page), 'grid-bad': f.status === 'error' }"
+                      :title="`${f.filename}\n${f.size_text || ''}`"
+                      @click="toggleGridSelect(f.item_page)"
+                      @contextmenu.prevent="openFileCtxMenu($event, f)"
+                    >
+                      <div class="grid-thumb">
+                        <div v-if="f.thumb_w" class="grid-sprite"
+                             :style="{ width: f.thumb_w + 'px', height: f.thumb_h + 'px', backgroundImage: 'url(' + f.thumbnail + ')', backgroundPosition: '-' + f.thumb_x + 'px -' + f.thumb_y + 'px' }"></div>
+                        <img v-else-if="f.thumbnail" :src="f.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
+                        <img v-else-if="f.file_icon" :src="f.file_icon" class="grid-icon" alt="" />
+                        <span v-else class="grid-type">{{ f.file_type || '文件' }}</span>
+                        <span v-if="f.is_new" class="grid-new">新</span>
+                        <span v-if="f.is_downloaded" class="grid-downloaded" title="历史任务已下载过（默认不勾选，可手动勾选重下）">已下载</span>
+                        <span v-if="checkedKeys.includes(f.item_page)" class="grid-check">✓</span>
+                        <span
+                          v-if="f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f) || isAudioItem(f))"
+                          class="grid-preview-btn"
+                          :title="isVideoItem(f) ? '在线播放' : (isAudioItem(f) ? '试听' : '查看大图')"
+                          @click.stop="openPreview(f)"
+                        >{{ isVideoItem(f) ? '▶' : (isAudioItem(f) ? '♪' : '👁') }}</span>
+                      </div>
+                      <div class="grid-name">{{ f.filename }}</div>
+                      <div class="grid-size">{{ f.size_text || '—' }}</div>
+                    </div>
+                  </div>
+  
+                  <div class="download-bar">
+                    <div class="selected-info">
+                      已选择 <span class="selected-count">{{ checkedKeys.length }}</span> 个文件
+                      <span class="selected-size" v-if="selectedSizeText">({{ selectedSizeText }})</span>
+                    </div>
+                    <n-button
+                      type="primary"
+                      size="large"
+                      :disabled="checkedKeys.length === 0"
+                      :loading="downloading"
+                      @click="handleDownload"
+                    >
+                      {{ downloading ? '下载中...' : `下载选中 (${checkedKeys.length})` }}
+                    </n-button>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <!-- 分组标签（female:/male:/mixed:/artist:/group:...，点击按命名空间搜索，与原版一致） -->
-            <div class="ex-detail-tags">
-              <div v-for="(tags, ns) in exGalleryDetail.tags" :key="ns" class="ex-detail-tagrow">
-                <span class="ex-detail-tagrow-ns">{{ ns }}:</span>
-                <a
-                  v-for="t in tags"
-                  :key="t"
-                  class="ex-detail-tag"
-                  title="点击搜索该标签"
-                  @click="searchTag(`${ns}:${t}`)"
-                >{{ t }}</a>
-              </div>
-              <div v-if="!exGalleryDetail.tags || Object.keys(exGalleryDetail.tags).length === 0" class="ex-detail-notags">
-                无标签
-              </div>
-            </div>
-          </template>
-        </n-scrollbar>
-      </div>
+        </template>
+      </ExhentaiView>
 
       <!-- PA 帖子详情视图：完整信息（标题/画师/时间/正文/标签）+ 附件预览 + 下载入口 -->
       <div v-else-if="site === 'pawchive' && (paPostDetail || paDetailLoading)" class="ex-detail">
@@ -1087,6 +1040,10 @@
             title="解析画师全部帖子的文件并进入下载列表"
             @click="$emit('open-album', { album_url: paArtistPosts?.url, album_name: paArtistPosts?.artist })"
           >批量解析全部</n-button>
+          <n-button-group size="tiny" class="pa-artist-view-switch">
+            <n-button size="tiny" :type="paArtistViewMode === 'list' ? 'primary' : 'default'" title="列表视图（缩略图 + 标题 + 更新时间）" @click="setPaArtistViewMode('list')">列表</n-button>
+            <n-button size="tiny" :type="paArtistViewMode === 'thumb' ? 'primary' : 'default'" title="缩略图视图（卡片网格）" @click="setPaArtistViewMode('thumb')">缩略图</n-button>
+          </n-button-group>
         </div>
         <n-scrollbar class="ex-detail-scroll">
           <div v-if="paArtistPostsLoading && !paArtistPosts" class="ex-detail-loading">
@@ -1099,6 +1056,7 @@
               <span class="pa-artist-count">共 {{ paArtistPosts.posts.length }} 个帖子</span>
               <span v-if="paArtistPosts.cached" class="pa-artist-cached">缓存数据（点"刷新"更新）</span>
             </div>
+            <template v-if="paArtistViewMode === 'list'">
             <div
               v-for="p in paArtistPosts.posts"
               :key="p.post_id"
@@ -1120,12 +1078,42 @@
               <div class="pa-post-info">
                 <div class="pa-post-title">{{ p.title }}</div>
                 <div class="pa-post-meta">
-                  <span class="pa-post-date">{{ (p.published || '').slice(0, 10) }}</span>
+                  <span class="pa-post-date">发布 {{ (p.published || '').slice(0, 10) }}</span>
+                  <span v-if="p.edited" class="pa-post-date pa-post-edited" title="最后更新时间">更新 {{ p.edited.slice(0, 10) }}</span>
                   <span class="pa-post-files">{{ p.file_count }} 个文件</span>
                   <span v-if="p.has_video" class="pa-post-badge pa-post-badge-video">视频</span>
                   <span v-if="p.has_archive" class="pa-post-badge pa-post-badge-zip">压缩包</span>
                 </div>
                 <div v-if="p.content" class="pa-post-content">{{ p.content }}</div>
+              </div>
+            </div>
+            </template>
+            <div v-else class="search-grid">
+              <div
+                v-for="p in paArtistPosts.posts"
+                :key="'t' + p.post_id"
+                class="search-card"
+                :title="paPostTooltip(p)"
+                @click="$emit('pa-open-post', p.post_url)"
+              >
+                <div class="thumb-wrapper">
+                  <img
+                    v-if="p.thumbnail"
+                    :src="p.thumbnail"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    :alt="p.title"
+                    @error="e => e.target.style.display = 'none'"
+                  />
+                  <span v-else class="pa-post-thumb-empty">帖</span>
+                  <span v-if="p.has_video" class="pa-post-badge pa-post-badge-video">视频</span>
+                  <span v-if="p.has_archive" class="pa-post-badge pa-post-badge-zip">压缩包</span>
+                </div>
+                <div class="card-name" :title="p.title">{{ p.title }}</div>
+                <div class="pa-post-meta pa-thumb-meta">
+                  <span class="pa-post-date">{{ (p.edited || p.published || '').slice(0, 10) }}</span>
+                  <span class="pa-post-files">{{ p.file_count }} 个文件</span>
+                </div>
               </div>
             </div>
             <div v-if="!paArtistPosts.posts.length" class="pa-artist-empty">该画师没有帖子</div>
@@ -1462,6 +1450,31 @@
             @click="$emit('tw-follow-list', 'follows')"
           >刷新</n-button>
         </div>
+        <!-- 收藏分类查看/跳转：点击分类 chip 筛选该分类下的用户（再点一次取消） -->
+        <div v-if="twFollowMode === 'follows' && followTagChips.length" class="tw-follow-tags-row">
+          <button
+            class="ex-cat-chip"
+            :class="{ on: !followTagFilter }"
+            title="查看全部已归类用户"
+            @click="followTagFilter = ''"
+          >全部 ({{ twFollowItems.length }})</button>
+          <template v-for="t in followTagChips" :key="t.name">
+            <button
+              class="ex-cat-chip tw-tag-parent"
+              :class="{ on: followTagFilter === t.name }"
+              :title="`查看分类「${t.name}」下的全部用户`"
+              @click="followTagFilter = followTagFilter === t.name ? '' : t.name"
+            >{{ t.name }}</button>
+            <button
+              v-for="c in t.children || []"
+              :key="t.name + '/' + c"
+              class="ex-cat-chip tw-tag-child"
+              :class="{ on: followTagFilter === `${t.name}/${c}` }"
+              :title="`查看「${t.name}/${c}」下的用户`"
+              @click="followTagFilter = followTagFilter === `${t.name}/${c}` ? '' : `${t.name}/${c}`"
+            >{{ c }}</button>
+          </template>
+        </div>
         <n-scrollbar class="tw-follow-scroll">
           <div v-if="twFollowError" class="tw-follow-error">{{ twFollowError }}</div>
           <div v-else-if="twFollowLoading && twFollowItems.length === 0" class="tw-follow-empty">
@@ -1472,7 +1485,7 @@
             {{ twFollowMode === 'follows' ? '还没有归类任何关注，去"关注列表"给用户点"分类"吧' : '暂无数据' }}
           </div>
           <div v-else-if="filteredFollowItems.length === 0" class="tw-follow-empty">
-            没有匹配「{{ followSearch }}」的人（试试加载更多，或清空搜索）
+            {{ followSearch ? `没有匹配「${followSearch}」的人（试试加载更多，或清空搜索）` : (followTagFilter ? `分类「${followTagFilter}」下还没有人` : '暂无数据') }}
           </div>
           <div
             v-for="u in filteredFollowItems"
@@ -1647,6 +1660,10 @@
           </div>
           <div v-else-if="!iwHomeItems.length" class="tw-follow-empty">暂无内容</div>
           <div v-else class="search-grid">
+              <div v-if="iwHomeItems.length && iwHomeHasMore" class="tw-browse-more" style="grid-column: 1 / -1; padding: 0 0 6px">
+                <n-button size="tiny" quaternary block :loading="iwHomeLoading" @click="$emit('iw-home-more')"
+                >加载更多</n-button>
+              </div>
             <div
               v-for="item in iwHomeItems"
               :key="item.video_id || item.album_url"
@@ -1683,7 +1700,7 @@
       <!-- Iwara 我的关注 / 我的好友：用户卡片（点进去看内容 / 关注/取关） -->
       <div v-else-if="site === 'iwara' && (iwView === 'following' || iwView === 'friends')" class="tw-follow-view">
         <div class="tw-follow-toolbar">
-          <n-button size="small" quaternary type="primary" @click="$emit('iw-home', 1)">← 返回</n-button>
+          <n-button size="small" quaternary type="primary" @click="$emit('site-back', 'iwara')">← 返回</n-button>
           <span class="tw-follow-title">{{ iwView === 'friends' ? '我的好友' : '我的关注' }}</span>
           <span v-if="(iwView === 'friends' ? iwFriendItems : iwFollowItems).length" class="tw-follow-count">
             {{ iwView === 'friends' ? iwFriendItems.length : iwFollowItems.length }} 人
@@ -1710,7 +1727,7 @@
             :key="u.user_id"
             class="iw-user-card"
             :class="{ 'iw-batch-checked': iwBatchMode && iwBatchChecked.has(u.username) }"
-            :title="`${u.name} (@${u.username})\n${iwBatchMode ? '点击勾选/取消勾选' : '查看 TA 的视频'}`"
+            :title="`${u.name} (@${u.username})${u.bio ? '\n' + u.bio : ''}\n${iwBatchMode ? '点击勾选/取消勾选' : '查看 TA 的视频'}`"
             @click="iwBatchMode ? toggleIwBatchItem(u.username) : $emit('iw-open-user', u.username)"
           >
             <span v-if="iwBatchMode" class="iw-batch-check iw-batch-check-user" :class="{ checked: iwBatchChecked.has(u.username) }">{{ iwBatchChecked.has(u.username) ? '✓' : '' }}</span>
@@ -1725,6 +1742,7 @@
                 <n-tag v-if="u.friend" size="tiny" type="info" round>好友</n-tag>
               </div>
               <div class="iw-user-handle">@{{ u.username }}</div>
+              <div v-if="u.bio" class="iw-user-bio" :title="u.bio">{{ u.bio }}</div>
             </div>
             <div class="iw-user-actions" @click.stop>
               <n-button
@@ -1745,222 +1763,50 @@
         </n-scrollbar>
       </div>
 
-      <!-- Hanime1 (H站) 视频详情：播放 + 信息 + 收藏 + 评论区（登录后可发表评论） -->
-      <div v-else-if="site === 'hanime' && haView === 'detail'" class="iw-detail">
-        <div v-if="haDetailLoading && !haDetail" class="tw-follow-empty">
-          <n-spin size="medium" />
-          <span>正在获取视频详情...</span>
-        </div>
-        <template v-else-if="haDetail">
-          <div class="tw-follow-toolbar">
-            <n-button size="small" quaternary type="primary" @click="$emit('ha-detail-back')">← 返回</n-button>
-            <span class="tw-follow-title iw-detail-title" :title="haDetail.album_name">{{ haDetail.album_name }}</span>
-            <n-button
-              size="tiny"
-              tertiary
-              type="primary"
-              title="解析视频文件并加入下载列表"
-              @click="$emit('open-album', haDetail)"
-            >解析下载</n-button>
-          </div>
-          <n-scrollbar class="iw-detail-scroll">
-            <div class="iw-video-area">
-              <!-- 视频走本地媒体代理（带 H站代理转发） -->
-              <video
-                v-if="haDetail.video_url"
-                :src="proxied(haDetail.video_url)"
-                controls
-                preload="metadata"
-                :poster="haDetail.thumbnail"
-              />
-              <img v-else :src="haDetail.thumbnail" referrerpolicy="no-referrer" :alt="haDetail.album_name" />
-            </div>
-            <div class="iw-detail-stats">
-              <span v-if="haDetail.views">👁 {{ haDetail.views }}</span>
-              <span v-if="haDetail.rating">👍 {{ haDetail.rating }}</span>
-              <span v-if="haDetail.duration">⏱ {{ haDetail.duration }}</span>
-              <span v-if="haDetail.post_date">{{ haDetail.post_date }}</span>
-            </div>
-            <!-- 上传者 + 收藏（稍後觀看） -->
-            <div class="iw-author-row">
-              <span class="iw-author-name ha-uploader">上传者：{{ haDetail.uploader || '未知' }}</span>
-              <n-button
-                size="tiny"
-                ghost
-                :type="haDetail.saved ? 'warning' : 'primary'"
-                :title="haDetail.saved ? '已收藏（点击取消稍後觀看）' : '加入稍後觀看（需登录）'"
-                @click="$emit('hanime-save-video', haDetail.video_id, !haDetail.saved)"
-              >{{ haDetail.saved ? '★ 已收藏' : '☆ 收藏' }}</n-button>
-            </div>
-            <div v-if="haDetail.description" class="iw-body">{{ haDetail.description }}</div>
-            <div v-if="haDetail.tags && haDetail.tags.length" class="iw-tags">
-              <n-tag
-                v-for="t in haDetail.tags"
-                :key="t"
-                size="small"
-                round
-                type="info"
-                class="iw-tag"
-                title="点击搜索该标签"
-                @click="$emit('hanime-search-tag', t)"
-              >{{ t }}</n-tag>
-            </div>
-            <!-- 评论区（发表评论需登录） -->
-            <div class="iw-comments-title">评论<template v-if="haComments.length">（{{ haComments.length }}）</template></div>
-            <div class="ha-comment-input-row">
-              <n-input
-                v-model:value="haCommentInput"
-                size="small"
-                type="textarea"
-                :rows="2"
-                maxlength="500"
-                placeholder="发表评论（需登录）..."
-              />
-              <n-button
-                size="small"
-                type="primary"
-                :disabled="!haCommentInput.trim()"
-                :loading="haCommentPosting"
-                @click="postHaComment"
-              >发表</n-button>
-            </div>
-            <div v-if="!haComments.length" class="iw-comments-empty">暂无评论</div>
-            <div
-              v-for="(c, i) in haComments"
-              :key="c.id || i"
-              class="iw-comment"
-              :class="{ 'ha-comment-reply': c.is_reply }"
-            >
-              <img v-if="c.avatar" class="iw-comment-avatar" :src="c.avatar" referrerpolicy="no-referrer" alt="" />
-              <span v-else class="iw-comment-avatar iw-comment-avatar-empty">@</span>
-              <div class="iw-comment-main">
-                <div class="iw-comment-head">
-                  <span class="iw-comment-name">{{ c.username || '匿名' }}</span>
-                  <span class="iw-comment-time">{{ c.posted }}</span>
-                </div>
-                <div class="iw-comment-body">{{ c.text }}</div>
-              </div>
-            </div>
-          </n-scrollbar>
-        </template>
-      </div>
+      <!-- Hanime1 主视图（已拆分到 HanimeView.vue，重构 f3：详情/主页/用户中心三子视图；
+           批量勾选状态三处共用故留守本组件，props 下发 + 事件上行） -->
+      <HanimeView
+        v-else-if="haMainViewActive"
+        mode="main"
+        :site="site"
+        :ha-view="haView"
+        :ha-detail="haDetail"
+        :ha-detail-loading="haDetailLoading"
+        :ha-comments="haComments"
+        :ha-sections="haSections"
+        :ha-home-loading="haHomeLoading"
+        :ha-home-error="haHomeError"
+        :ha-genres="haGenres"
+        :ha-sorts="haSorts"
+        :ha-user-items="haUserItems"
+        :ha-user-loading="haUserLoading"
+        :ha-user-has-more="haUserHasMore"
+        :ha-user-page="haUserPage"
+        :ha-user-label="haUserLabel"
+        :ha-user-tab="haUserTab"
+        :ha-batch-mode="haBatchMode"
+        :ha-batch-checked="haBatchChecked"
+        :ha-batch-running="haBatchRunning"
+        :ha-batch-progress="haBatchProgress"
+        :translated-titles="translatedTitles"
+        :media-proxy-port="mediaProxyPort"
+        @ha-home="$emit('ha-home')"
+        @ha-detail-back="$emit('ha-detail-back')"
+        @ha-open-detail="$emit('ha-open-detail', $event)"
+        @hanime-user-videos="(...args) => $emit('hanime-user-videos', ...args)"
+        @hanime-save-video="(...args) => $emit('hanime-save-video', ...args)"
+        @hanime-search-tag="$emit('hanime-search-tag', $event)"
+        @hanime-add-comment="$emit('hanime-add-comment', $event)"
+        @open-album="$emit('open-album', $event)"
+        @update:ha-search="$emit('update:ha-search', $event)"
+        @add-favorite="$emit('add-favorite', $event)"
+        @toggle-ha-batch="toggleHaBatch"
+        @toggle-ha-batch-item="toggleHaBatchItem"
+        @start-ha-batch="startHaBatch"
+        @select-ha-batch="selectHaBatch"
+      />
 
-      <!-- Hanime1 (H站) 主页：分区列表（最新上市/最新上傳 + 各分类，每区最多 20 条） -->
-      <div v-else-if="site === 'hanime' && haView === 'home'" class="tw-follow-view">
-        <div class="tw-follow-toolbar">
-          <span class="tw-follow-title">Hanime1 · 主页</span>
-          <span v-if="haSections.length" class="tw-follow-count">{{ haSections.length }} 个分区</span>
-          <n-button size="tiny" quaternary :loading="haHomeLoading" @click="$emit('ha-home')">刷新</n-button>
-        </div>
-        <n-scrollbar class="tw-follow-scroll">
-          <div v-if="haHomeError" class="tw-follow-error">{{ haHomeError }}</div>
-          <div v-else-if="haHomeLoading && !haSections.length" class="tw-follow-empty">
-            <n-spin size="medium" />
-            <span>正在获取主页内容...</span>
-          </div>
-          <div v-else-if="!haSections.length" class="tw-follow-empty">暂无内容</div>
-          <div v-else class="ha-sections">
-            <div v-for="(sec, si) in haSections" :key="si" class="ha-section">
-              <div class="ha-section-title">
-                <span>{{ sec.title }}</span>
-                <n-button
-                  v-if="haGenres.includes(sec.title)"
-                  size="tiny"
-                  quaternary
-                  type="primary"
-                  :title="`查看「${sec.title}」分类的更多视频`"
-                  @click="setHaGenre(sec.title)"
-                >查看更多 →</n-button>
-              </div>
-              <div class="search-grid ha-section-grid">
-                <div
-                  v-for="item in sec.items"
-                  :key="item.video_id || item.album_url"
-                  class="search-card iw-card"
-                  :class="{ 'iw-batch-checked': haBatchMode && haBatchChecked.has(item.video_id) }"
-                  :title="`${item.album_name}\n${haBatchMode ? '点击勾选/取消勾选' : '点击查看完整信息'}`"
-                  @click="haBatchMode ? toggleHaBatchItem(item.video_id) : $emit('ha-open-detail', item)"
-                >
-                  <div class="thumb-wrapper">
-                    <img :src="item.thumbnail" loading="lazy" referrerpolicy="no-referrer" :alt="item.album_name" />
-                    <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }}</span>
-                    <div class="iw-thumb-stats">
-                      <span v-if="item.views">👁 {{ item.views }}</span>
-                      <span v-if="item.rating">👍 {{ item.rating }}</span>
-                    </div>
-                    <span v-if="haBatchMode" class="iw-batch-check" :class="{ checked: haBatchChecked.has(item.video_id) }">{{ haBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
-                    <button v-if="!haBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
-                  </div>
-                  <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
-                  <div class="iw-card-meta">
-                    <span class="iw-card-author">{{ item.author || '未知' }}</span>
-                    <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </n-scrollbar>
-      </div>
 
-      <!-- Hanime1 (H站) 用户中心：觀看紀錄/稍後觀看/讚好的影片/上傳的影片/審核中的影片 -->
-      <div v-else-if="site === 'hanime' && haView === 'user'" class="tw-follow-view">
-        <div class="tw-follow-toolbar">
-          <n-button size="small" quaternary type="primary" @click="$emit('ha-home')">← 返回</n-button>
-          <span class="tw-follow-title">{{ haUserLabel || '用户中心' }}</span>
-          <span v-if="haUserItems.length" class="tw-follow-count">
-            {{ haUserItems.length }} 个视频<template v-if="haUserHasMore">（可继续加载）</template>
-          </span>
-          <n-button
-            size="tiny"
-            quaternary
-            :loading="haUserLoading"
-            title="刷新当前列表"
-            @click="$emit('hanime-user-videos', haUserTab)"
-          >刷新</n-button>
-        </div>
-        <n-scrollbar class="tw-follow-scroll">
-          <div v-if="haUserLoading && !haUserItems.length" class="tw-follow-empty">
-            <n-spin size="medium" />
-            <span>正在获取列表...</span>
-          </div>
-          <div v-else-if="!haUserItems.length" class="tw-follow-empty">暂无视频</div>
-          <div v-else class="search-grid">
-            <div
-              v-for="item in haUserItems"
-              :key="item.video_id || item.album_url"
-              class="search-card iw-card"
-              :class="{ 'iw-batch-checked': haBatchMode && haBatchChecked.has(item.video_id) }"
-              :title="`${item.album_name}\n${haBatchMode ? '点击勾选/取消勾选' : '点击查看完整信息'}`"
-              @click="haBatchMode ? toggleHaBatchItem(item.video_id) : $emit('ha-open-detail', item)"
-            >
-              <div class="thumb-wrapper">
-                <img :src="item.thumbnail" loading="lazy" referrerpolicy="no-referrer" :alt="item.album_name" />
-                <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }}</span>
-                <div class="iw-thumb-stats">
-                  <span v-if="item.views">👁 {{ item.views }}</span>
-                  <span v-if="item.rating">👍 {{ item.rating }}</span>
-                </div>
-                <span v-if="haBatchMode" class="iw-batch-check" :class="{ checked: haBatchChecked.has(item.video_id) }">{{ haBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
-                <button v-if="!haBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
-              </div>
-              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
-              <div class="iw-card-meta">
-                <span class="iw-card-author">{{ item.author || '未知' }}</span>
-                <span v-if="item.posted" class="iw-card-time">{{ item.posted }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-if="haUserItems.length && haUserHasMore" class="tw-browse-more">
-            <n-button
-              quaternary
-              block
-              :loading="haUserLoading"
-              @click="$emit('hanime-user-videos', haUserTab, haUserPage + 1)"
-            >加载更多</n-button>
-          </div>
-        </n-scrollbar>
-      </div>
 
       <!-- Oreno3D (O3D) / EroMMDTube (E站) 视频详情：播放（iwara 源最高画质）+ 作者/角色/原作可点击 + iwara 原站链接 + 下载 -->
       <div v-else-if="isOrenoSite && orView === 'detail'" class="iw-detail">
@@ -2081,6 +1927,10 @@
           </div>
           <div v-else-if="!orHomeItems.length" class="tw-follow-empty">暂无内容</div>
           <div v-else class="search-grid">
+              <div v-if="orHomeItems.length && orHomeHasMore" class="tw-browse-more" style="grid-column: 1 / -1; padding: 0 0 6px">
+                <n-button size="tiny" quaternary block :loading="orHomeLoading" @click="$emit('or-home-more')"
+                >加载更多</n-button>
+              </div>
             <div
               v-for="item in orHomeItems"
               :key="item.video_id || item.album_url"
@@ -2234,6 +2084,10 @@
           </div>
           <div v-else-if="!orList.items.length" class="tw-follow-empty">{{ orList.type === 'favorites' ? '还没有收藏，点卡片右上角 ♥ 收藏视频' : '暂无视频' }}</div>
           <div v-else class="search-grid">
+              <div v-if="orList.items.length && orList.has_more" class="tw-browse-more" style="grid-column: 1 / -1; padding: 0 0 6px">
+                <n-button size="tiny" quaternary block :loading="orListLoading" @click="$emit('or-list-more')"
+                >加载更多</n-button>
+              </div>
             <div
               v-for="item in orList.items"
               :key="item.video_id || item.album_url"
@@ -2263,348 +2117,163 @@
         </n-scrollbar>
       </div>
 
-      <!-- ASMR 音声站列表视图（热门/媒体库/收藏/社团·标签·声优筛选共用）：作品卡片 -->
-      <div v-else-if="site === 'asmr' && asmrView && asmrView !== 'detail'" class="tw-follow-view">
-        <div class="tw-follow-toolbar">
-          <n-button
-            v-if="asmrFilter.id"
-            size="small"
-            quaternary
-            type="primary"
-            title="返回媒体库"
-            @click="$emit('asmr-works', 1)"
-          >← 返回</n-button>
-          <span class="tw-follow-title">{{ asmrLabel || '热门作品' }}</span>
-          <span v-if="asmrItems.length" class="tw-follow-count">
-            {{ asmrItems.length }} 个作品<template v-if="asmrHasMore">（可继续加载）</template>
-          </span>
-          <n-button
-            size="tiny"
-            quaternary
-            :loading="asmrListLoading"
-            @click="refreshAsmrView"
-          >刷新</n-button>
-        </div>
-        <n-scrollbar class="tw-follow-scroll">
-          <div v-if="asmrError" class="tw-follow-error">{{ asmrError }}</div>
-          <div v-else-if="asmrListLoading && !asmrItems.length" class="tw-follow-empty">
-            <n-spin size="medium" />
-            <span>正在获取作品列表...</span>
-          </div>
-          <div v-else-if="!asmrItems.length" class="tw-follow-empty">
-            {{ asmrView === 'favorites' ? '还没有收藏，登录后在作品详情页点 ☆ 收藏' : '暂无作品' }}
-          </div>
-          <div v-else class="search-grid">
-            <div
-              v-for="item in asmrItems"
-              :key="item.video_id || item.album_url"
-              class="search-card iw-card asmr-card"
-              :class="{ 'iw-batch-checked': asmrBatchMode && asmrBatchChecked.has(item.video_id) }"
-              :title="asmrCardTooltip(item)"
-              @click="asmrBatchMode ? toggleAsmrBatchItem(item.video_id) : $emit('asmr-open-detail', item)"
-            >
-              <div class="thumb-wrapper">
-                <img :src="item.thumbnail" loading="lazy" referrerpolicy="no-referrer" :alt="item.album_name" />
-                <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }} 分钟</span>
-                <span v-if="item.has_subtitle" class="asmr-thumb-sub">字幕</span>
-                <div class="iw-thumb-stats">
-                  <span v-if="item.views != null" title="下载数">⬇ {{ formatCount(item.views) }}</span>
-                  <span v-if="item.rating" title="评分">★ {{ item.rating }}</span>
-                </div>
-                <span v-if="asmrBatchMode" class="iw-batch-check" :class="{ checked: asmrBatchChecked.has(item.video_id) }">{{ asmrBatchChecked.has(item.video_id) ? '✓' : '' }}</span>
-                <button v-if="!asmrBatchMode" class="card-favorite-btn" title="快速收藏到本地" @click.stop="handleQuickFavorite(item)">♥</button>
-              </div>
-              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
-              <div class="iw-card-meta">
-                <span class="iw-card-author" :title="`社团：${item.author || '未知'}`">{{ item.author || '未知社团' }}</span>
-                <span v-if="item.post_date" class="iw-card-time">{{ item.post_date }}</span>
-              </div>
-              <div v-if="item.tags && item.tags.length" class="asmr-card-tags" :title="item.tags.join(' ')">
-                {{ item.tags.slice(0, 4).join(' · ') }}<template v-if="item.tags.length > 4"> 等</template>
-              </div>
-            </div>
-          </div>
-          <div v-if="asmrItems.length && asmrHasMore" class="tw-browse-more">
-            <n-button quaternary block :loading="asmrListLoading" @click="$emit('asmr-more')">加载更多</n-button>
-          </div>
-        </n-scrollbar>
-      </div>
 
-      <!-- ASMR 作品详情：封面 + 元信息 + 收藏 + 音轨列表（文件夹分组）+ 内置音频播放器 -->
-      <div v-else-if="site === 'asmr' && asmrView === 'detail'" class="iw-detail">
-        <div v-if="asmrDetailLoading && !asmrDetail" class="tw-follow-empty">
-          <n-spin size="medium" />
-          <span>正在获取作品详情...</span>
-        </div>
-        <template v-else-if="asmrDetail">
-          <div class="tw-follow-toolbar">
-            <n-button size="small" quaternary type="primary" @click="$emit('asmr-detail-back')">← 返回</n-button>
-            <span class="tw-follow-title iw-detail-title" :title="asmrDetail.album_name">{{ asmrDetail.album_name }}</span>
-            <n-button
-              size="tiny"
-              tertiary
-              type="primary"
-              title="解析作品全部音轨文件并加入下载列表"
-              @click="$emit('open-album', asmrDetail)"
-            >解析下载</n-button>
-          </div>
-          <n-scrollbar class="iw-detail-scroll">
-            <div class="asmr-detail-head">
-              <div class="asmr-detail-cover">
-                <img :src="asmrDetail.thumbnail" referrerpolicy="no-referrer" :alt="asmrDetail.album_name" />
-              </div>
-              <div class="asmr-detail-info">
-                <div v-if="asmrDetail.source_id" class="asmr-detail-rid">RJ号：{{ asmrDetail.source_id }}</div>
-                <div class="asmr-detail-circle" title="点击查看该社团全部作品" @click="$emit('asmr-open-circle', asmrDetail)">
-                  社团：{{ (asmrDetail.circle && asmrDetail.circle.name) || asmrDetail.author || '未知' }}
-                </div>
-                <div class="asmr-detail-stats">
-                  <span v-if="asmrDetail.rating != null">★ {{ asmrDetail.rating }}<template v-if="asmrDetail.review_count">（{{ asmrDetail.review_count }} 条评价）</template></span>
-                  <span v-if="asmrDetail.views != null">⬇ {{ formatCount(asmrDetail.views) }}</span>
-                  <span v-if="asmrDetail.duration">⏱ {{ asmrDetail.duration }} 分钟</span>
-                  <span v-if="asmrDetail.price != null">{{ asmrDetail.price > 0 ? `¥${asmrDetail.price}` : '免费' }}</span>
-                  <n-tag v-if="asmrDetail.has_subtitle" size="tiny" type="info" round>中文字幕</n-tag>
-                  <n-tag v-if="asmrDetail.nsfw" size="tiny" type="error" round>NSFW</n-tag>
-                </div>
-                <div v-if="asmrDetail.post_date" class="asmr-detail-meta">发售日：{{ asmrDetail.post_date }}<template v-if="asmrDetail.create_date"> · 入库：{{ asmrDetail.create_date }}</template></div>
-                <div v-if="asmrDetail.file_count" class="asmr-detail-meta">共 {{ asmrDetail.file_count }} 个文件</div>
-                <div class="asmr-detail-actions">
-                  <n-button
-                    size="tiny"
-                    ghost
-                    :type="asmrDetail.saved ? 'warning' : 'primary'"
-                    :title="asmrDetail.saved ? '已收藏（点击取消）' : '加入收藏（需登录）'"
-                    @click="$emit('asmr-toggle-favorite', asmrDetail)"
-                  >{{ asmrDetail.saved ? '★ 已收藏' : '☆ 收藏' }}</n-button>
-                  <n-button
-                    v-if="asmrDetail.vas && asmrDetail.vas.length"
-                    size="tiny"
-                    quaternary
-                    :title="`声优：${asmrDetail.vas.join('、')}`"
-                    @click="$emit('asmr-open-va', asmrDetail)"
-                  >🎤 声优：{{ asmrDetail.vas.join('、') }}</n-button>
-                </div>
-              </div>
-            </div>
-            <!-- 作品属性（中文附加信息） -->
-            <div v-if="asmrDescEntries.length" class="asmr-attrs">
-              <div v-for="a in asmrDescEntries" :key="a.key" class="asmr-attr-row">
-                <span class="asmr-attr-key">{{ a.key }}</span>
-                <span class="asmr-attr-value">{{ a.value }}</span>
-              </div>
-            </div>
-            <div v-if="asmrDetail.tags && asmrDetail.tags.length" class="iw-tags">
-              <n-tag
-                v-for="t in asmrDetail.tags"
-                :key="t"
-                size="small"
-                round
-                type="info"
-                class="iw-tag"
-                title="点击查看该标签作品"
-                @click="$emit('asmr-search-tag', t)"
-              >{{ t }}</n-tag>
-            </div>
-            <!-- 音轨文件列表：按文件夹路径分组 -->
-            <div class="asmr-files-title">音轨文件<template v-if="asmrFiles.length">（{{ asmrFiles.length }}）</template></div>
-            <div v-if="!asmrFiles.length" class="iw-comments-empty">暂无音轨文件</div>
-            <div v-for="g in asmrFileGroups" :key="g.path || 'root'" class="asmr-file-group">
-              <div v-if="g.path" class="asmr-folder-name" title="文件夹路径">📁 {{ g.path }}</div>
-              <div
-                v-for="(f, fi) in g.files"
-                :key="fi"
-                class="asmr-file-row"
-                :class="{ active: f === asmrPlayingFile, text: f.type === 'text' }"
-                :title="f.type === 'text' ? '文本文件（无音频）' : '点击播放'"
-                @click="f.type === 'text' ? null : playAsmrFile(f)"
-              >
-                <span class="asmr-file-icon">{{ f.type === 'text' ? '📄' : (asmrPlayingFile === f ? '▶' : '♪') }}</span>
-                <span class="asmr-file-name" :title="f.title">{{ f.title }}</span>
-                <span v-if="f.type !== 'text' && f.duration" class="asmr-file-duration">{{ iwDuration(f.duration) }}</span>
-                <span v-if="f.size" class="asmr-file-size">{{ formatSize(f.size) }}</span>
-              </div>
-            </div>
-            <!-- 底部占位（播放器悬浮时不遮挡列表） -->
-            <div class="asmr-player-space"></div>
-          </n-scrollbar>
-          <!-- 内置音频播放器（悬浮底部）：连续自动播放 + 快进/倒带 + 音量 -->
-          <div v-if="asmrPlayingFile" class="asmr-player">
-            <span class="asmr-player-icon">🎵</span>
-            <div class="asmr-player-info">
-              <div class="asmr-player-name" :title="asmrPlayingFile.title">{{ asmrPlayingFile.title }}</div>
-              <div class="asmr-player-track">
-                {{ asmrPlayingIndex + 1 }} / {{ asmrAudioFiles.length }}<template v-if="asmrPlayingFile.path"> · {{ asmrPlayingFile.path }}</template>
-              </div>
-            </div>
-            <n-button size="tiny" quaternary title="上一个音轨" :disabled="!asmrHasPrev" @click="playAsmrOffset(-1)">⏮</n-button>
-            <n-button size="tiny" quaternary :title="`倒带 ${settings.asmr_seek_back || 5} 秒`" @click="asmrSeekBy(-1)">⏪ {{ settings.asmr_seek_back || 5 }}s</n-button>
-            <n-button size="tiny" quaternary :type="asmrAudioPaused ? 'primary' : 'default'" :title="asmrAudioPaused ? '播放' : '暂停'" @click="toggleAsmrPlay">{{ asmrAudioPaused ? '▶' : '⏸' }}</n-button>
-            <n-button size="tiny" quaternary :title="`快进 ${settings.asmr_seek_forward || 30} 秒`" @click="asmrSeekBy(1)">⏩ {{ settings.asmr_seek_forward || 30 }}s</n-button>
-            <n-button size="tiny" quaternary title="下一个音轨" :disabled="!asmrHasNext" @click="playAsmrOffset(1)">⏭</n-button>
-            <n-button size="tiny" quaternary title="静音 / 取消静音（音量已记忆）" @click="toggleAsmrMute">{{ asmrAudioMuted ? '🔇' : '🔊' }}</n-button>
-            <input
-              class="asmr-volume"
-              type="range"
-              min="0"
-              max="100"
-              :value="asmrVolumePercent"
-              title="音量（拖动后自动记住）"
-              @input="onAsmrVolumeInput"
-            />
-            <span class="asmr-player-time">{{ asmrTimeText }}</span>
-            <n-button size="tiny" quaternary type="error" title="关闭播放器" @click="stopAsmrPlayer">✕</n-button>
-            <audio
-              ref="asmrAudioRef"
-              :src="asmrPlayingFile.play_url"
-              preload="auto"
-              @ended="onAsmrEnded"
-              @timeupdate="onAsmrTimeUpdate"
-              @error="onAsmrAudioError"
-            />
-          </div>
-        </template>
-      </div>
+      <!-- ASMR 主视图（已拆分到 AsmrView.vue，重构 f3：列表/详情+音频播放器；
+           批量勾选状态四处共用故留守本组件） -->
+      <AsmrView
+        v-else-if="site === 'asmr' && asmrView"
+        mode="main"
+        :site="site"
+        :settings="settings"
+        :asmr-view="asmrView"
+        :asmr-list-loading="asmrListLoading"
+        :asmr-error="asmrError"
+        :asmr-filter="asmrFilter"
+        :asmr-label="asmrLabel"
+        :asmr-items="asmrItems"
+        :asmr-recommend="asmrRecommend"
+        :asmr-has-more="asmrHasMore"
+        :asmr-detail="asmrDetail"
+        :asmr-detail-loading="asmrDetailLoading"
+        :asmr-files="asmrFiles"
+        :asmr-related="asmrRelated"
+        :asmr-related-pending="asmrRelatedPending"
+        :asmr-batch-mode="asmrBatchMode"
+        :asmr-batch-checked="asmrBatchChecked"
+        :asmr-batch-running="asmrBatchRunning"
+        :asmr-batch-progress="asmrBatchProgress"
+        :translated-titles="translatedTitles"
+        @asmr-works="p => $emit('asmr-works', p || 1)"
+        @asmr-open-detail="$emit('asmr-open-detail', $event)"
+        @asmr-more="$emit('asmr-more')"
+        @asmr-detail-back="$emit('asmr-detail-back')"
+        @asmr-open-circle="$emit('asmr-open-circle', $event)"
+        @asmr-open-va="$emit('asmr-open-va', $event)"
+        @asmr-search-tag="$emit('asmr-search-tag', $event)"
+        @asmr-toggle-favorite="$emit('asmr-toggle-favorite', $event)"
+        @asmr-download-files="$emit('asmr-download-files', $event)"
+        @open-album="$emit('open-album', $event)"
+        @add-favorite="$emit('add-favorite', $event)"
+        @toggle-asmr-batch="toggleAsmrBatch"
+        @toggle-asmr-batch-item="toggleAsmrBatchItem"
+        @start-asmr-batch="startAsmrBatch"
+        @asmr-video-preview="handleAsmrVideoPreview"
+        @select-asmr-batch="selectAsmrBatch"
+        @site-back="x => $emit('site-back', x)"
+      />
 
-      <!-- JavDB 视频详情：封面大图 + 预览图网格 + 信息面板 + 标签/演员 + 磁力列表 + 下载图片 -->
-      <div v-else-if="site === 'javdb' && (javdbDetail || javdbDetailLoading)" class="ex-detail">
-        <div v-if="javdbDetailLoading && !javdbDetail" class="tw-follow-empty">
-          <n-spin size="medium" />
-          <span>正在获取视频详情...</span>
-        </div>
-        <template v-else-if="javdbDetail">
-          <div class="tw-follow-toolbar">
-            <n-button size="small" quaternary type="primary" @click="$emit('javdb-detail-back')">← 返回</n-button>
-            <span class="tw-follow-title iw-detail-title" :title="javdbDetail.title">{{ javdbDetail.title }}</span>
-            <n-button
-              size="tiny"
-              tertiary
-              type="primary"
-              title="下载封面 + 全部预览图（直链下载任务）"
-              @click="$emit('javdb-download-images')"
-            >下载图片</n-button>
-            <a
-              class="or-iwara-link"
-              title="在浏览器打开 JavDB 原页面"
-              @click.prevent="openOrExternal(javdbDetail.url)"
-            >原站 ↗</a>
-          </div>
-          <n-scrollbar class="iw-detail-scroll">
-            <!-- 封面 -->
-            <div class="iw-video-area javdb-cover-area">
-              <img
-                v-if="javdbDetail.cover"
-                :src="javdbDetail.cover"
-                referrerpolicy="no-referrer"
-                :alt="javdbDetail.title"
-                @click="openOrExternal(javdbDetail.cover)"
-              />
-            </div>
-            <!-- 信息面板 -->
-            <div v-if="javdbDetail.code || Object.keys(javdbDetail.info || {}).length" class="iw-detail-stats javdb-info-panel">
-              <span v-if="javdbDetail.code">🏷️ 番号: {{ javdbDetail.code }}</span>
-              <span v-for="(v, k) in javdbDetail.info" :key="k">{{ k }}: {{ v }}</span>
-            </div>
-            <!-- 演员 -->
-            <div v-if="javdbDetail.actors && javdbDetail.actors.length" class="iw-tags">
-              <n-tag size="small" round type="success" class="iw-tag">演员</n-tag>
-              <n-tag v-for="a in javdbDetail.actors" :key="a" size="small" round type="success" class="iw-tag">{{ a }}</n-tag>
-            </div>
-            <!-- 标签 -->
-            <div v-if="javdbDetail.tags && javdbDetail.tags.length" class="iw-tags">
-              <n-tag v-for="t in javdbDetail.tags" :key="t" size="small" round type="info" class="iw-tag">{{ t }}</n-tag>
-            </div>
-            <!-- 磁力链接列表 -->
-            <div v-if="javdbDetail.magnets && javdbDetail.magnets.length" class="javdb-magnets">
-              <div class="javdb-magnets-title">🧲 磁力链接（{{ javdbDetail.magnets.length }} 个，点击复制，用外部种子客户端下载）</div>
-              <div
-                v-for="(m, idx) in javdbDetail.magnets"
-                :key="idx"
-                class="javdb-magnet-item"
-                title="点击复制磁力链接"
-                @click="reverseCopyText(m.link)"
-              >
-                <span class="javdb-magnet-name">{{ m.name }}</span>
-                <span class="javdb-magnet-meta">
-                  <span v-if="m.size">{{ m.size }}</span>
-                  <span v-if="m.date">{{ m.date }}</span>
-                  <n-tag v-for="t in (m.tags || [])" :key="t" size="tiny" round type="warning">{{ t }}</n-tag>
-                </span>
-              </div>
-            </div>
-            <div v-else class="or-no-source">没有磁力链接（部分磁力需登录后可见，可在左侧登录 JavDB）</div>
-            <!-- 预览图 -->
-            <div v-if="javdbDetail.previews && javdbDetail.previews.length" class="javdb-previews">
-              <div class="javdb-magnets-title">🖼️ 预览图（{{ javdbDetail.previews.length }} 张，点击看原图）</div>
-              <div class="javdb-preview-grid">
-                <img
-                  v-for="(p, idx) in javdbDetail.previews"
-                  :key="idx"
-                  :src="p"
-                  referrerpolicy="no-referrer"
-                  loading="lazy"
-                  @click="openOrExternal(p)"
-                />
-              </div>
-            </div>
-          </n-scrollbar>
-        </template>
-      </div>
+      <!-- xHamster 浏览视图（已拆分到 XhView.vue，重构 f1：props 下行 + 事件上行，状态在 App.vue 经此透传） -->
+      <XhView
+        v-else-if="site === 'xhamster' && xhView"
+        :site="site"
+        :xh-view="xhView"
+        :xh-tab="xhTab"
+        :xh-home-items="xhHomeItems"
+        :xh-home-loading="xhHomeLoading"
+        :xh-home-error="xhHomeError"
+        :xh-home-sort="xhHomeSort"
+        :xh-home-has-more="xhHomeHasMore"
+        :xh-cats-loading="xhCatsLoading"
+        :xh-cats-trending="xhCatsTrending"
+        :xh-cats-groups="xhCatsGroups"
+        :xh-cats-error="xhCatsError"
+        :xh-cat-name="xhCatName"
+        :xh-cat-items="xhCatItems"
+        :xh-cat-loading="xhCatLoading"
+        :xh-cat-error="xhCatError"
+        :xh-cat-has-more="xhCatHasMore"
+        :xh-shorts-items="xhShortsItems"
+        :xh-shorts-loading="xhShortsLoading"
+        :xh-shorts-error="xhShortsError"
+        :xh-shorts-has-more="xhShortsHasMore"
+        :xh-notif="xhNotif"
+        :xh-notif-loading="xhNotifLoading"
+        :xh-my-tab="xhMyTab"
+        :xh-my-items="xhMyItems"
+        :xh-my-loading="xhMyLoading"
+        :xh-my-error="xhMyError"
+        :xh-my-has-more="xhMyHasMore"
+        :xh-my-username="xhMyUsername"
+        :xh-detail="xhDetail"
+        :xh-detail-loading="xhDetailLoading"
+        :xh-detail-error="xhDetailError"
+        :xh-comments="xhComments"
+        :xh-comment-count="xhCommentCount"
+        :xh-user="xhUser"
+        :xh-user-items="xhUserItems"
+        :xh-user-loading="xhUserLoading"
+        :xh-user-error="xhUserError"
+        :xh-user-has-more="xhUserHasMore"
+        :xh-user-tab="xhUserTab"
+        :xh-user-profile="xhUserProfile"
+        :xh-subscribe-loading="xhSubscribeLoading"
+        :xh-comment-sending="xhCommentSending"
+        :xh-batch-running="xhBatchRunning"
+        :xh-batch-progress="xhBatchProgress"
+        :translated-titles="translatedTitles"
+        :media-proxy-port="mediaProxyPort"
+        @xh-tab="$emit('xh-tab', $event)"
+        @xh-home="p => $emit('xh-home', p)"
+        @xh-home-more="$emit('xh-home-more')"
+        @xh-home-sort="$emit('xh-home-sort', $event)"
+        @xh-open-categories="$emit('xh-open-categories')"
+        @xh-open-category="$emit('xh-open-category', $event)"
+        @xh-cat-back="$emit('xh-cat-back')"
+        @xh-cat-more="$emit('xh-cat-more')"
+        @xh-shorts-reload="$emit('xh-shorts-reload')"
+        @xh-shorts-more="$emit('xh-shorts-more')"
+        @xh-notifications="$emit('xh-notifications')"
+        @xh-my-tab="$emit('xh-my-tab', $event)"
+        @xh-my-more="$emit('xh-my-more')"
+        @xh-open-detail="$emit('xh-open-detail', $event)"
+        @xh-detail-back="$emit('xh-detail-back')"
+        @xh-open-user="$emit('xh-open-user', $event)"
+        @xh-user-back="$emit('xh-user-back')"
+        @xh-user-more="$emit('xh-user-more')"
+        @xh-user-tab="$emit('xh-user-tab', $event)"
+        @xh-subscribe="$emit('xh-subscribe', $event)"
+        @xh-add-comment="$emit('xh-add-comment', $event)"
+        @xh-search-tag="$emit('xh-search-tag', $event)"
+        @xh-search="$emit('xh-search', $event)"
+        @xh-batch-download="$emit('xh-batch-download', $event)"
+        @open-album="$emit('open-album', $event)"
+        @add-favorite="$emit('add-favorite', $event)"
+      />
 
-      <!-- ExHentai 浏览器视图（类浏览器界面，可登录/浏览/收藏；点"浏览器/搜索结果"切换） -->
-      <div v-else-if="site === 'exhentai' && exViewMode === 'browser'" class="ex-browser">
-        <!-- 浏览器工具栏 -->
-        <div class="ex-toolbar">
-          <n-button-group size="small">
-            <n-button quaternary @click="exNav('back')" :disabled="!exNavState.canBack" title="后退">←</n-button>
-            <n-button quaternary @click="exNav('forward')" :disabled="!exNavState.canForward" title="前进">→</n-button>
-            <n-button quaternary @click="exNav('reload')" title="刷新">↻</n-button>
-            <n-button quaternary @click="exNav('home')" title="主页">🏠</n-button>
-          </n-button-group>
-          <n-input
-            v-model:value="exAddress"
-            size="small"
-            placeholder="https://exhentai.org/..."
-            class="ex-address"
-            @keyup.enter="exNavigateToAddress"
-          >
-            <template #prefix>
-              <span style="font-size: 12px; color: #63e2b7">{{ exLoading ? '⏳' : '🔒' }}</span>
-            </template>
-          </n-input>
-          <n-button size="small" type="primary" ghost :disabled="!exIsGallery" @click="exParseGallery" title="解析当前画廊的图片列表">
-            解析画廊
-          </n-button>
-          <n-button size="small" type="warning" ghost :disabled="!exIsGallery" :loading="torrentLoading" @click="exShowTorrents" title="查看画廊的磁力链接">
-            磁力
-          </n-button>
-          <n-button size="small" ghost :loading="cookieSyncing" @click="exSyncCookies" title="把浏览器登录状态同步给下载后端">
-            同步Cookie
-          </n-button>
-          <!-- 登录状态（后端 cookie 验证结果） -->
-          <n-tag v-if="exhentaiUser" size="small" type="success" round title="下载后端已登录 ExHentai">
-            已登录: {{ exhentaiUser }}
-          </n-tag>
-          <n-tag v-else size="small" type="warning" round title="下载后端未登录，请先在浏览器中登录后点同步Cookie">
-            后端未登录
-          </n-tag>
-          <!-- 浏览器/搜索结果视图切换 -->
-          <n-button-group size="small">
-            <n-button :type="exViewMode === 'browser' ? 'primary' : 'default'" size="small" @click="exShowBrowser">浏览器</n-button>
-            <n-button :type="exViewMode === 'search' ? 'primary' : 'default'" size="small" @click="exViewMode = 'search'">搜索结果</n-button>
-          </n-button-group>
-        </div>
-        <!-- webview 浏览器（独立会话 persist:exhentai，cookie 持久化保存） -->
-        <webview
-          ref="exWebviewRef"
-          src="https://exhentai.org/"
-          partition="persist:exhentai"
-          class="ex-webview"
-          @did-navigate="onExNavigated"
-          @did-navigate-in-page="onExNavigated"
-          @did-start-loading="exLoading = true"
-          @did-stop-loading="exLoading = false"
-        />
-      </div>
+      <!-- FC2 专属视图（FC站-页面设计.txt：底部四 Tab + 播放页 + 用户页 + 我的收藏） -->
+      <Fc2View
+        v-else-if="site === 'fc2'"
+        :state="gsState"
+        :local-favorites="localFavorites"
+        @gs-command="$emit('gs-command', $event)"
+        @gs-restore-state="$emit('gs-restore-state', $event)"
+      />
+
+      <!-- 通用站点视图（模块化架构 m5）：站点在 siteConfigs 通用配置表即挂载
+           （新站上线 = siteConfigs.js 加配置 + 后端 site_template.py 复制注册，本处零改动） -->
+      <!-- 综合资源站点：文件列表打开时让位（点创作者 → 文件列表，PA 同款交互） -->
+      <GenericSiteView
+        v-else-if="site && gsConfigFor(site) && site !== 'fc2' && !(site === 'coomerst' && fileList.length > 0)"
+        :site="site"
+        :state="gsState"
+        :translated-titles="translatedTitles"
+        @gs-command="$emit('gs-command', $event)"
+      />
+
+      <!-- JavDB 视频详情（已拆分到 JavdbView.vue，重构 f3） -->
+      <JavdbView
+        v-else-if="site === 'javdb' && (javdbDetail || javdbDetailLoading)"
+        mode="detail"
+        :site="site"
+        :javdb-detail="javdbDetail"
+        :javdb-detail-loading="javdbDetailLoading"
+        :translated-titles="translatedTitles"
+        @javdb-detail-back="$emit('javdb-detail-back')"
+        @javdb-download-images="$emit('javdb-download-images')"
+        @javdb-open-actor="u => $emit('javdb-open-actor', u)"
+        @javdb-search-tag="$emit('javdb-search-tag', $event)"
+      />
+
 
       <!-- 搜索结果视图（解析中让位给"解析中"视图：点击后立即切换 + 显示加载态；
            EX 内联详情模式下解析中也保留搜索结果，进度显示在内联区块底部） -->
@@ -2615,338 +2284,13 @@
         :on-scroll="handleScroll"
         :content-style="{ padding: '12px 16px' }"
       >
-        <!-- ExHentai：复刻原版搜索页布局（列表/缩略图模式 + 顶底分页 + 跳页） -->
-        <div v-if="site === 'exhentai'" class="ex-results">
-          <!-- 工具栏：显示模式切换 + 批量收藏 + 结果统计 -->
-          <div class="ex-toolbar">
-            <n-button-group size="tiny">
-              <n-button size="tiny" :type="exDisplayMode === 'list' ? 'primary' : 'default'" @click="exDisplayMode = 'list'" title="列表视图（原版 List 模式）">列表</n-button>
-              <n-button size="tiny" :type="exDisplayMode === 'thumbnail' ? 'primary' : 'default'" @click="exDisplayMode = 'thumbnail'" title="缩略图视图（原版 Thumbnail 模式）">缩略图</n-button>
-            </n-button-group>
-            <!-- 批量下载全部：常驻按钮（无需逐个勾选，直接批量解析当前页全部画廊） -->
-            <n-button
-              size="tiny"
-              type="warning"
-              :disabled="exBatchRunning"
-              :title="exBatchRunning
-                ? '批量解析进行中，请稍候…'
-                : `批量解析当前页全部 ${searchResults.length} 个画廊的图片并加入文件列表，可统一勾选下载（确认时可设置母文件夹）`"
-              @click="$emit('ex-batch-download', searchResults.map(i => i.album_url).filter(Boolean))"
-            >{{ exBatchRunning ? `批量解析中 (${exBatchProgress.done}/${exBatchProgress.total})` : `批量下载全部 (${searchResults.length})` }}</n-button>
-            <n-button
-              v-if="exChecked.length"
-              size="tiny"
-              type="primary"
-              ghost
-              @click="batchFavoriteEx"
-            >收藏选中 ({{ exChecked.length }})</n-button>
-            <n-button
-              v-if="exChecked.length"
-              size="tiny"
-              type="warning"
-              ghost
-              title="批量解析选中画廊的全部图片并加入文件列表，可统一勾选下载"
-              @click="$emit('ex-batch-download', exChecked)"
-            >批量下载选中 ({{ exChecked.length }})</n-button>
-            <!-- 选中操作：全选 / 反选 / 取消全部 -->
-            <n-button-group v-if="searchResults.length" size="tiny">
-              <n-button size="tiny" quaternary title="选中当前页全部画廊" @click="exCheckAll">全选</n-button>
-              <n-button size="tiny" quaternary title="反转选择（未选的变为选中）" @click="exInvertCheck">反选</n-button>
-              <n-button size="tiny" quaternary title="取消全部选择" @click="exChecked = []">取消全部</n-button>
-            </n-button-group>
-            <!-- 清除批量任务：批量收集过文件后常驻，一键清空并解锁视图（不删除已下载文件） -->
-            <n-button
-              v-if="fileList.length > 0 && !exBatchRunning"
-              size="tiny"
-              type="error"
-              ghost
-              title="清空批量解析收集的文件列表并解锁视图（不影响已提交的下载任务和已下载的文件）"
-              @click="$emit('clear-batch-tasks')"
-            >清除批量任务 ({{ fileList.length }})</n-button>
-            <span class="ex-result-count">
-              {{ exFavMode ? '我的收藏' : `共约 ${formatCount(searchTotalResults)} 条结果` }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
-            </span>
-          </div>
-          <PaginationBar
-            :page="searchPage"
-            :total-pages="searchTotalPages"
-            :has-more="searchHasMore"
-            :searching="searching"
-            @go-page="p => $emit('go-page', p)"
-          />
 
-          <!-- 列表模式（复刻 EX List：复选框 + 缩略图 + 绿色标题 + 可点击标签 + meta 行） -->
-          <table v-if="exDisplayMode === 'list'" class="ex-list-table">
-            <tbody>
-              <tr
-                v-for="(item, idx) in searchResults"
-                :key="item.album_url"
-                class="ex-tr"
-                :class="{ 'ex-tr-alt': idx % 2 === 1 }"
-                @click="$emit('ex-open-gallery', item.album_url)"
-              >
-                <td class="ex-td-check">
-                  <input
-                    type="checkbox"
-                    class="ex-check"
-                    :value="item.album_url"
-                    v-model="exChecked"
-                    @click.stop
-                  />
-                </td>
-                <td class="ex-td-thumb">
-                  <div class="ex-thumb">
-                    <img
-                      v-if="item.thumbnail"
-                      :src="item.thumbnail"
-                      loading="lazy"
-                      referrerpolicy="no-referrer"
-                      :alt="item.album_name"
-                    />
-                    <span v-else class="ex-thumb-empty">EX</span>
-                  </div>
-                </td>
-                <td class="ex-td-info">
-                  <div class="ex-info-title" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
-                  <div class="ex-info-tags" v-if="item.tags && item.tags.length">
-                    <a
-                      v-for="t in item.tags"
-                      :key="t"
-                      class="ex-info-tag"
-                      title="点击搜索该标签"
-                      @click.stop="searchTag(t)"
-                    >{{ t }}</a>
-                  </div>
-                  <div class="ex-info-meta">
-                    <span v-if="item.posted">发布于 {{ item.posted }}</span>
-                    <span v-if="item.uploader">发布者 {{ item.uploader }}</span>
-                    <span v-if="item.pages">{{ item.pages }} 页</span>
-                  </div>
-                </td>
-                <td class="ex-td-fav">
-                  <button
-                    class="card-favorite-btn ex-row-fav"
-                    title="快速收藏到本地"
-                    @click.stop="handleQuickFavorite(item)"
-                  >♥</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <!-- 缩略图模式（复刻 EX Thumbnail：网格缩略图 + 标题 + 勾选批量下载） -->
-          <div v-else class="ex-thumb-grid">
-            <div
-              v-for="item in searchResults"
-              :key="item.album_url"
-              class="ex-thumb-card"
-              :class="{ 'ex-thumb-card-checked': exChecked.includes(item.album_url) }"
-              :title="item.album_name"
-              @click="$emit('ex-open-gallery', item.album_url)"
-            >
-              <div class="ex-thumb-card-img">
-                <img
-                  v-if="item.thumbnail"
-                  :src="item.thumbnail"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  :alt="item.album_name"
-                />
-                <span v-else class="ex-thumb-empty">EX</span>
-                <!-- 多选勾选框（与列表模式共用 exChecked，勾选后可批量下载） -->
-                <label class="ex-thumb-check" title="勾选后可批量下载" @click.stop>
-                  <input
-                    type="checkbox"
-                    class="ex-check"
-                    :value="item.album_url"
-                    v-model="exChecked"
-                  />
-                </label>
-              </div>
-              <div class="ex-thumb-card-title">{{ trTitle(item.album_name) }}</div>
-              <button
-                class="card-favorite-btn ex-card-fav"
-                title="快速收藏到本地"
-                @click.stop="handleQuickFavorite(item)"
-              >♥</button>
-            </div>
-          </div>
-
-          <PaginationBar
-            :page="searchPage"
-            :total-pages="searchTotalPages"
-            :has-more="searchHasMore"
-            :searching="searching"
-            @go-page="p => $emit('go-page', p)"
-          />
-
-          <!-- EX 内联详情+文件列表：从搜索结果/收藏点开作品后，追加在搜索结果下方（不跳转新界面） -->
-          <div v-if="exInlineDetail" class="ex-inline-detail">
-            <div class="ex-inline-detail-head">
-              <span class="ex-inline-detail-title">
-                {{ exGalleryDetail ? exGalleryDetail.title : (albumInfo.album_name || '正在解析...') }}
-              </span>
-              <n-button
-                size="tiny"
-                quaternary
-                type="error"
-                title="收起详情并清空文件列表，回到纯搜索结果"
-                @click="$emit('back-to-search')"
-              >✕ 收起详情</n-button>
-            </div>
-
-            <!-- 解析中：进度动画（搜索结果保留在上方） -->
-            <div v-if="inspecting || exDetailLoading" class="ex-inline-detail-loading">
-              <n-spin size="medium" />
-              <span>
-                正在解析文件列表...
-                <template v-if="inspectProgress && inspectProgress.total > 0">
-                  （{{ inspectProgress.current }}/{{ inspectProgress.total }}）
-                </template>
-              </span>
-            </div>
-
-            <template v-else>
-              <!-- 画廊详情（完整信息 + 分组标签，与独立详情视图一致） -->
-              <div v-if="exGalleryDetail" class="ex-detail-head">
-                <div class="ex-detail-cover">
-                  <img
-                    v-if="exGalleryDetail.thumbnail"
-                    :src="exGalleryDetail.thumbnail"
-                    referrerpolicy="no-referrer"
-                    :alt="exGalleryDetail.title"
-                  />
-                  <span v-else class="ex-thumb-empty">EX</span>
-                </div>
-                <div class="ex-detail-info">
-                  <div class="ex-detail-name" :title="exGalleryDetail.title">{{ exGalleryDetail.title }}</div>
-                  <div
-                    v-if="exGalleryDetail.title_jp && exGalleryDetail.title_jp !== exGalleryDetail.title"
-                    class="ex-detail-name-jp"
-                  >{{ exGalleryDetail.title_jp }}</div>
-                  <table class="ex-detail-meta">
-                    <tr v-if="exGalleryDetail.uploader"><td>发布者</td><td>{{ exGalleryDetail.uploader }}</td></tr>
-                    <tr v-if="exGalleryDetail.posted"><td>发布时间</td><td>{{ exGalleryDetail.posted }}</td></tr>
-                    <tr v-if="exGalleryDetail.language"><td>语言</td><td>{{ exGalleryDetail.language }}</td></tr>
-                    <tr v-if="exGalleryDetail.file_size"><td>文件大小</td><td>{{ exGalleryDetail.file_size }}</td></tr>
-                    <tr v-if="exGalleryDetail.length"><td>页数</td><td>{{ exGalleryDetail.length }}</td></tr>
-                    <tr v-if="exGalleryDetail.rating">
-                      <td>评分</td>
-                      <td>⭐ {{ exGalleryDetail.rating }}<span v-if="exGalleryDetail.rating_count">（{{ exGalleryDetail.rating_count }} 人评分）</span></td>
-                    </tr>
-                  </table>
-                  <div class="ex-detail-actions">
-                    <n-button
-                      size="small"
-                      type="warning"
-                      ghost
-                      :loading="torrentLoading"
-                      title="查看画廊附带的种子（可获取磁力或保存种子文件）"
-                      @click="exDetailTorrents(exGalleryDetail.url)"
-                    >种子 / 磁力</n-button>
-                  </div>
-                </div>
-              </div>
-              <div v-if="exGalleryDetail && exGalleryDetail.tags && Object.keys(exGalleryDetail.tags).length" class="ex-detail-tags">
-                <div v-for="(tags, ns) in exGalleryDetail.tags" :key="ns" class="ex-detail-tagrow">
-                  <span class="ex-detail-tagrow-ns">{{ ns }}:</span>
-                  <a
-                    v-for="t in tags"
-                    :key="t"
-                    class="ex-detail-tag"
-                    title="点击搜索该标签"
-                    @click="searchTag(`${ns}:${t}`)"
-                  >{{ t }}</a>
-                </div>
-              </div>
-
-              <!-- 文件列表（工具栏 + 方格/列表 + 下载栏，与独立文件列表视图一致） -->
-              <div v-if="fileList.length > 0" class="ex-inline-file-list">
-                <div class="list-toolbar">
-                  <div class="album-info">
-                    <span class="album-name">{{ albumInfo.album_name || '未知相册' }}</span>
-                    <n-tag size="small" :type="albumInfo.is_album ? 'info' : 'warning'" round>
-                      {{ albumInfo.is_album ? '相册' : '单文件' }}
-                    </n-tag>
-                    <span class="file-count">共 {{ fileList.length }} 个文件</span>
-                  </div>
-                  <div class="list-actions">
-                    <n-button size="small" quaternary @click="selectAll">全选</n-button>
-                    <n-button size="small" quaternary @click="selectNone">取消全选</n-button>
-                    <n-button size="small" quaternary @click="invertSelection">反选</n-button>
-                    <n-button size="small" quaternary @click="selectByType('ok')">仅选可下载</n-button>
-                    <n-button
-                      size="small"
-                      quaternary
-                      :title="viewMode === 'grid' ? '切换为横向详细列表' : '切换为小方格排列'"
-                      @click="toggleViewMode"
-                    >{{ viewMode === 'grid' ? '列表' : '方格' }}</n-button>
-                  </div>
-                </div>
-
-                <n-data-table
-                  v-if="viewMode === 'list'"
-                  :columns="columns"
-                  :data="filteredFileList"
-                  :row-key="row => row.item_page"
-                  :row-props="fileRowProps"
-                  v-model:checked-row-keys="checkedKeys"
-                  :max-height="tableHeight"
-                  :scroll-x="700"
-                  size="small"
-                  striped
-                />
-                <div v-else class="file-grid">
-                  <div
-                    v-for="f in filteredFileList"
-                    :key="f.item_page"
-                    class="file-grid-item"
-                    :class="{ 'grid-selected': checkedKeys.includes(f.item_page), 'grid-bad': f.status === 'error' }"
-                    :title="`${f.filename}\n${f.size_text || ''}`"
-                    @click="toggleGridSelect(f.item_page)"
-                    @contextmenu.prevent="openFileCtxMenu($event, f)"
-                  >
-                    <div class="grid-thumb">
-                      <img v-if="f.thumbnail" :src="f.thumbnail" referrerpolicy="no-referrer" loading="lazy" alt="" />
-                      <img v-else-if="f.file_icon" :src="f.file_icon" class="grid-icon" alt="" />
-                      <span v-else class="grid-type">{{ f.file_type || '文件' }}</span>
-                      <span v-if="f.is_new" class="grid-new">新</span>
-                      <span v-if="f.is_downloaded" class="grid-downloaded" title="历史任务已下载过（默认不勾选，可手动勾选重下）">已下载</span>
-                      <span v-if="checkedKeys.includes(f.item_page)" class="grid-check">✓</span>
-                      <span
-                        v-if="f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f))"
-                        class="grid-preview-btn"
-                        :title="isVideoItem(f) ? '在线播放' : '查看大图'"
-                        @click.stop="openPreview(f)"
-                      >{{ isVideoItem(f) ? '▶' : '👁' }}</span>
-                    </div>
-                    <div class="grid-name">{{ f.filename }}</div>
-                    <div class="grid-size">{{ f.size_text || '—' }}</div>
-                  </div>
-                </div>
-
-                <div class="download-bar">
-                  <div class="selected-info">
-                    已选择 <span class="selected-count">{{ checkedKeys.length }}</span> 个文件
-                    <span class="selected-size" v-if="selectedSizeText">({{ selectedSizeText }})</span>
-                  </div>
-                  <n-button
-                    type="primary"
-                    size="large"
-                    :disabled="checkedKeys.length === 0"
-                    :loading="downloading"
-                    @click="handleDownload"
-                  >
-                    {{ downloading ? '下载中...' : `下载选中 (${checkedKeys.length})` }}
-                  </n-button>
-                </div>
-              </div>
-            </template>
-          </div>
+        <!-- 站点内搜索结果：返回该站起点（多层返回的最后一环） -->
+        <div v-if="['iwara', 'asmr', 'xhamster', 'hanime1', 'oreno'].includes(site)" class="pa-toolbar">
+          <n-button size="tiny" quaternary type="primary" @click="$emit('site-back-root', site)">← 返回主页</n-button>
         </div>
-
         <!-- Pawchive：卡片网格 + 顶底分页（与 EX 同一套分页逻辑） -->
-        <div v-else-if="site === 'pawchive'" class="pa-results">
+        <div v-if="site === 'pawchive'" class="pa-results">
           <div class="pa-toolbar">
             <span class="pa-result-count">
               {{ !searchQuery ? (searchResults.length && searchResults[0]?.album_url?.includes('/post/') ? '主页' : '我的收藏') : (searchMode === 'tag' ? `标签「${searchQuery}」` : `画师「${searchQuery}」`) }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
@@ -2963,6 +2307,14 @@
               @click="$emit('pa-favorites')"
             >★ 我的收藏</button>
           </div>
+          <div v-if="paFavMode" class="pa-ctl-row">
+              <span class="pa-ctl-label">类型：</span>
+              <n-select size="tiny" class="pa-ctl-select" :value="paFavViewType" :options="[{ label: '创作者', value: 'creator' }, { label: '帖子', value: 'post' }]" @update:value="v => { paFavViewType = v; $emit('pa-favorites', v) }" />
+              <span class="pa-ctl-label">排序方式：</span>
+              <n-select size="tiny" class="pa-ctl-select" :value="paFavSortBy" :options="[{ label: '最新发布日期', value: 'updated' }, { label: '收藏日期', value: 'fav' }, { label: '重新导入日期', value: 'reimport' }]" @update:value="v => paFavSortBy = v" />
+              <span class="pa-ctl-label">排序：</span>
+              <n-select size="tiny" class="pa-ctl-select pa-ctl-order" :value="paFavOrder" :options="[{ label: '降序', value: 'desc' }, { label: '升序', value: 'asc' }]" @update:value="v => paFavOrder = v" />
+          </div>
           <PaginationBar
             :page="searchPage"
             :total-pages="searchTotalPages"
@@ -2972,7 +2324,7 @@
           />
           <div class="search-grid">
             <div
-              v-for="item in searchResults"
+              v-for="item in (paFavMode ? paFavSorted : searchResults)"
               :key="item.album_url"
               class="search-card"
               @click="handlePaCardClick(item)"
@@ -2994,6 +2346,14 @@
                 >♥</button>
               </div>
               <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
+                <div v-if="item.updated" class="pa-post-meta pa-fav-updated">更新 {{ item.updated.slice(0, 10) }}</div>
+                <button
+                  v-if="item.user_id"
+                  class="pa-follow-btn"
+                  :class="{ on: item.favorited }"
+                  :title="item.favorited ? '取消关注该画师' : '关注该画师（加入 Pawchive 收藏）'"
+                  @click.stop="$emit('pa-fav-toggle', { service: item.service, user_id: item.user_id, favorited: !!item.favorited })"
+                >{{ item.favorited ? '★ 已关注' : '☆ 关注' }}</button>
             </div>
           </div>
           <PaginationBar
@@ -3055,6 +2415,71 @@
                 <span class="iw-card-stats">
                   <span class="iw-card-time">{{ iwTimeAgo(item.created_at) || item.post_date }}</span>
                 </span>
+              </div>
+            </div>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+        </div>
+
+        <!-- xHamster：搜索结果卡片（作者名/用户卡/视频卡 + 顶底分页） -->
+        <div v-else-if="site === 'xhamster'" class="pa-results">
+          <div class="pa-toolbar">
+            <span class="pa-result-count">
+              {{ searchQuery ? `「${searchQuery}」` : 'xHamster 搜索' }} · 第 {{ searchPage }}{{ searchTotalPages ? `/${searchTotalPages}` : '' }} 页
+              <template v-if="searchResults.length">（本页 {{ searchResults.length }} 条）</template>
+            </span>
+          </div>
+          <PaginationBar
+            :page="searchPage"
+            :total-pages="searchTotalPages"
+            :has-more="searchHasMore"
+            :searching="searching"
+            @go-page="p => $emit('go-page', p)"
+          />
+          <div class="search-grid">
+            <div
+              v-for="item in searchResults"
+              :key="item.album_url"
+              class="search-card iw-card"
+              :title="item.album_name"
+              @click="item.kind === 'user' ? $emit('xh-open-user', item.author || item.album_name) : $emit('xh-open-detail', item)"
+            >
+              <div class="thumb-wrapper">
+                <img
+                  v-if="item.thumbnail"
+                  :src="item.thumbnail"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  :alt="item.album_name"
+                />
+                <div class="thumb-files" v-if="item.kind === 'user'">👤 用户</div>
+                <span v-else-if="item.kind === 'short'" class="iw-thumb-r18">短</span>
+                <span v-if="item.duration" class="iw-thumb-duration">{{ item.duration }}</span>
+                <div class="iw-thumb-stats">
+                  <span v-if="item.views">👁 {{ formatCount(item.views) }}</span>
+                  <span v-if="item.rating">★ {{ item.rating }}</span>
+                </div>
+                <button
+                  class="card-favorite-btn"
+                  title="快速收藏到本地"
+                  @click.stop="handleQuickFavorite(item)"
+                >♥</button>
+              </div>
+              <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
+              <div class="iw-card-meta">
+                <span
+                  v-if="item.kind === 'user' || item.author"
+                  class="iw-card-author"
+                  :title="item.author"
+                  @click.stop="$emit('xh-open-user', item.kind === 'user' ? (item.author_url || item.author || item.album_name) : (item.author_url || item.author))"
+                >@{{ item.author || '用户' }}</span>
+                <span v-if="item.created" class="iw-card-time">{{ item.created }}</span>
               </div>
             </div>
           </div>
@@ -3196,8 +2621,9 @@
               {{ searchQuery ? `「${searchQuery}」` : '音声作品' }} · 第 {{ searchPage }} 页
             </span>
             <n-button
-              size="tiny"
-              :type="asmrBatchMode ? 'warning' : 'default'"
+              class="batch-cta"
+        size="small"
+              :type="asmrBatchMode ? 'warning' : 'primary'"
               :title="asmrBatchMode ? '退出勾选模式' : '勾选多个作品批量下载'"
               @click="toggleAsmrBatch"
             >{{ asmrBatchMode ? `取消勾选${asmrBatchChecked.size ? `(${asmrBatchChecked.size})` : ''}` : '批量下载' }}</n-button>
@@ -3266,12 +2692,59 @@
           />
         </div>
 
+        <!-- JavDB：目录浏览视图（演员/系列/片商名称网格 + 本地过滤 + 翻页） -->
+        <div v-else-if="site === 'javdb' && javdbDir.kind" class="pa-results">
+          <div class="pa-toolbar">
+            <span class="pa-result-count">
+              {{ javdbDir.label }}目录 · 第 {{ javdbDir.page }} 页 · {{ javdbDirFiltered.length }}/{{ javdbDir.items.length }} 项
+            </span>
+            <n-input
+              v-model:value="javdbDirFilter"
+              size="tiny"
+              clearable
+              placeholder="🔍 过滤名称"
+              style="width: 160px"
+            />
+            <n-button size="tiny" @click="$emit('javdb-dir-clear')">关闭目录</n-button>
+          </div>
+          <PaginationBar
+            :page="javdbDir.page"
+            :total-pages="0"
+            :has-more="javdbDir.hasMore"
+            :searching="searching"
+            @go-page="p => $emit('javdb-dir-page', p)"
+          />
+          <div class="jt-dir-grid">
+            <button
+              v-for="it in javdbDirFiltered"
+              :key="it.url"
+              class="jt-dir-item"
+              :title="it.name"
+              @click="openJavdbDirItem(it)"
+            >{{ it.name }}</button>
+          </div>
+          <div v-if="!javdbDirFiltered.length" class="empty-text">无匹配项</div>
+          <PaginationBar
+            :page="javdbDir.page"
+            :total-pages="0"
+            :has-more="javdbDir.hasMore"
+            :searching="searching"
+            @go-page="p => $emit('javdb-dir-page', p)"
+          />
+        </div>
+
         <!-- JavDB：搜索结果卡片（封面 + 番号 + 标题 + 分页 + 批量下载） -->
         <div v-else-if="site === 'javdb'" class="pa-results">
           <div class="pa-toolbar">
             <span class="pa-result-count">
               {{ searchQuery ? `「${searchQuery}」` : 'JavDB' }} · 第 {{ searchPage }} 页
             </span>
+            <n-button
+              size="tiny"
+              type="info"
+              title="浏览 JavDB 首页最新影片（无需搜索关键词）"
+              @click="$emit('javdb-home')"
+            >🆕 最新影片</n-button>
             <n-button
               size="tiny"
               type="warning"
@@ -3312,7 +2785,7 @@
               </div>
               <div class="card-name" :title="item.album_name">{{ trTitle(item.album_name) }}</div>
               <div class="iw-card-meta">
-                <span class="iw-card-author" :title="item.author ? `演员: ${item.author}` : ''">{{ item.author || '未知演员' }}</span>
+                <span class="iw-card-author" :title="item.code ? `番号: ${item.code}` : ''">{{ item.code || '点击查看详情' }}</span>
               </div>
             </div>
           </div>
@@ -3431,6 +2904,7 @@
         <template v-else-if="site === 'javdb'">
           <div class="empty-text">JavDB 影片信息数据库（javdb.com）</div>
           <div class="empty-hint">输入番号（如 SSIS-001）/标题/演员名搜索，点卡片看详情（封面/预览/标签/磁力）；国内必须在左侧设置里配置 JavDB 代理</div>
+          <n-button size="small" type="info" @click="$emit('javdb-home')">🆕 浏览最新影片</n-button>
         </template>
         <template v-else>
           <div class="empty-text">搜索 Bunkr 相册，或粘贴 Bunkr 链接</div>
@@ -3439,86 +2913,17 @@
       </div>
     </div>
 
-    <!-- 底部：下载进度 + 日志 + 右侧实时下载滚动栏 -->
-    <div class="bottom-area">
-      <n-tabs type="line" size="small" :value="activeTab" @update:value="activeTab = $event">
-        <n-tab-pane name="progress" tab="下载进度">
-          <div class="progress-list">
-            <template v-if="Object.keys(downloadProgress).length === 0">
-              <div class="empty-tab">暂无下载任务</div>
-            </template>
-            <div
-              v-for="(item, filename) in downloadProgress"
-              :key="filename"
-              class="progress-item"
-            >
-              <div class="progress-item-header">
-                <span class="progress-filename" :title="filename">{{ filename }}</span>
-                <div class="progress-meta">
-                  <span
-                    v-if="item.status === 'downloading' && item.speed > 0"
-                    class="progress-speed"
-                  >{{ formatSpeed(item.speed) }}</span>
-                  <n-tag size="tiny" :type="statusTagType(item.status)" round>{{ statusText(item.status) }}</n-tag>
-                </div>
-              </div>
-              <n-progress
-                type="line"
-                :percentage="item.completed || 0"
-                :status="progressStatus(item.status)"
-                :show-indicator="false"
-                :height="6"
-              />
-            </div>
-          </div>
-        </n-tab-pane>
-        <n-tab-pane name="logs" tab="日志">
-          <div class="log-list">
-            <div v-for="(log, i) in logs" :key="i" class="log-item">
-              <span class="log-time">{{ log.time }}</span>
-              <n-tag size="tiny" :type="logTagType(log.type)" round>{{ log.type }}</n-tag>
-              <span class="log-message">{{ log.message }}</span>
-            </div>
-            <div v-if="logs.length === 0" class="empty-tab">暂无日志</div>
-          </div>
-        </n-tab-pane>
-        <n-tab-pane name="history" tab="历史">
-          <div class="history-list">
-            <div v-for="item in history" :key="item.id" class="history-item">
-              <div class="history-main">
-                <span class="history-name" :title="item.path">{{ item.filename }}</span>
-                <span class="history-meta">{{ item.time }} · {{ formatSize(item.size) }}</span>
-              </div>
-              <div class="history-actions">
-                <n-button size="tiny" quaternary @click="$emit('open-file', item.path)">打开</n-button>
-                <n-button size="tiny" quaternary @click="$emit('show-folder', item.path)">文件夹</n-button>
-                <n-button size="tiny" quaternary type="warning" @click="handleDeleteHistory(item, false)">删记录</n-button>
-                <n-button size="tiny" quaternary type="error" @click="handleDeleteHistory(item, true)">删文件</n-button>
-              </div>
-            </div>
-            <div v-if="history.length === 0" class="empty-tab">暂无历史任务</div>
-          </div>
-        </n-tab-pane>
-      </n-tabs>
-
-      <!-- 右侧：实时下载滚动信息（文件名 + 进度 + 速度，自动向上滚动） -->
-      <div class="dl-ticker">
-        <div class="dl-ticker-header">
-          <span class="dl-ticker-title">实时下载</span>
-          <span v-if="tickerTotalSpeedText" class="dl-ticker-total">{{ tickerTotalSpeedText }}</span>
-        </div>
-        <div class="dl-ticker-viewport">
-          <div v-if="tickerItems.length === 0" class="dl-ticker-empty">暂无下载任务</div>
-          <div v-else class="dl-ticker-track">
-            <div v-for="(item, i) in tickerLoopItems" :key="i" class="dl-ticker-item">
-              <span class="dl-ticker-name" :title="item.name">{{ item.name }}</span>
-              <span class="dl-ticker-pct">{{ item.percent }}%</span>
-              <span class="dl-ticker-speed">{{ item.speedText }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- 底部：下载进度 + 日志 + 历史 + 实时下载滚动栏（独立小组件：
+         高频进度/日志更新只重渲染此条，不再拖累整个 RightPanel） -->
+    <DlBottomStrip
+      :download-progress="downloadProgress"
+      :logs="logs"
+      :history="history"
+      :downloading="downloading"
+      @open-file="p => $emit('open-file', p)"
+      @show-folder="p => $emit('show-folder', p)"
+      @delete-history="(id, df) => $emit('delete-history', id, df)"
+    />
 
     <!-- 磁力链接弹窗：选择种子 -> 获取磁力 -> 复制/打开 -->
     <n-modal v-model:show="torrentModalVisible" preset="card" title="磁力链接（选择种子）" style="width: 640px">
@@ -3534,9 +2939,11 @@
           <div class="torrent-info">
             <div class="torrent-name" :title="t.name">{{ t.name }}</div>
             <div class="torrent-meta">
-              <span v-if="t.size">大小 {{ t.size }}</span>
               <span v-if="t.posted">发布 {{ t.posted }}</span>
-              <span>做种 {{ t.seeds }} · 下载 {{ t.peers }}</span>
+              <span v-if="t.size">大小 {{ t.size }}</span>
+              <span v-if="t.seeds">做种 {{ t.seeds }}</span>
+              <span v-if="t.peers">下载中 {{ t.peers }}</span>
+              <span v-if="t.downloads">累计下载 {{ t.downloads }}</span>
             </div>
           </div>
           <div class="torrent-actions">
@@ -3554,7 +2961,12 @@
           </div>
         </div>
       </div>
-      <!-- 磁力结果 -->
+      <!-- EX 内联封面放大层 -->
+    <div v-if="exInlineCoverZoom" class="ex-cover-zoom" @click="exInlineCoverZoom = false">
+      <img v-if="exGalleryDetail" :src="exGalleryDetail.thumbnail" referrerpolicy="no-referrer" :alt="exGalleryDetail.title" />
+    </div>
+
+    <!-- 磁力结果 -->
       <div v-if="currentMagnet" class="magnet-result">
         <div class="magnet-label">磁力链接：</div>
         <n-input :value="currentMagnet" size="small" readonly type="textarea" :rows="2" />
@@ -3610,12 +3022,12 @@
       </template>
     </n-modal>
 
-    <!-- 在线预览/播放弹窗（所有站点通用：图片看原图 + 视频在线播放，支持左右键切换） -->
+    <!-- 在线预览/播放弹窗（所有站点通用：图片看原图 + 视频在线播放 + 音频试听，支持左右键切换） -->
     <n-modal
       v-model:show="previewVisible"
       preset="card"
       class="media-preview-modal"
-      :title="previewItem ? (previewIsVideo ? '在线播放' : '图片预览') : '预览'"
+      :title="previewItem ? (previewIsVideo ? '在线播放' : (previewIsAudio ? '试听' : '图片预览')) : '预览'"
       style="width: min(920px, 92vw)"
     >
       <div v-if="previewItem" class="media-preview-body">
@@ -3656,6 +3068,24 @@
             <span class="preview-volume-text">{{ previewVolumePercent }}%</span>
           </div>
         </div>
+        <!-- 音频试听（走本地媒体代理，浏览器原生控件；标题/文件名见底部信息） -->
+        <div v-else-if="previewIsAudio" class="media-preview-audio">
+          <audio
+            v-if="previewSrc"
+            :key="previewSrc"
+            :src="previewSrc"
+            controls
+            autoplay
+            preload="metadata"
+            @error="previewItem.media_resolve_failed = true"
+          ></audio>
+          <div v-else-if="previewLoading" class="media-preview-tip">
+            正在解析播放地址（Bunkr/EX 需要请求源站）...
+          </div>
+          <div v-else class="media-preview-tip media-preview-err">
+            {{ previewItem.media_resolve_msg || '无法解析播放地址，请直接下载后收听' }}
+          </div>
+        </div>
         <!-- 图片预览（加载中显示 spinner，避免大图白屏卡顿感） -->
         <div v-else class="media-preview-image" @click="previewNav(1)">
           <n-spin v-if="previewSrc && !previewImageLoaded && !previewImageFailed" size="large" class="media-preview-img-loading" />
@@ -3675,6 +3105,8 @@
         </div>
         <!-- 底部信息 + 导航 -->
         <div class="media-preview-footer">
+          <n-button v-if="!previewIsAudio" size="small" quaternary title="全屏查看（Esc 退出）" @click="togglePreviewFullscreen">⛶ 全屏</n-button>
+          <n-button size="small" quaternary title="在新窗口打开原图" @click="openPreviewWindow">🗔 窗口</n-button>
           <n-button size="small" quaternary :disabled="previewableList.length < 2" @click="previewNav(-1)">← 上一个</n-button>
           <div class="media-preview-name" :title="previewItem.filename">
             {{ previewItem.filename }}
@@ -3707,10 +3139,23 @@
 </template>
 
 <script setup>
-import { ref, computed, h, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { NTag, NButton } from 'naive-ui'
+import { ref, reactive, computed, h, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
+import { NTag, NButton, useMessage } from 'naive-ui'
 import PaginationBar from './PaginationBar.vue'
-import PixivPanel from './PixivPanel.vue'
+import DlBottomStrip from './DlBottomStrip.vue'
+import { gsConfigFor } from '../siteConfigs.js'
+// f5b 代码分割：大型站点视图按需加载（Electron file:// 本地秒载，切站首次渲染才拉取，
+// 大幅缩小首屏解析体积；全部无模板 ref 契约，异步包裹零行为差异）
+const PixivPanel = defineAsyncComponent(() => import('./PixivPanel.vue'))
+const XhView = defineAsyncComponent(() => import('./XhView.vue'))
+const ExhentaiView = defineAsyncComponent(() => import('./ExhentaiView.vue'))
+const HanimeView = defineAsyncComponent(() => import('./HanimeView.vue'))
+const JavdbView = defineAsyncComponent(() => import('./JavdbView.vue'))
+const AsmrView = defineAsyncComponent(() => import('./AsmrView.vue'))
+const GenericSiteView = defineAsyncComponent(() => import('./GenericSiteView.vue'))
+const Fc2View = defineAsyncComponent(() => import('./Fc2View.vue'))
+// 通用站点视图演示开关：仅让组件进入编译产物；置 true 需先接好后端 example 站
+const gsDemoEnabled = false
 
 const props = defineProps({
   settings: { type: Object, required: true },
@@ -3846,9 +3291,58 @@ const props = defineProps({
   orDetailLoading: { type: Boolean, default: false },
   orBatchRunning: { type: Boolean, default: false },
   orBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
+  // xHamster 浏览视图（类 App 布局：''=搜索 | home=首页 | categories=分类目录 | category=分类列表
+  // | shorts=短视频 | notifications=消息 | my=我的 | detail=详情 | user=用户主页）
+  xhView: { type: String, default: '' },
+  xhTab: { type: String, default: 'home' },          // 底部 Tab 当前高亮页
+  xhHomeItems: { type: Array, default: () => [] },   // 首页视频卡片
+  xhHomeLoading: { type: Boolean, default: false },
+  xhHomeError: { type: String, default: '' },
+  xhHomeSort: { type: String, default: 'newest' },   // 首页排序（newest/views/rating）
+  xhHomeHasMore: { type: Boolean, default: false },
+  xhCatsLoading: { type: Boolean, default: false },  // 分类目录加载中
+  xhCatsTrending: { type: Array, default: () => [] },// 热门分类（带缩略图）
+  xhCatsGroups: { type: Array, default: () => [] },  // 分组分类 [{id, name, items: [{id, slug, name}]}]
+  xhCatsError: { type: String, default: '' },
+  xhCatName: { type: String, default: '' },          // 当前分类列表名称
+  xhCatItems: { type: Array, default: () => [] },    // 分类列表视频卡片
+  xhCatLoading: { type: Boolean, default: false },
+  xhCatError: { type: String, default: '' },
+  xhCatHasMore: { type: Boolean, default: false },
+  xhShortsItems: { type: Array, default: () => [] }, // 短视频卡片
+  xhShortsLoading: { type: Boolean, default: false },
+  xhShortsError: { type: String, default: '' },
+  xhShortsHasMore: { type: Boolean, default: false },
+  xhNotif: { type: Object, default: null },          // 消息中心 {logged_in, counts, message}
+  xhNotifLoading: { type: Boolean, default: false },
+  xhMyTab: { type: String, default: 'videos' },      // 我的：videos=我的视频 | favorites=我的收藏
+  xhMyItems: { type: Array, default: () => [] },
+  xhMyLoading: { type: Boolean, default: false },
+  xhMyError: { type: String, default: '' },
+  xhMyHasMore: { type: Boolean, default: false },
+  xhMyUsername: { type: String, default: '' },       // 登录用户名
+  xhDetail: { type: Object, default: null },         // 视频详情（含播放直链/画质列表/评论）
+  xhDetailLoading: { type: Boolean, default: false },
+  xhDetailError: { type: String, default: '' },
+  xhComments: { type: Array, default: () => [] },    // 详情页评论
+  xhCommentCount: { type: Number, default: 0 },
+  xhUser: { type: String, default: '' },             // 用户主页用户名
+  xhUserItems: { type: Array, default: () => [] },
+  xhUserLoading: { type: Boolean, default: false },
+  xhUserError: { type: String, default: '' },
+  xhUserHasMore: { type: Boolean, default: false },
+  xhUserTab: { type: String, default: 'videos' },     // 作者页 Tab（漏声明致高亮永不变，2026-09-09 补）
+  xhUserProfile: { type: Object, default: null },     // 作者资料（漏声明致作者信息永不渲染，2026-09-09 补）
+  xhSubscribeLoading: { type: Boolean, default: false },
+  xhCommentSending: { type: Boolean, default: false },
+  xhBatchRunning: { type: Boolean, default: false }, // 批量解析下载进行中
+  xhBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
+  gsState: { type: Object, default: null },                // 通用站点状态（App.gsStates[site]，模块化契约）
+  localFavorites: { type: Array, default: () => [] },      // 本地收藏（FC2 我的 Tab 数据源）
   // ASMR 音声站视图（''=搜索 | popular=热门 | works=媒体库/筛选 | favorites=收藏 | detail=详情）
   asmrView: { type: String, default: '' },
   asmrItems: { type: Array, default: () => [] },     // 当前列表作品卡片
+  asmrRecommend: { type: Array, default: () => [] }, // 收藏页推荐流（漏声明会渲染空，2026-09-10）
   asmrListLoading: { type: Boolean, default: false },
   asmrHasMore: { type: Boolean, default: false },
   asmrError: { type: String, default: '' },
@@ -3864,6 +3358,9 @@ const props = defineProps({
   asmrFiles: { type: Array, default: () => [] },
   asmrDetailLoading: { type: Boolean, default: false },
   asmrLoggedIn: { type: Boolean, default: false },
+  // 相似作品（同社团随详情下发 + tags 后台补齐事件合并；此前漏声明恒渲染空，2026-09-10 修复）
+  asmrRelated: { type: Array, default: () => [] },
+  asmrRelatedPending: { type: Boolean, default: false },
   // 批量下载
   asmrBatchRunning: { type: Boolean, default: false },
   asmrBatchProgress: { type: Object, default: () => ({ done: 0, total: 0, message: '' }) },
@@ -3875,14 +3372,26 @@ const props = defineProps({
   reverseActive: { type: Boolean, default: false },            // 识图视图激活（左侧识图按钮开关）
   reverseSites: { type: Array, default: () => [] },           // [{key,name,status,results,url,error}]
   reverseRunning: { type: Boolean, default: false },          // 搜索进行中
+  reverseMerged: { type: Array, default: () => [] },          // 跨站去重 + 相似度排序后的聚合结果
+  reverseCached: { type: Boolean, default: false },           // 本轮结果来自本地缓存（未消耗站点配额）
   // JavDB 视频详情（封面/预览图/磁力列表，非空 = 占用右侧内容区）
   javdbDetail: { type: Object, default: null },
   javdbDetailLoading: { type: Boolean, default: false },
   javdbBatchRunning: { type: Boolean, default: false },
   javdbBatchProgress: { type: Object, default: () => ({ done: 0, total: 0 }) },
+  // JavDB 工具栏：用户名 / 搜索类型 / 标签词库（5 模式）/ 当前标签页模式 / 热搜词 / 目录浏览状态
+  javdbUser: { type: String, default: '' },
+  javdbSearchField: { type: String, default: 'all' },
+  javdbTagsVocab: { type: Array, default: null },
+  javdbTagsMode: { type: String, default: 'censored' },
+  javdbHot: { type: Array, default: () => [] },
+  javdbDir: { type: Object, default: () => ({ kind: '', label: '', items: [], page: 1, hasMore: false }) },
+  javdbModeRecommend: { type: Object, default: () => ({ mode: '', label: '', items: [] }) },
 })
 
-const emit = defineEmits([
+const emit = defineEmits([  'select-ha-batch',       // 批量全选/反选/清空
+  'select-asmr-batch',       // 批量全选/反选/清空
+
   'update:search-query',
   'update:site',
   'update:search-mode',
@@ -3892,6 +3401,7 @@ const emit = defineEmits([
   'go-page',
   'open-album',
   'back-to-search',
+  'gs-restore-state',       // FC2 多级返回：恢复上一推入视图的状态快照（参数：{site, state}）
   'download',
   'ctx-download-file',     // 右键菜单"下载此项"：静默添加单个文件到下载任务（参数：文件条目）
   'resolve-media',   // 在线播放：请求后端解析条目直链（参数：文件条目对象）
@@ -3908,6 +3418,8 @@ const emit = defineEmits([
   'ex-favorites',           // 打开我的收藏（参数：页码）
   'ex-open-gallery',        // 打开画廊详情（参数：画廊 URL）
   'ex-batch-download',      // 批量下载选中画廊（参数：URL 数组，解析全部图片加入文件列表）
+  'ex-batch-cancel',        // 取消 EX 批量解析（中止派发剩余画廊，不自动下载）
+  'show-collected-files',   // 查看批量收集的文件（解锁视图锁定回文件列表）
   'clear-batch-tasks',      // 清除批量任务（清空批量收集的文件列表并解锁视图）
   'ex-close-detail',        // 关闭画廊详情（返回搜索结果）
   'ex-save-torrent',        // 保存 .torrent 种子文件（参数：种子条目）
@@ -3916,6 +3428,7 @@ const emit = defineEmits([
   'pa-favorites',           // PA 我的收藏（服务器收藏，需登录）
   'pa-home',                // PA 主页（全站最新帖子流）
   'pa-open-artist',         // 打开 PA 画师子项目列表（参数：画师 URL）
+  'pa-fav-toggle',          // 关注/取关画师（参数：{service, user_id, favorited}）
   'pa-close-artist',        // 关闭画师子项目视图（返回搜索结果）
   'pa-download-artist',     // 右键下载画师所有内容（参数：{url, name}，后台解析并提交下载任务）
   'ex-add-hidden-tag',      // EX 添加隐藏标签（参数：标签名）
@@ -3997,20 +3510,62 @@ const emit = defineEmits([
   'asmr-open-circle',       // 点击社团查看全部作品（参数：详情对象）
   'asmr-open-va',           // 点击声优查看作品（参数：详情对象）
   'asmr-batch-download',    // 批量下载（参数：[work_id]）
+  'asmr-download-files',    // 右键下载单个/整文件夹音轨（参数：[file]）
+  // xHamster 事件（由 App.vue 转发给 Python 后端）
+  'xh-tab',                 // 底部 Tab 切换（参数：home/categories/shorts/notifications/my）
+  'xh-home',                // 首页刷新/排序后重载（参数：页码）
+  'xh-home-more',           // 首页加载更多
+  'xh-home-sort',           // 首页排序切换（参数：newest/views/rating）
+  'xh-open-categories',     // 分类目录刷新
+  'xh-open-category',       // 打开分类视频列表（参数：分类对象 {slug, name}）
+  'xh-cat-back',            // 分类列表返回目录
+  'xh-cat-more',            // 分类列表加载更多
+  'xh-shorts-reload',       // 短视频刷新
+  'xh-shorts-more',         // 短视频加载更多
+  'xh-notifications',       // 消息中心刷新
+  'xh-my-tab',              // 我的：切换 我的视频/我的收藏（参数：videos/favorites）
+  'xh-my-more',             // 我的加载更多
+  'xh-open-detail',         // 打开视频详情（参数：视频条目）
+  'xh-detail-back',         // 详情返回上一层
+  'xh-open-user',           // 查看用户主页（参数：username）
+  'xh-user-back',           // 用户主页返回
+  'xh-user-more',           // 用户主页加载更多
+  'xh-user-tab',            // 作者页 Tab
+  'xh-subscribe',           // 关注/取关
+  'xh-add-comment',         // 发表评论
+  'xh-search-tag',          // 点击分类/标签搜索（参数：名称）
+  'xh-search',              // Header 搜索框提交（参数：关键词）
+  'xh-batch-download',      // 批量解析下载（参数：[视频页 URL]）
   // JavDB
   'javdb-open-detail',      // 点击搜索卡片打开视频详情（参数：条目对象）
   'javdb-detail-back',      // 关闭详情返回搜索结果
   'javdb-download-images',  // 下载封面+预览图（当前详情页）
   'javdb-batch-download',   // 批量下载（参数：URL 数组）
+  'javdb-home',             // 浏览首页最新影片（参数：页码，可省略）
+  'javdb-open-actor',       // 打开演员主页全部作品（参数：演员链接）
+  'javdb-search-tag',       // 按标签搜索（参数：标签名，可选 field）
+  // JavDB 工具栏（五行动态）
+  'javdb-search-field',     // 切换搜索类型（参数：f= 值 all/actor/series/maker/director/coded/tag）
+  'javdb-hot',              // 点击热搜词搜索（参数：关键词，f=all）
+  'javdb-open-list',        // 打开通用列表页（参数：url, label）
+  'javdb-dir',              // 打开目录导航（参数：kind=actors/series/makers, 页码）
+  'javdb-dir-page',         // 目录翻页（参数：页码）
+  'javdb-dir-clear',        // 关闭目录浏览
+  'javdb-mode',             // 标签页模式切换（参数：模式对象）
+  'javdb-logout',           // 退出 JavDB 登录
   // 识图（反向图片搜索）
   'reverse-search',        // 开始识图（参数：图片本地路径）
   'reverse-reset',         // 清空结果回到拖拽框
+  'reverse-cancel',        // 取消进行中的识图
+  'reverse-download',      // 把识图结果链接交给下载器（参数：url）
   // Pixiv 事件（由 App.vue 集中处理：发后端命令 / 切视图 / 记录状态）
   'pixiv-command',         // PixivPanel 统一命令出口（参数：{cmd, ...payload}）
+  'gs-command',            // 通用站点命令出口（模块化契约：{site, cmd, ...payload}）
+  'site-back',             // 通用多层返回（参数：站点键，App 按栈回退）
+  'site-back-root',        // 回到站点起点（清栈+主页）
 ])
 
 const checkedKeys = ref([])
-const activeTab = ref('logs')
 const tableHeight = ref(320)
 const localFilter = ref('')
 
@@ -4067,27 +3622,47 @@ function trTitle(name) {
 }
 
 
-// ============================
-// EX 隐藏标签管理面板
-// ============================
-const exHidePanel = ref(false)
-const exHideTagInput = ref('')
-
-// 添加隐藏标签（去重 + 转发后端保存并重新过滤）
-function exAddHiddenTag() {
-  const t = (exHideTagInput.value || '').trim()
-  if (!t) return
-  emit('ex-add-hidden-tag', t)
-  exHideTagInput.value = ''
-}
 
 // ============================
 // PA 画师子项目：悬浮详情提示
 // ============================
+// ---------- Pawchive 收藏页：类型/排序控件（对齐原站 Favorite Creators） ----------
+// 类型（creator=画师 / post=帖子）切换重拉；排序方式/顺序客户端即时重排
+const paFavViewType = ref('creator')
+const paFavSortBy = ref('updated')   // updated=最新发布日期 / fav=收藏日期 / reimport=重新导入日期
+const paFavOrder = ref('desc')
+// 收藏模式判定：与计数行同启发式（PA 站 + 无搜索词 + 有结果 + 首条非帖子）
+const paFavMode = computed(() => props.site === 'pawchive' && !props.searchQuery
+  && props.searchResults.length > 0 && !String(props.searchResults[0]?.album_url || '').includes('/post/'))
+const paFavSorted = computed(() => {
+  const isPostFav = props.searchResults[0]?.fav_type === 'post'
+  const keyOf = (it) => {
+    if (paFavSortBy.value === 'fav') return Number(it.faved_seq) || 0
+    if (paFavSortBy.value === 'reimport') return it.last_imported || ''
+    if (isPostFav) return it.edited || it.updated || it.published || ''
+    return it.updated || it.published || ''
+  }
+  const arr = [...props.searchResults]
+  arr.sort((x, y) => {
+    const a = keyOf(x), b = keyOf(y)
+    const r = typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b))
+    return paFavOrder.value === 'desc' ? -r : r
+  })
+  return arr
+})
+
+// 画师帖子列表展示模式：list=行式列表 / thumb=缩略图网格（localStorage 记忆）
+const paArtistViewMode = ref(localStorage.getItem('pa_artist_view_mode') || 'list')
+function setPaArtistViewMode(m) {
+  paArtistViewMode.value = m
+  localStorage.setItem('pa_artist_view_mode', m)
+}
+
 function paPostTooltip(p) {
   if (!p) return ''
   const lines = [p.title || '未命名帖子']
   if (p.published) lines.push(`发布：${String(p.published).slice(0, 10)}`)
+  if (p.edited) lines.push(`更新：${String(p.edited).slice(0, 16)}`)
   if (p.file_count != null) lines.push(`文件数：${p.file_count}`)
   if (p.files && p.files.length) lines.push(`文件：${p.files.join('、')}`)
   if (p.content) lines.push(`内容：${p.content}`)
@@ -4190,19 +3765,19 @@ const isUrl = computed(() => {
 // ============================
 // ExHentai 浏览器视图（webview）
 // ============================
-const exWebviewRef = ref(null)
 const exViewMode = ref('search')  // browser | search（默认搜索列表，点"浏览器"切换 webview）
-const exAddress = ref('https://exhentai.org/')
-const exLoading = ref(false)
-const exNavState = ref({ canBack: false, canForward: false })
-const cookieSyncing = ref(false)
+
+// EX 主视图激活条件（三子视图按原链序：详情 > 浏览器 > 搜索结果；与拆分前 v-else-if 链等价）
+const exMainViewActive = computed(() => props.site === 'exhentai' && (
+  exViewMode.value === 'browser'
+  || ((props.exGalleryDetail || props.exDetailLoading) && props.fileList.length === 0 && !props.exInlineDetail)
+  || (props.searchResults.length > 0 && (!props.inspecting || props.exInlineDetail))
+))
 const torrentLoading = ref(false)
 const magnetLoading = ref(false)
 const torrentModalVisible = ref(false)
 const torrentList = ref([])
 const currentMagnet = ref('')
-// 当前 webview 地址（did-navigate 更新，与输入框同步）
-const exCurrentUrl = ref('https://exhentai.org/')
 
 // EX 站点发起搜索时自动切到"搜索结果"视图
 watch(() => props.searching, (v) => {
@@ -4217,99 +3792,20 @@ function exShowBrowser() {
   }
 }
 
-// 当前 webview 地址是否为画廊页（决定"解析画廊/磁力"按钮可用）
-const exIsGallery = computed(() => isExhentaiUrl(exCurrentUrl.value))
-
-// webview 导航完成：同步地址栏和前进/后退状态
-function onExNavigated(e) {
-  const url = e.url || ''
-  if (url && url !== 'about:blank') {
-    exCurrentUrl.value = url
-    exAddress.value = url
-  }
-  const wv = exWebviewRef.value
-  if (wv) {
-    exNavState.value = {
-      canBack: wv.canGoBack(),
-      canForward: wv.canGoForward(),
-    }
-  }
-}
-
-// 浏览器导航操作
-function exNav(action) {
-  const wv = exWebviewRef.value
-  if (!wv) return
-  if (action === 'back' && wv.canGoBack()) wv.goBack()
-  else if (action === 'forward' && wv.canGoForward()) wv.goForward()
-  else if (action === 'reload') wv.reload()
-  else if (action === 'home') wv.loadURL('https://exhentai.org/')
-}
-
-// 地址栏回车跳转
-function exNavigateToAddress() {
-  const wv = exWebviewRef.value
-  let url = (exAddress.value || '').trim()
-  if (!wv || !url) return
-  if (!/^https?:\/\//i.test(url)) {
-    url = 'https://' + url.replace(/^\/+/, '')
-  }
-  // 只允许 exhentai/e-hentai 域名（防止跳到其他网站）
-  if (!/(e-hentai|exhentai)\.org/i.test(url)) {
-    url = 'https://exhentai.org/'
-  }
-  wv.loadURL(url)
-}
-
-// 解析当前画廊（触发后端 inspect）
-function exParseGallery() {
-  if (!exIsGallery.value) return
-  emit('ex-parse-gallery', exCurrentUrl.value)
-}
-
-// 打开磁力弹窗（获取种子列表）
-function exShowTorrents() {
-  if (!exIsGallery.value) return
-  torrentModalVisible.value = true
-  torrentList.value = []
-  currentMagnet.value = ''
-  torrentLoading.value = true
-  emit('ex-get-torrents', exCurrentUrl.value)
-}
-
-// 画廊详情视图的种子按钮（参数：画廊 URL，不依赖 webview）
-function exDetailTorrents(url) {
-  if (!url) return
+// 打开磁力弹窗（原 exShowTorrents/exDetailTorrents 合并：组件经 ex-torrents 事件带上画廊 URL）
+function onExTorrents(url) {
   torrentModalVisible.value = true
   torrentList.value = []
   currentMagnet.value = ''
   torrentLoading.value = true
   emit('ex-get-torrents', url)
 }
-
-// 同步 webview cookie 给后端（保持登录状态）
-async function exSyncCookies() {
-  cookieSyncing.value = true
-  try {
-    if (window.api) {
-      const result = await window.api.exGetCookies()
-      if (result && result.cookieStr) {
-        emit('ex-sync-cookies', result.cookieStr)
-      } else {
-        // 无 cookie 时也触发一次（后端会提示未登录）
-        emit('ex-sync-cookies', '')
-      }
-    }
-  } finally {
-    setTimeout(() => { cookieSyncing.value = false }, 500)
-  }
-}
-
 // 获取某个种子的磁力链接
 function handleGetMagnet(torrent) {
-  magnetLoading.value = true
-  currentMagnet.value = ''
-  emit('ex-get-magnet', torrent.url)
+  // 磁力链接在种子列表解析时已生成（btih hash），直接显示——
+  // 原先走 exhentai_get_magnet 命令但该后端命令已不存在，永远转圈
+  magnetLoading.value = false
+  currentMagnet.value = torrent.magnet || `magnet:?xt=urn:btih:${torrent.hash || ''}`
 }
 
 // 复制磁力链接
@@ -4334,58 +3830,6 @@ async function openMagnet() {
   }
 }
 
-// ============================
-// ExHentai 搜索选项（复刻原版搜索页过滤按钮）
-// ============================
-// 分类（key 与后端 EXHENTAI_CATEGORIES 对应，f_cats 位掩码）
-const exCategories = [
-  { key: 'misc', label: '杂项' },
-  { key: 'doujinshi', label: '同人志' },
-  { key: 'manga', label: '漫画' },
-  { key: 'artistcg', label: '艺术家CG' },
-  { key: 'gamecg', label: '游戏CG' },
-  { key: 'imageset', label: '图集' },
-  { key: 'cosplay', label: 'Cosplay' },
-  { key: 'asianporn', label: '亚洲色情' },
-  { key: 'nonh', label: '非H' },
-  { key: 'western', label: '西方' },
-]
-
-const exRatingOptions = [
-  { label: '不限', value: 0 },
-  { label: '2 星', value: 2 },
-  { label: '3 星', value: 3 },
-  { label: '4 星', value: 4 },
-  { label: '5 星', value: 5 },
-]
-
-// 已勾选分类（旧配置无该字段时视为全选）
-const exCats = computed(() => {
-  const cats = props.settings.exhentai_cats
-  if (Array.isArray(cats) && cats.length > 0) return cats
-  return exCategories.map(c => c.key)
-})
-const exMinRating = computed(() => Number(props.settings.exhentai_min_rating) || 0)
-const exTorrentsOnly = computed(() => !!props.settings.exhentai_torrents_only)
-const exPageMin = computed(() => Number(props.settings.exhentai_page_min) || 0)
-const exPageMax = computed(() => Number(props.settings.exhentai_page_max) || 0)
-
-// 选项变更 → 通知 App.vue 存设置并自动重新搜索
-function emitExSearch(opts) {
-  emit('update:ex-search', opts)
-}
-
-function exToggleCat(key) {
-  const cur = [...exCats.value]
-  const i = cur.indexOf(key)
-  if (i >= 0) cur.splice(i, 1)
-  else cur.push(key)
-  emitExSearch({ exhentai_cats: cur })
-}
-
-function exSelectAllCats() {
-  emitExSearch({ exhentai_cats: exCategories.map(c => c.key) })
-}
 
 // 快速收藏到本地（搜索结果卡片爱心按钮）
 function handleQuickFavorite(item) {
@@ -4402,33 +3846,9 @@ function handleQuickFavorite(item) {
 // ============================
 // ExHentai 搜索结果（复刻原版布局）
 // ============================
-// 显示模式：列表（原版 List）/ 缩略图（原版 Thumbnail）
-const exDisplayMode = ref('list')
-// 列表模式勾选的画廊（批量收藏，对应原版复选框逻辑）
-const exChecked = ref([])
 // EX 画廊信息内联面板展开状态（文件列表视图下保留元数据可见）
 const showExGalleryInfo = ref(true)
 
-// 换页/新结果时清空勾选
-watch(() => props.searchResults, () => { exChecked.value = [] })
-
-// 批量收藏勾选的画廊
-function batchFavoriteEx() {
-  const selected = props.searchResults.filter(i => exChecked.value.includes(i.album_url))
-  selected.forEach(i => handleQuickFavorite(i))
-  exChecked.value = []
-}
-
-// 全选当前页画廊
-function exCheckAll() {
-  exChecked.value = props.searchResults.map(i => i.album_url).filter(Boolean)
-}
-
-// 反选：未选中的变为选中，已选中的取消
-function exInvertCheck() {
-  const all = props.searchResults.map(i => i.album_url).filter(Boolean)
-  exChecked.value = all.filter(u => !exChecked.value.includes(u))
-}
 
 // 点击标签搜索（原版标签点击 = 按该命名空间搜索）
 function searchTag(t) {
@@ -4501,11 +3921,32 @@ function formatCount(n) {
 // X 关注名单本地搜索（快速检索已缓存的人）
 // ============================
 const followSearch = ref('')
-// 按昵称 / @推特号 / 简介 / 分类过滤当前列表（纯前端过滤已加载的条目）
+// 收藏分类筛选（我的分类视图）：'' = 全部；'母类' / '母类/子类' = 按分类查看
+const followTagFilter = ref('')
+// 当前列表实际用到的分类 chips（母类/子级；只列出已归类用户里出现的分类）
+const followTagChips = computed(() => {
+  if (props.twFollowMode !== 'follows') return []
+  const used = new Set()
+  for (const u of props.twFollowItems) {
+    const p = u.follow_tag || u.tag || ''
+    if (p) used.add(p)
+  }
+  return (props.twFollowTags || []).filter(t => used.has(t.name) || (t.children || []).some(c => used.has(`${t.name}/${c}`)))
+})
+// 按昵称 / @推特号 / 简介 / 分类过滤当前列表（纯前端过滤已加载的条目）+ 分类筛选
 const filteredFollowItems = computed(() => {
+  let list = props.twFollowItems
+  const tf = followTagFilter.value
+  if (tf) {
+    // '母类' 匹配该母类及全部子类；'母类/子类' 精确匹配
+    list = list.filter(u => {
+      const tag = u.follow_tag || u.tag || ''
+      return tf.includes('/') ? tag === tf : (tag === tf || tag.startsWith(tf + '/'))
+    })
+  }
   const kw = (followSearch.value || '').trim().toLowerCase()
-  if (!kw) return props.twFollowItems
-  return props.twFollowItems.filter(u => {
+  if (!kw) return list
+  return list.filter(u => {
     const fields = [
       u.name || '',
       u.screen_name || '',
@@ -4516,8 +3957,8 @@ const filteredFollowItems = computed(() => {
     return fields.some(f => (f || '').toLowerCase().includes(kw))
   })
 })
-// 切换列表模式时清空搜索（不同列表共用一个搜索框）
-watch(() => props.twFollowMode, () => { followSearch.value = '' })
+// 切换列表模式时清空搜索与分类筛选（不同列表共用一个搜索框）
+watch(() => props.twFollowMode, () => { followSearch.value = ''; followTagFilter.value = '' })
 
 // 浏览模式缓存时间戳 → 可读文本
 function formatTwTime(ts) {
@@ -4571,16 +4012,55 @@ function toggleIwBatchItem(key) {
 }
 
 // 开始下载：按当前视图收集勾选内容（关注/好友 → 用户名；主页 → 视频 ID），交给 App.vue 转发后端
+// ASMR 视频文件预览（作品内嵌视频：stream_url 经媒体代理播放）
+function handleAsmrVideoPreview(file) {
+  if (!file) return
+  openPreview({
+    filename: file.title || '视频',
+    media_url: file.stream_url || file.media_url || '',
+    thumbnail: (props.asmrDetail || {}).thumbnail || '',
+    status: 'ok',
+    _is_video: true,
+  })
+}
+
+// O3D/E站 批量全选/反选/清空（主页 orHomeItems / 列表 orList.items）
+function selectOrBatch(mode) {
+  if (mode === 'clear') { orBatchChecked.value = new Set(); return }
+  let ids = []
+  if (props.orView === 'list') {
+    ids = ((props.orList && props.orList.items) || []).filter(it => it && it.video_id).map(it => it.video_id)
+  } else {
+    ids = (props.orHomeItems || []).filter(it => it && it.video_id).map(it => it.video_id)
+  }
+  if (mode === 'all') orBatchChecked.value = new Set(ids)
+  else orBatchChecked.value = new Set(ids.filter(id => !orBatchChecked.value.has(id)))
+}
+
+// iwara 批量全选/反选/清空（当前视图：following/friends=用户名，home=视频 id）
+function selectIwBatch(mode) {
+  if (mode === 'clear') { iwBatchChecked.value = new Set(); return }
+  let ids = []
+  if (props.iwView === 'following' || props.iwView === 'friends') {
+    const items = props.iwView === 'friends' ? props.iwFriendItems : props.iwFollowItems
+    ids = items.map(u => u.username).filter(Boolean)
+  } else if (props.iwView === 'home') {
+    ids = props.iwHomeItems.filter(it => it && it.video_id).map(it => it.video_id)
+  }
+  if (mode === 'all') iwBatchChecked.value = new Set(ids)
+  else iwBatchChecked.value = new Set(ids.filter(id => !iwBatchChecked.value.has(id)))
+}
+
 function startIwBatch() {
   const usernames = []
   const video_ids = []
-  if (iwView.value === 'following' || iwView.value === 'friends') {
-    const items = iwView.value === 'friends' ? iwFriendItems.value : iwFollowItems.value
+  if (props.iwView === 'following' || props.iwView === 'friends') {
+    const items = props.iwView === 'friends' ? props.iwFriendItems : props.iwFollowItems
     for (const u of items) {
       if (iwBatchChecked.value.has(u.username)) usernames.push(u.username)
     }
-  } else if (iwView.value === 'home') {
-    for (const item of iwHomeItems.value) {
+  } else if (props.iwView === 'home') {
+    for (const item of props.iwHomeItems) {
       if (item.video_id && iwBatchChecked.value.has(item.video_id)) video_ids.push(item.video_id)
     }
   }
@@ -4591,35 +4071,16 @@ function startIwBatch() {
 }
 
 // ============================
-// Hanime1 (H站) 搜索选项 / 评论 / 批量下载
 // ============================
-// 排序下拉选项（后端 HANIME_SORTS）
-const haSortOptions = computed(() => (props.haSorts || []).map(s => ({ label: s, value: s })))
-
-// 分类/排序切换（发给 App.vue 存设置并决定 搜索/分类浏览/主页）
-function setHaGenre(genre) {
-  emit('update:ha-search', { genre: genre || '', sort: props.settings.hanime_sort || '' })
-}
-
-function setHaSort(sort) {
-  emit('update:ha-search', { genre: props.settings.hanime_genre || '', sort: sort || '' })
-}
-
-// 详情页发表评论（需登录；结果事件由 App.vue 弹提示并自动刷新评论）
-const haCommentInput = ref('')
-const haCommentPosting = ref(false)
-
-function postHaComment() {
-  const text = (haCommentInput.value || '').trim()
-  if (!text || !props.haDetail || !props.haDetail.video_id) return
-  haCommentPosting.value = true
-  emit('hanime-add-comment', { video_id: props.haDetail.video_id, text })
-  haCommentInput.value = ''
-  // 提交状态由评论结果事件驱动，超时兜底复位
-  setTimeout(() => { haCommentPosting.value = false }, 5000)
-}
+// Hanime1 (H站) 批量下载（勾选状态三处共用：工具栏/主视图/搜索结果，留守本组件）
+// ============================
 
 // H站批量解析下载：勾选模式（主页分区/用户中心/搜索结果均按 video_id 勾选）
+// H站主视图激活条件（详情/主页/用户中心；搜索结果网格仍在共享结果分支）
+const exInlineCoverZoom = ref(false)  // EX 文件列表视图的画廊封面放大层
+
+const haMainViewActive = computed(() => props.site === 'hanime' && ['detail', 'home', 'user'].includes(props.haView))
+
 const haBatchMode = ref(false)
 const haBatchChecked = ref(new Set())
 
@@ -4634,6 +4095,31 @@ function toggleHaBatchItem(videoId) {
   if (next.has(videoId)) next.delete(videoId)
   else next.add(videoId)
   haBatchChecked.value = next
+}
+
+// H站批量全选/反选/清空（mode: all|invert|clear；作用于当前视图列表）
+function selectHaBatch(mode) {
+  if (mode === 'clear') { haBatchChecked.value = new Set(); return }
+  let ids = []
+  if (props.haView === 'home') {
+    for (const sec of (props.haSections || [])) {
+      for (const item of (sec.items || [])) if (item.video_id) ids.push(item.video_id)
+    }
+  } else if (props.haView === 'user') {
+    ids = (props.haUserItems || []).filter(it => it.video_id).map(it => it.video_id)
+  } else {
+    ids = (props.searchResults || []).filter(it => it.video_id).map(it => it.video_id)
+  }
+  if (mode === 'all') haBatchChecked.value = new Set(ids)
+  else haBatchChecked.value = new Set(ids.filter(id => !haBatchChecked.value.has(id)))
+}
+
+// 音声站批量全选/反选/清空（当前列表 asmrItems）
+function selectAsmrBatch(mode) {
+  if (mode === 'clear') { asmrBatchChecked.value = new Set(); return }
+  const ids = (props.asmrItems || []).filter(it => it && it.video_id).map(it => it.video_id)
+  if (mode === 'all') asmrBatchChecked.value = new Set(ids)
+  else asmrBatchChecked.value = new Set(ids.filter(id => !asmrBatchChecked.value.has(id)))
 }
 
 // 开始下载：收集当前视图勾选的视频 ID，交给 App.vue 转发后端
@@ -4716,11 +4202,14 @@ function openOrExternal(url) {
 // ============================
 const reverseDragOver = ref(false)
 const reverseFileInput = ref(null)
+// 结果视图：'site' = 按站点分组；'merged' = 跨站去重 + 相似度排序聚合
+const reverseViewMode = ref('site')
 
 // 已成功返回的站点（失效/失败站点直接不展示）
 const reverseDoneSites = computed(() => (props.reverseSites || []).filter(s => s.status === 'done'))
+const reverseDoneCount = computed(() => reverseDoneSites.value.length)
 const reverseTotalCount = computed(() =>
-  reverseDoneSites.value.reduce((n, s) => n + (s.results || []).length, 0))
+  (reverseDoneSites.value || []).reduce((n, s) => n + ((s.results || []).length || 0), 0))
 
 // 从 File 对象取真实路径（Electron 30 需 webUtils）
 function _reversePathFromFile(file) {
@@ -4741,6 +4230,7 @@ function handleReverseDrop(e) {
   }
   const p = _reversePathFromFile(file)
   if (!p) return
+  reverseViewMode.value = 'site'
   emit('reverse-search', p)
 }
 
@@ -4753,6 +4243,7 @@ function handleReversePick(e) {
   if (!file) return
   const p = _reversePathFromFile(file)
   if (!p) return
+  reverseViewMode.value = 'site'
   emit('reverse-search', p)
 }
 
@@ -4762,9 +4253,23 @@ function reverseOpenExternal(url) {
   else window.open(url, '_blank')
 }
 
-function reverseCopyText(text) {
+const reverseMessage = useMessage()
+
+async function reverseCopyText(text) {
   if (!text) return
-  if (navigator.clipboard) navigator.clipboard.writeText(text)
+  try {
+    if (window.api && window.api.copyText) {
+      const r = await window.api.copyText(text)
+      if (r && r.ok === false) throw new Error(r.error || '剪贴板写入失败')
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      throw new Error('剪贴板不可用')
+    }
+    reverseMessage.success('链接已复制')
+  } catch (e) {
+    reverseMessage.error(`复制失败：${e?.message || '未知错误'}`)
+  }
 }
 
 // 热门分类弹窗（打开时向后端请求 分类组 + 全部标签）
@@ -4856,25 +4361,8 @@ function startOrBatch() {
 }
 
 // ============================
-// ASMR 音声站：排序 / 索引弹窗 / 批量下载 / 音频播放器
+// ASMR 音声站：卡片提示 / 批量下载（批量状态四处共用：工具栏/列表/详情/搜索结果，留守）
 // ============================
-// 排序下拉选项（后端 ASMR_ORDERS：release=发售日 create_date=最新入库 dl_count=下载量...）
-const asmrOrderOptions = computed(() => {
-  const map = props.asmrOrders || {}
-  const keys = Object.keys(map)
-  if (!keys.length) {
-    return [
-      { label: '最新入库', value: 'create_date' },
-      { label: '发售日', value: 'release' },
-      { label: '下载量', value: 'dl_count' },
-      { label: '评分', value: 'rate_average_2dp' },
-      { label: '价格', value: 'price' },
-      { label: '评论数', value: 'review_count' },
-    ]
-  }
-  return keys.map(k => ({ label: map[k], value: k }))
-})
-
 // 卡片悬浮提示（社团/评分/下载数/字幕/标签）
 function asmrCardTooltip(item) {
   const lines = [item.album_name || '未命名']
@@ -4888,39 +4376,7 @@ function asmrCardTooltip(item) {
   return lines.join('\n')
 }
 
-// 社团/标签/声优索引弹窗
-const asmrIndexModal = ref(false)
-const asmrIndexKind = ref('tags')   // 'circles' | 'tags' | 'vas'
-const asmrIndexFilter = ref('')
-const ASMR_INDEX_TITLES = { circles: '社团', tags: '标签', vas: '声优' }
-const asmrIndexTitle = computed(() => ASMR_INDEX_TITLES[asmrIndexKind.value] || '标签')
 
-const filteredAsmrIndex = computed(() => {
-  const q = (asmrIndexFilter.value || '').trim().toLowerCase()
-  const items = props.asmrIndexItems || []
-  if (!q) return items.slice(0, 400)
-  return items.filter(t => String(t.name || '').toLowerCase().includes(q)).slice(0, 400)
-})
-
-function showAsmrIndex(kind) {
-  asmrIndexKind.value = kind
-  asmrIndexModal.value = true
-  asmrIndexFilter.value = ''
-  emit('asmr-index', kind)
-}
-
-function pickAsmrIndex(t) {
-  if (!t || !t.id) return
-  asmrIndexModal.value = false
-  emit('asmr-index-pick', asmrIndexKind.value, t.id, t.name)
-}
-
-// 刷新当前列表（按当前视图分发）
-function refreshAsmrView() {
-  if (props.asmrView === 'popular') emit('asmr-popular', 1)
-  else if (props.asmrView === 'favorites') emit('asmr-favorites', 1)
-  else emit('asmr-works', 1)
-}
 
 // 批量下载：勾选模式（列表视图/搜索结果均按 video_id 勾选）
 const asmrBatchMode = ref(false)
@@ -4963,159 +4419,36 @@ function startJavdbBatch() {
   emit('javdb-batch-download', urls)
 }
 
-// 详情作品属性（description 为 dict）
-const asmrDescEntries = computed(() => {
-  const d = (props.asmrDetail && props.asmrDetail.description) || {}
-  return Object.keys(d).filter(k => d[k] != null && d[k] !== '').map(k => ({
-    key: k, value: String(d[k]),
-  }))
+// ---------- JavDB 工具栏（五行动态：搜索类型 / 目录导航 / 热搜 / 标签词库 / 主页推荐） ----------
+
+// 第一行：搜索类型（对应 JavDB f= 参数）→ 已移至搜索框左侧折叠卡片
+const javdbSearchFields = [
+  { key: 'all', label: '影片' },
+  { key: 'actor', label: '演员' },
+  { key: 'series', label: '系列' },
+  { key: 'maker', label: '片商' },
+  { key: 'director', label: '导演' },
+  { key: 'coded', label: '番号' },
+]
+// 注：「标签」类型已移除——第四行标签词库常驻展示，点词条即按标签搜索
+
+// 当前搜索类型显示名（折叠卡片触发按钮）
+const javdbFieldLabel = computed(() => {
+  const f = javdbSearchFields.find(x => x.key === props.javdbSearchField)
+  return f ? f.label : '影片'
 })
 
-// 音轨文件按文件夹路径分组（保序）
-const asmrFileGroups = computed(() => {
-  const groups = []
-  const index = new Map()
-  for (const f of props.asmrFiles) {
-    const path = f.path || ''
-    if (!index.has(path)) {
-      index.set(path, { path, files: [] })
-      groups.push(index.get(path))
-    }
-    index.get(path).files.push(f)
-  }
-  return groups
+
+
+// 目录浏览：名称筛选（本地过滤当前页）
+const javdbDirFilter = ref('')
+const javdbDirFiltered = computed(() => {
+  const items = (props.javdbDir && props.javdbDir.items) || []
+  const f = javdbDirFilter.value.trim().toLowerCase()
+  return f ? items.filter(i => (i.name || '').toLowerCase().includes(f)) : items
 })
 
-// ============================
-// 内置音频播放器（连续自动播放 + 快进/倒带 + 音量记忆）
-// ============================
-const asmrAudioRef = ref(null)
-const asmrPlayingFile = ref(null)   // 当前播放的音轨对象
-const asmrPlayingIndex = ref(0)     // 在音频列表中的序号
-const asmrAudioPaused = ref(true)
-const asmrAudioMuted = ref(true)    // 默认静音（音量记忆在 localStorage）
-const asmrTimeText = ref('0:00 / 0:00')
 
-// 音量（0-1）：记忆到 localStorage，默认 0.8
-const asmrVolume = ref(Number(localStorage.getItem('asmr_volume')) || 0.8)
-const asmrVolumePercent = computed(() => Math.round((asmrVolume.value || 0) * 100))
-
-// 仅音频文件（连续播放按此列表推进）
-const asmrAudioFiles = computed(() => (props.asmrFiles || []).filter(f => f.type === 'audio' && f.play_url))
-const asmrHasPrev = computed(() => asmrPlayingIndex.value > 0)
-const asmrHasNext = computed(() => asmrPlayingIndex.value < asmrAudioFiles.value.length - 1)
-
-// 同步音量/静音到 <audio>
-watch([asmrVolume, asmrAudioMuted], () => {
-  const el = asmrAudioRef.value
-  if (!el) return
-  el.volume = asmrVolume.value
-  el.muted = asmrAudioMuted.value
-})
-
-// 点击音轨播放（连续自动播放下一轨）
-function playAsmrFile(file) {
-  if (!file || !file.play_url) return
-  const idx = asmrAudioFiles.value.indexOf(file)
-  if (idx < 0) return
-  asmrPlayingFile.value = file
-  asmrPlayingIndex.value = idx
-  nextTick(() => {
-    const el = asmrAudioRef.value
-    if (!el) return
-    el.volume = asmrVolume.value
-    el.muted = asmrAudioMuted.value
-    el.play().then(() => { asmrAudioPaused.value = false }).catch(() => {
-      // 自动播放受限（默认静音一般可播；失败提示用户手动点播放）
-      asmrAudioPaused.value = true
-    })
-  })
-}
-
-// 相对当前曲目跳转（-1 上一轨 / +1 下一轨）
-function playAsmrOffset(step) {
-  const list = asmrAudioFiles.value
-  const target = asmrPlayingIndex.value + step
-  if (target < 0 || target >= list.length) return
-  playAsmrFile(list[target])
-}
-
-// 播放 / 暂停
-function toggleAsmrPlay() {
-  const el = asmrAudioRef.value
-  if (!el) return
-  if (el.paused) {
-    el.play().then(() => { asmrAudioPaused.value = false }).catch(() => {})
-  } else {
-    el.pause()
-    asmrAudioPaused.value = true
-  }
-}
-
-// 快进 / 倒带（秒数来自设置，默认快进 30 秒倒带 5 秒）
-function asmrSeekBy(dir) {
-  const el = asmrAudioRef.value
-  if (!el) return
-  const sec = dir > 0
-    ? Number(props.settings.asmr_seek_forward) || 30
-    : Number(props.settings.asmr_seek_back) || 5
-  el.currentTime = Math.max(0, Math.min((el.duration || 0), el.currentTime + dir * sec))
-}
-
-// 静音切换（音量记忆）
-function toggleAsmrMute() {
-  asmrAudioMuted.value = !asmrAudioMuted.value
-  localStorage.setItem('asmr_muted', asmrAudioMuted.value ? '1' : '0')
-}
-
-// 拖动音量条：更新音量并记忆；拖离 0 时自动取消静音
-function onAsmrVolumeInput(e) {
-  const v = Math.max(0, Math.min(100, Number(e.target.value) || 0)) / 100
-  asmrVolume.value = v
-  localStorage.setItem('asmr_volume', String(v))
-  if (v > 0) {
-    asmrAudioMuted.value = false
-    localStorage.setItem('asmr_muted', '0')
-  }
-}
-
-// 一轨播完自动播下一轨
-function onAsmrEnded() {
-  if (asmrHasNext.value) playAsmrOffset(1)
-  else asmrAudioPaused.value = true
-}
-
-function onAsmrTimeUpdate() {
-  const el = asmrAudioRef.value
-  if (!el) return
-  const fmt = s => {
-    s = Math.floor(s || 0)
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  }
-  asmrTimeText.value = `${fmt(el.currentTime)} / ${fmt(el.duration)}`
-}
-
-function onAsmrAudioError() {
-  asmrAudioPaused.value = true
-}
-
-// 关闭播放器
-function stopAsmrPlayer() {
-  const el = asmrAudioRef.value
-  if (el) el.pause()
-  asmrPlayingFile.value = null
-  asmrAudioPaused.value = true
-  asmrTimeText.value = '0:00 / 0:00'
-}
-
-// 详情数据刷新时停掉旧播放器
-watch(() => props.asmrFiles, () => stopAsmrPlayer())
-
-// 恢复上次静音状态（首次默认静音）
-onMounted(() => {
-  const saved = localStorage.getItem('asmr_muted')
-  if (saved != null) asmrAudioMuted.value = saved === '1'
-})
 
 // 当前文件列表是否为 Pawchive 内容（显示画师内过滤框）
 const isPawchiveList = computed(() => {
@@ -5141,7 +4474,8 @@ const previewItem = ref(null)   // 引用 fileList 条目对象（media_url 解�
 // 预览视频音量持久化（默认静音，用户取消静音/调音量后记忆到 localStorage，下次沿用）
 const previewVideoRef = ref(null)
 const previewMuted = ref(localStorage.getItem('preview_muted') !== '0')   // 默认静音 true
-const previewVolume = ref(Number(localStorage.getItem('preview_volume')) || 1)  // 0~1，默认 1
+const _pvStored = Number(localStorage.getItem('preview_volume'))
+const previewVolume = ref(Number.isFinite(_pvStored) && 0 < _pvStored && _pvStored < 1 ? _pvStored : 0.5)  // 默认 50%（存过 100% 视同未设置）
 const previewVolumePercent = computed(() => Math.round((previewVolume.value || 0) * 100))
 function applyPreviewVolume() {
   const el = previewVideoRef.value
@@ -5161,7 +4495,13 @@ function togglePreviewMute() {
   previewMuted.value = !previewMuted.value
   localStorage.setItem('preview_muted', previewMuted.value ? '1' : '0')
   const el = previewVideoRef.value
-  if (el) el.muted = previewMuted.value
+  if (el) {
+    el.muted = previewMuted.value
+    // 取消静音时把记忆音量补应用到元素（:volume 属性绑定对 <video> 无效，音量只能走 property）
+    if (!previewMuted.value) {
+      try { el.volume = previewVolume.value } catch (e) {}
+    }
+  }
 }
 function onPreviewVolumeInput(e) {
   const p = Number(e.target.value) / 100
@@ -5180,6 +4520,7 @@ function onPreviewVolumeInput(e) {
 
 const VIDEO_EXTS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v', 'ts', 'flv', 'wmv']
 const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif', 'jfif']
+const AUDIO_EXTS = ['mp3', 'flac', 'wav', 'm4a', 'ogg', 'opus', 'aac', 'wma', 'mid', 'midi']
 
 function extOf(item) {
   const src = item.filename || item.media_url || item.thumbnail || ''
@@ -5187,7 +4528,15 @@ function extOf(item) {
   return m ? m[1] : ''
 }
 function isVideoItem(item) {
+  if (item && item._is_video) return true   // ASMR 内嵌视频（stream_url 无扩展名）
   return VIDEO_EXTS.includes(extOf(item))
+}
+function isAudioItem(item) {
+  if (item && item._is_audio) return true
+  if (isVideoItem(item)) return false
+  if (item && item.file_type === 'audio') return true
+  const e = extOf(item)
+  return !!e && AUDIO_EXTS.includes(e)
 }
 function isImageItem(item) {
   if (isVideoItem(item)) return false
@@ -5196,9 +4545,9 @@ function isImageItem(item) {
   // 无扩展名：有缩略图按图片处理
   return !!(item.thumbnail && !String(item.thumbnail).includes('video'))
 }
-// 可预览条目（图片或视频）
+// 可预览条目（图片/视频/音频）
 const previewableList = computed(() => filteredFileList.value.filter(f =>
-  f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f))
+  f.status !== 'fetch_failed' && (isImageItem(f) || isVideoItem(f) || isAudioItem(f))
 ))
 // Bunkr/EX 需要懒解析：无 media_url 时发给后端解析
 function ensureMediaUrl(item) {
@@ -5213,15 +4562,16 @@ function proxied(url) {
   if (url.startsWith('thumb://') || url.startsWith('http://127.0.0.1')) return url
   return `http://127.0.0.1:${props.mediaProxyPort}/media?url=${encodeURIComponent(url)}`
 }
-// 预览源（视频用代理直链；图片优先 media_url 原图，否则用缩略图）
+// 预览源（视频/音频用代理直链；图片优先 media_url 原图，否则用缩略图）
 const previewSrc = computed(() => {
   const it = previewItem.value
   if (!it) return ''
-  if (isVideoItem(it)) return it.media_url ? proxied(it.media_url) : ''
+  if (isVideoItem(it) || isAudioItem(it)) return it.media_url ? proxied(it.media_url) : ''
   if (it.media_url) return proxied(it.media_url)
   return it.thumbnail || ''
 })
 const previewIsVideo = computed(() => previewItem.value && isVideoItem(previewItem.value))
+const previewIsAudio = computed(() => previewItem.value && !previewIsVideo.value && isAudioItem(previewItem.value))
 // 图片预览加载态：切换图片时复位，加载完成/失败前显示 spinner（大图不再白屏无反馈）
 const previewImageLoaded = ref(false)
 const previewImageFailed = ref(false)
@@ -5231,8 +4581,24 @@ watch(previewSrc, () => {
 })
 const previewLoading = computed(() => {
   const it = previewItem.value
-  return !!it && isVideoItem(it) && !it.media_url && !it.media_resolve_failed
+  return !!it && (isVideoItem(it) || isAudioItem(it)) && !it.media_url && !it.media_resolve_failed
 })
+
+// 快速预览增强（m10）：全屏查看 + 新窗口查看原图（本地代理直链）
+function togglePreviewFullscreen() {
+  const body = document.querySelector('.media-preview-modal .n-card__content') || document.querySelector('.media-preview-modal')
+  if (!body) return
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  } else {
+    body.requestFullscreen?.()
+  }
+}
+
+function openPreviewWindow() {
+  if (!previewSrc.value) return
+  window.open(previewSrc.value, '_blank', 'width=960,height=720')
+}
 
 function openPreview(item) {
   previewItem.value = item
@@ -5291,11 +4657,27 @@ const inputPlaceholder = computed(() => {
   if (props.site === 'oreno3d') {
     return '搜索 Oreno3D / EroMMDTube 3D 视频，或粘贴 oreno3d.com、erommdtube.com/movies/... 链接'
   }
+  if (props.site === 'javdb') {
+    const f = javdbSearchFields.find(x => x.key === props.javdbSearchField)
+    return `按「${f ? f.label : '影片'}」搜索 JavDB（番号/标题/演员名），或粘贴 javdb.com/v/... 链接`
+  }
   if (props.site === 'erommdtube') {
     return '搜索 EroMMDTube 3D 视频，或粘贴 erommdtube.com、oreno3d.com/movies/... 链接'
   }
   if (props.site === 'asmr') {
     return '搜索音声作品（RJ号 / 标题 / 社团 / 标签），或粘贴 asmr-100.com/work/... 链接'
+  }
+  if (props.site === 'coomerst') {
+    return '搜索 Coomer 创作者名称，或粘贴 coomer.st/{服务}/user/{id} 链接'
+  }
+  if (props.site === 'coomerfans') {
+    return '搜索 CoomerFans 帖子关键词，或粘贴 coomerfans.com/p/... 链接'
+  }
+  if (props.site === 'fapello') {
+    return '搜索 Fapello 模型名称，或粘贴 fapello.com/{模型}/ 链接'
+  }
+  if (props.site === 'leakedzone') {
+    return '搜索 Leakedzone 关键词，或粘贴 leakedzone.com 链接（需先在左侧过 Cloudflare 盾）'
   }
   return '搜索 Bunkr 相册，或粘贴 Bunkr 链接'
 })
@@ -5317,7 +4699,12 @@ function siteChipName(s) {
     oreno3d: 'O3D',
     erommdtube: 'E站',
     asmr: '音声',
+    fc2: 'FC2',
     coomer: 'Coomer',
+    coomerst: 'Coomer',
+    coomerfans: 'CoomerFans',
+    fapello: 'Fapello',
+    leakedzone: 'Leakedzone',
     bunkr: 'Bunkr',
     twitter: 'X',
   }
@@ -5434,13 +4821,7 @@ watch(() => props.fileList, (newList) => {
     .filter(f => f.status === 'ok' && !f.is_downloaded)
     .map(f => f.item_page)
   localFilter.value = ''
-  activeTab.value = newList.length > 0 ? 'progress' : 'logs'
 }, { immediate: true })
-
-// 下载开始时切换到进度标签
-watch(() => props.downloading, (downloading) => {
-  if (downloading) activeTab.value = 'progress'
-})
 
 // ============================
 // 搜索触发
@@ -5500,78 +4881,6 @@ function formatSize(bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
-}
-
-function formatSpeed(bytesPerSecond) {
-  if (!bytesPerSecond || bytesPerSecond <= 0) return ''
-  return `${formatSize(bytesPerSecond)}/s`
-}
-
-// ============================
-// 右侧实时下载滚动栏（下载中的文件：文件名 + 进度 + 速度）
-// ============================
-const tickerItems = computed(() => {
-  const items = []
-  for (const [name, p] of Object.entries(props.downloadProgress || {})) {
-    if (p && p.status === 'downloading') {
-      items.push({
-        name,
-        percent: Math.round(p.completed || 0),
-        speedText: p.speed > 0 ? formatSpeed(p.speed) : '',
-      })
-    }
-  }
-  return items
-})
-
-// 内容复制一份拼接实现无缝循环滚动
-const tickerLoopItems = computed(() => tickerItems.value.concat(tickerItems.value))
-
-// 所有下载中文件的合计速度
-const tickerTotalSpeedText = computed(() => {
-  let total = 0
-  for (const p of Object.values(props.downloadProgress || {})) {
-    if (p && p.status === 'downloading') total += p.speed || 0
-  }
-  return total > 0 ? formatSpeed(total) : ''
-})
-
-function handleDeleteHistory(item, deleteFile) {
-  const msg = deleteFile
-    ? `确定删除记录和文件「${item.filename}」吗？此操作不可恢复。`
-    : `确定删除记录「${item.filename}」吗？`
-  if (window.confirm(msg)) {
-    emit('delete-history', item.id, deleteFile)
-  }
-}
-
-function statusTagType(status) {
-  const map = { downloading: 'info', completed: 'success', failed: 'error' }
-  return map[status] || 'default'
-}
-
-function statusText(status) {
-  const map = { downloading: '下载中', completed: '完成', failed: '失败' }
-  return map[status] || status
-}
-
-function progressStatus(status) {
-  if (status === 'completed') return 'success'
-  if (status === 'failed') return 'error'
-  return 'default'
-}
-
-function logTagType(type) {
-  const map = {
-    '错误': 'error',
-    '失败': 'error',
-    '完成': 'success',
-    '解析': 'info',
-    '下载': 'info',
-    '搜索': 'info',
-    '系统': 'default',
-  }
-  return map[type] || 'default'
 }
 
 // ============================
@@ -5655,7 +4964,7 @@ defineExpose({
   flex-shrink: 0;
 }
 
-/* 站点切换：竖排三类（二次元 / 三次元 / 综合类） */
+/* 站点切换：竖排三类（二次元 / 三次元 / 综合资源站点） */
 .site-switch-groups {
   display: flex;
   flex-direction: column;
@@ -5837,18 +5146,7 @@ html.light-mode .site-chip.on {
   border-bottom: 1px solid #2d2d33;
 }
 
-.ex-cats {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-}
 
-.ex-cats-label {
-  font-size: 12px;
-  color: #8f8f98;
-  margin-right: 2px;
-}
 
 /* 分类复选按钮（原版分类复选框的按钮化样式） */
 .ex-cat-chip {
@@ -5874,42 +5172,12 @@ html.light-mode .site-chip.on {
   color: #dff5cf;
 }
 
-.ex-cat-all {
-  margin-left: 4px;
-  border-style: dashed;
-}
 
-.ex-filters {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
-}
 
-.ex-filter-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
-.ex-filter-label {
-  font-size: 12px;
-  color: #8f8f98;
-  white-space: nowrap;
-}
 
-.ex-rating-select {
-  width: 78px;
-}
 
-.ex-page-input {
-  width: 84px;
-}
 
-.ex-filter-sep {
-  color: #7f7f88;
-  font-size: 12px;
-}
 
 /* ========== ExHentai 画廊详情（复刻原版画廊页信息区） ========== */
 .ex-detail {
@@ -5919,38 +5187,6 @@ html.light-mode .site-chip.on {
   min-height: 0;
 }
 
-/* ============ EX 内联详情+文件列表（搜索结果下方追加展示） ============ */
-.ex-inline-detail {
-  margin-top: 16px;
-  border: 1px solid #3a3a42;
-  border-radius: 8px;
-  background: #191a1d;
-  padding: 12px;
-}
-.ex-inline-detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.ex-inline-detail-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #a3c74f;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ex-inline-detail-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 40px 0;
-  color: #8f8f98;
-  font-size: 13px;
-}
 .ex-inline-file-list {
   display: flex;
   flex-direction: column;
@@ -6115,6 +5351,38 @@ html.light-mode .site-chip.on {
 }
 
 /* EX 画廊信息内联面板（文件列表视图下，自动解析后保留元数据可见） */
+.ex-inline-cover {
+  padding: 4px 0 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.ex-inline-cover img {
+  max-width: 200px;
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 8px;
+  cursor: zoom-in;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.ex-cover-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.ex-cover-zoom img {
+  max-width: 94vw;
+  max-height: 92vh;
+  object-fit: contain;
+}
+
 .ex-inline-info {
   margin: 0 0 8px;
   padding: 8px 12px;
@@ -6234,238 +5502,39 @@ html.light-mode .site-chip.on {
   text-overflow: ellipsis;
 }
 
-/* ========== ExHentai 搜索结果（复刻原版 List/Thumbnail 布局） ========== */
-.ex-results {
-  display: flex;
-  flex-direction: column;
-}
 
-.ex-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 4px;
-}
 
-.ex-result-count {
-  font-size: 12px;
-  color: #8f8f98;
-  margin-left: auto;
-}
 
-/* 列表模式：行式表格（原版 List） */
-.ex-list-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
 
-.ex-tr {
-  background: #34353b;
-  cursor: pointer;
-  transition: background 0.1s ease;
-}
 
-.ex-tr-alt {
-  background: #3c3e44;
-}
 
-.ex-tr:hover {
-  background: #4f535b;
-}
 
-.ex-td-check {
-  width: 30px;
-  padding: 0 4px;
-  text-align: center;
-  vertical-align: middle;
-}
 
-.ex-check {
-  cursor: pointer;
-}
 
-.ex-td-thumb {
-  width: 116px;
-  padding: 6px 8px;
-  vertical-align: middle;
-}
 
-.ex-thumb {
-  width: 100px;
-  height: 140px;
-  background: #26262b;
-  border: 1px solid #525252;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
-.ex-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
 
-.ex-thumb-empty {
-  font-size: 11px;
-  font-weight: bold;
-  color: #5f5f5f;
-}
 
-.ex-td-info {
-  padding: 8px 10px;
-  vertical-align: middle;
-}
 
-/* 原版绿色标题链接 */
-.ex-info-title {
-  font-size: 13px;
-  font-weight: bold;
-  color: #a3c74f;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-all;
-}
 
-.ex-tr:hover .ex-info-title {
-  color: #c8e88a;
-}
 
-/* 标签行：灰色可点击（点击按命名空间搜索，同原版逻辑） */
-.ex-info-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 5px;
-}
 
-.ex-info-tag {
-  font-size: 11px;
-  color: #b8b8b8;
-  text-decoration: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
 
-.ex-info-tag:hover {
-  color: #ffffff;
-  text-decoration: underline;
-}
 
-.ex-info-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-top: 5px;
-  font-size: 11px;
-  color: #989898;
-}
 
-.ex-td-fav {
-  width: 34px;
-  vertical-align: middle;
-}
 
-.ex-row-fav {
-  position: static;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
 
-.ex-tr:hover .ex-row-fav {
-  opacity: 1;
-}
 
-/* 缩略图模式（原版 Thumbnail：网格） */
-.ex-thumb-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-  margin-top: 8px;
-}
 
-.ex-thumb-card {
-  position: relative;
-  background: #1e1e22;
-  border: 1px solid #2d2d33;
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-}
 
-.ex-thumb-card:hover {
-  border-color: #a3c74f;
-}
 
-.ex-thumb-card-img {
-  aspect-ratio: 100 / 140;
-  background: #26262b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
 
-/* 缩略图模式多选勾选框（左上角，勾选后卡片高亮） */
-.ex-thumb-check {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 20px;
-  height: 20px;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 2;
-}
-.ex-thumb-check .ex-check {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-}
-.ex-thumb-card-checked {
-  outline: 2px solid #3889ff;
-  outline-offset: -2px;
-}
 
-.ex-thumb-card-img img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
 
-.ex-thumb-card-title {
-  font-size: 11px;
-  color: #e6e6ec;
-  padding: 6px 8px;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-all;
-}
 
-.ex-card-fav {
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
 
-.ex-thumb-card:hover .ex-card-fav {
-  opacity: 1;
-}
+
+
 
 /* ========== Pawchive 搜索结果（卡片网格 + 分页） ========== */
 .pa-results {
@@ -6473,74 +5542,15 @@ html.light-mode .site-chip.on {
   flex-direction: column;
 }
 
-/* ========== EX 隐藏标签按钮 + 管理面板 ========== */
-.ex-hide-tag-btn.on {
-  background: #5f2b2b;
-  border-color: #a25b5b;
-  color: #f0b1b1;
-}
 
-.ex-hide-panel {
-  margin: 6px 0 4px;
-  padding: 8px 10px;
-  border: 1px dashed #5a5a64;
-  border-radius: 8px;
-  background: #17181b;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 
-.ex-hide-input-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
 
-.ex-hide-input {
-  flex: 1;
-}
 
-.ex-hide-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 
-.ex-hide-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: #2b1f22;
-  border: 1px solid #7a4a4a;
-  color: #e8b8b8;
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  cursor: pointer;
-  user-select: none;
-}
 
-.ex-hide-chip:hover {
-  border-color: #c76a6a;
-}
 
-.ex-hide-chip-x {
-  font-weight: 700;
-  color: #ff9c9c;
-  padding: 0 2px;
-  cursor: pointer;
-}
 
-.ex-hide-chip-x:hover {
-  color: #ffffff;
-}
 
-.ex-hide-empty {
-  font-size: 12px;
-  color: #8f8f98;
-  line-height: 1.6;
-}
 
 /* ========== PA 画师子项目视图 ========== */
 .pa-artist-head {
@@ -6574,6 +5584,74 @@ html.light-mode .site-chip.on {
   text-align: center;
   color: #8f8f98;
   font-size: 13px;
+}
+
+.pa-ctl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 12px 2px;
+}
+
+.pa-follow-btn {
+  margin: 0 10px 8px;
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #bbb;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pa-follow-btn.on {
+  color: #f2c97d;
+  border-color: rgba(242, 201, 125, 0.5);
+  background: rgba(242, 201, 125, 0.08);
+}
+
+.pa-ctl-label {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.pa-ctl-select {
+  width: 150px;
+}
+
+.pa-ctl-order {
+  width: 96px;
+}
+
+.pa-fav-updated {
+  color: #4098d7;
+  font-size: 11px;
+  padding: 0 10px 6px;
+}
+
+.pa-artist-view-switch {
+  margin-left: auto;
+}
+
+.pa-post-edited {
+  color: #4098d7;
+}
+
+.search-card .pa-post-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 2;
+}
+
+.pa-thumb-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .pa-post-row {
@@ -6941,70 +6019,16 @@ html.light-mode .site-chip.on {
   text-align: center;
 }
 
-/* ==================== Hanime1 (H站) 专属样式 ==================== */
-/* 详情页：上传者行 */
-.ha-uploader {
-  font-size: 13px;
-}
 
-/* 详情页：发表评论输入行 */
-.ha-comment-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 0 14px 10px;
-}
 
-.ha-comment-input-row .n-input {
-  flex: 1;
-}
 
-/* 楼中楼回复缩进 */
-.ha-comment-reply {
-  padding-left: 46px;
-  border-left: 2px solid rgba(99, 226, 183, 0.25);
-  margin-left: 14px;
-}
 
-/* 搜索选项栏：排序下拉 */
-.ha-sort-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 10px;
-}
 
-.ha-sort-select {
-  width: 130px;
-}
 
-/* 主页分区列表 */
-.ha-sections {
-  padding: 10px 14px 20px;
-}
 
-.ha-section {
-  margin-bottom: 18px;
-}
 
-.ha-section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #e0e0e6;
-}
 
-.ha-section-grid {
-  margin-top: 0;
-}
 
-/* 批量下载进度（复用 iw-batch-progress 样式） */
-.ha-batch-progress {
-  margin-left: 4px;
-}
 
 /* ==================== Oreno3D (O3D) 专属样式 ==================== */
 /* 工具栏排序下拉 */
@@ -7208,15 +6232,7 @@ html.light-mode .site-chip.on {
   background: rgba(112, 192, 232, 0.2);
 }
 
-/* 日间模式适配 */
-html.light-mode .ha-section-title,
-html.light-mode .ha-uploader {
-  color: #333;
-}
 
-html.light-mode .ha-comment-reply {
-  border-left-color: rgba(0, 128, 90, 0.25);
-}
 
 html.light-mode .or-tag-chip {
   background: rgba(0, 128, 90, 0.06);
@@ -7402,6 +6418,19 @@ html.light-mode .or-group-chip:hover {
   color: #8f8f98;
 }
 
+.iw-user-bio {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #a0a0aa;
+  white-space: pre-line;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .iw-user-actions {
   display: flex;
   gap: 6px;
@@ -7477,36 +6506,9 @@ html.light-mode .or-group-chip:hover {
   transform: scale(1.15);
 }
 
-/* ExHentai 浏览器视图 */
-.ex-browser {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
 
-.ex-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #1e1e22;
-  border-bottom: 1px solid #2d2d33;
-  flex-shrink: 0;
-  flex-wrap: nowrap;
-}
 
-.ex-address {
-  flex: 1;
-  min-width: 120px;
-}
 
-.ex-webview {
-  flex: 1;
-  min-height: 0;
-  background: #fff;
-}
 
 /* 磁力弹窗 */
 .torrent-list {
@@ -7866,6 +6868,13 @@ html.light-mode .dl-ticker-empty {
   justify-content: center;
 }
 
+.grid-sprite {
+  display: block;
+  margin: 0 auto;
+  background-repeat: no-repeat;
+  background-color: #26262b;
+}
+
 .grid-thumb img {
   width: 100%;
   height: 100%;
@@ -7960,6 +6969,18 @@ html.light-mode .dl-ticker-empty {
   max-height: 62vh;
   background: #000;
   border-radius: 6px;
+  display: block;
+}
+
+.media-preview-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 0;
+}
+
+.media-preview-audio audio {
+  width: min(680px, 100%);
   display: block;
 }
 
@@ -8202,6 +7223,17 @@ html.light-mode .preview-volume-text {
 }
 
 /* ============================ X (Twitter) 关注视图 ============================ */
+.tw-toolbar-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #1b1b20;
+}
+
+html.light-mode .tw-toolbar-sticky {
+  background: #ffffff;
+}
+
 .tw-toolbar {
   display: flex;
   align-items: center;
@@ -8210,6 +7242,9 @@ html.light-mode .preview-volume-text {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 30;
 }
 
 .tw-toolbar-hint {
@@ -8242,6 +7277,26 @@ html.light-mode .preview-volume-text {
 }
 .tw-follow-search + .n-button {
   margin-left: 0;
+}
+
+/* 收藏分类查看/跳转 chips 行（我的分类视图） */
+.tw-follow-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 2px 6px;
+  border-bottom: 1px solid #2a2a32;
+}
+
+.tw-tag-parent {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.tw-tag-child {
+  font-size: 11px;
+  color: #9aa4b0;
 }
 
 .tw-follow-title {
@@ -8572,437 +7627,65 @@ html.light-mode .preview-volume-text {
   line-height: 1.6;
 }
 
-/* ============================ ASMR 音声站 ============================ */
-/* 工具栏"仅带字幕"勾选 */
-.asmr-subtitle-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 
-/* 卡片字幕角标 */
-.asmr-thumb-sub {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: rgba(56, 137, 255, 0.85);
-  color: #fff;
-  font-size: 10px;
-  line-height: 16px;
-}
 
-/* JavDB 详情：封面区域（限宽居中） */
-.javdb-cover-area {
-  display: flex;
-  justify-content: center;
-  background: transparent;
-  padding: 8px 0;
-}
-.javdb-cover-area img {
-  max-width: min(100%, 480px);
-  max-height: 420px;
-  border-radius: 8px;
-  cursor: zoom-in;
-  object-fit: contain;
-}
-/* JavDB 信息面板 */
-.javdb-info-panel {
-  flex-wrap: wrap;
-  gap: 6px 14px;
-}
-/* JavDB 磁力列表 */
-.javdb-magnets {
-  margin: 10px 0;
-}
-.javdb-magnets-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: #d4d4dc;
-  margin: 8px 0 6px;
-}
-.javdb-magnet-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 7px 10px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  margin-bottom: 5px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.javdb-magnet-item:hover {
-  background: rgba(56, 137, 255, 0.12);
-}
-.javdb-magnet-name {
-  font-size: 12px;
-  color: #d4d4dc;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 60%;
-}
-.javdb-magnet-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: #7a7a85;
-  margin-left: auto;
-}
-/* JavDB 预览图网格 */
-.javdb-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 8px;
-}
-.javdb-preview-grid img {
-  width: 100%;
-  aspect-ratio: 16/11;
-  object-fit: cover;
-  border-radius: 6px;
-  cursor: zoom-in;
-  transition: transform 0.15s;
-}
-.javdb-preview-grid img:hover {
-  transform: scale(1.03);
-}
-html.light-mode .javdb-magnets-title { color: #333338; }
-html.light-mode .javdb-magnet-item { background: rgba(0, 0, 0, 0.04); }
-html.light-mode .javdb-magnet-name { color: #333338; }
-html.light-mode .javdb-magnet-meta { color: #8a8a93; }
+/* JavDB 详情演员/标签可点击 */
+.iw-tag.iw-tag-click { cursor: pointer; }
+.iw-tag.iw-tag-click:hover { opacity: 0.75; }
 
-/* 卡片 tags 摘要行 */
-.asmr-card-tags {
-  font-size: 11px;
-  color: #7a7a85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 2px 2px;
-}
 
-/* 详情头部：封面 + 信息 */
-.asmr-detail-head {
-  display: flex;
-  gap: 16px;
-  padding: 12px 4px 6px;
-}
 
-.asmr-detail-cover {
-  flex-shrink: 0;
-  width: 200px;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
 
-.asmr-detail-cover img {
-  display: block;
-  width: 100%;
-  object-fit: cover;
-}
 
-.asmr-detail-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
 
-.asmr-detail-rid {
-  font-size: 12px;
-  color: #63e2b7;
-}
 
-.asmr-detail-circle {
-  font-size: 14px;
-  color: #e0e0e6;
-  cursor: pointer;
-}
 
-.asmr-detail-circle:hover {
-  color: #63e2b7;
-}
 
-.asmr-detail-stats {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: #9a9aa5;
-}
 
-.asmr-detail-meta {
-  font-size: 12px;
-  color: #7a7a85;
-}
 
-.asmr-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
 
-/* 作品属性表 */
-.asmr-attrs {
-  margin: 8px 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
-}
 
-.asmr-attr-row {
-  display: flex;
-  gap: 10px;
-  padding: 3px 0;
-  font-size: 12px;
-}
 
-.asmr-attr-key {
-  flex-shrink: 0;
-  width: 90px;
-  color: #63e2b7;
-}
 
-.asmr-attr-value {
-  flex: 1;
-  min-width: 0;
-  color: #c8c8d0;
-  word-break: break-all;
-}
 
-/* 音轨文件列表 */
-.asmr-files-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #e0e0e6;
-  margin: 12px 0 6px;
-}
 
-.asmr-file-group {
-  margin-bottom: 6px;
-}
 
-.asmr-folder-name {
-  font-size: 12px;
-  color: #63e2b7;
-  padding: 6px 4px 2px;
-  word-break: break-all;
-}
 
-.asmr-file-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  color: #c8c8d0;
-  transition: background 0.12s ease;
-}
 
-.asmr-file-row:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
 
-.asmr-file-row.active {
-  background: rgba(99, 226, 183, 0.14);
-  color: #63e2b7;
-}
 
-.asmr-file-row.text {
-  cursor: default;
-  color: #7a7a85;
-}
 
-.asmr-file-row.text:hover {
-  background: transparent;
-}
 
-.asmr-file-icon {
-  flex-shrink: 0;
-  width: 18px;
-  text-align: center;
-}
 
-.asmr-file-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.asmr-file-duration,
-.asmr-file-size {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: #7a7a85;
-}
 
-/* 播放器底部占位（防悬浮播放器遮挡列表） */
-.asmr-player-space {
-  height: 64px;
-}
 
-/* 内置音频播放器（悬浮底部，锚定详情容器） */
-.asmr-player {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: rgba(24, 24, 28, 0.96);
-  border: 1px solid rgba(99, 226, 183, 0.25);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
-}
 
-.asmr-player-icon {
-  flex-shrink: 0;
-  font-size: 16px;
-}
 
-.asmr-player-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
 
-.asmr-player-name {
-  font-size: 12px;
-  color: #e0e0e6;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.asmr-player-track {
-  font-size: 10px;
-  color: #7a7a85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.asmr-player-time {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: #9a9aa5;
-  font-variant-numeric: tabular-nums;
-}
 
-/* 音量条 */
-.asmr-volume {
-  flex-shrink: 0;
-  width: 80px;
-  height: 4px;
-  accent-color: #63e2b7;
-  cursor: pointer;
-}
 
-/* ============================ ASMR 日间模式 ============================ */
-html.light-mode .asmr-thumb-sub {
-  background: rgba(56, 137, 255, 0.9);
-}
 
-html.light-mode .asmr-card-tags {
-  color: #8a8a95;
-}
 
-html.light-mode .asmr-detail-circle {
-  color: #333;
-}
 
-html.light-mode .asmr-detail-circle:hover {
-  color: #18a058;
-}
 
-html.light-mode .asmr-detail-stats {
-  color: #666;
-}
 
-html.light-mode .asmr-detail-meta {
-  color: #8a8a95;
-}
 
-html.light-mode .asmr-attrs {
-  border-color: rgba(0, 0, 0, 0.1);
-  background: rgba(0, 0, 0, 0.03);
-}
 
-html.light-mode .asmr-attr-key {
-  color: #18a058;
-}
 
-html.light-mode .asmr-attr-value {
-  color: #444;
-}
 
-html.light-mode .asmr-files-title {
-  color: #333;
-}
 
-html.light-mode .asmr-folder-name {
-  color: #18a058;
-}
 
-html.light-mode .asmr-file-row {
-  color: #444;
-}
 
-html.light-mode .asmr-file-row:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
 
-html.light-mode .asmr-file-row.active {
-  background: rgba(24, 160, 88, 0.15);
-  color: #18a058;
-}
 
-html.light-mode .asmr-file-row.text {
-  color: #8a8a95;
-}
 
-html.light-mode .asmr-file-duration,
-html.light-mode .asmr-file-size {
-  color: #8a8a95;
-}
 
-html.light-mode .asmr-player {
-  background: rgba(255, 255, 255, 0.97);
-  border-color: rgba(24, 160, 88, 0.35);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-}
 
-html.light-mode .asmr-player-name {
-  color: #333;
-}
 
-html.light-mode .asmr-player-track {
-  color: #8a8a95;
-}
 
-html.light-mode .asmr-player-time {
-  color: #666;
-}
 
 /* ============================ 识图（反向图片搜索） ============================ */
 .reverse-view {
@@ -9061,47 +7744,124 @@ html.light-mode .asmr-player-time {
 
 /* 搜索中进度 */
 .reverse-progress {
+  flex-shrink: 0;
+  border: 1px solid rgba(108, 140, 255, 0.25);
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: rgba(108, 140, 255, 0.06);
+}
+
+.reverse-progress.done {
+  border-color: rgba(62, 207, 142, 0.3);
+  background: rgba(62, 207, 142, 0.05);
+}
+
+.reverse-progress-top {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 20px;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .reverse-progress-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
 }
 
-.reverse-progress-item {
+.reverse-progress-chips {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rp-chip {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.reverse-progress-name {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.reverse-progress-running {
+  gap: 6px;
   font-size: 12px;
-  color: #63e2b7;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(108, 140, 255, 0.1);
+  color: var(--tx2, #9aa5b8);
 }
 
-.reverse-progress-ok {
-  font-size: 12px;
-  color: #63e2b7;
-  font-weight: 600;
+.rp-chip.running { animation: rp-pulse 1.2s ease-in-out infinite; }
+.rp-chip.running .rp-dot { background: var(--acc); }
+.rp-chip.done { background: rgba(62, 207, 142, 0.12); color: var(--ok, #21c58b); }
+.rp-chip.failed { background: rgba(255, 95, 125, 0.12); color: var(--bad, #ff5f7d); }
+.rp-chip.cancelled { opacity: .5; }
+.rp-chip b { font-weight: 800; }
+.rp-dot { width: 7px; height: 7px; border-radius: 50%; background: #888; }
+
+@keyframes rp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
 }
 
 .reverse-progress-fail {
+  color: var(--bad, #ff5f7d);
+}
+
+.reverse-progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+/* 结果视图切换：按站点 / 聚合排序 */
+.reverse-view-tabs {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.reverse-tab {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.reverse-tab:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.reverse-tab.active {
+  background: rgba(99, 226, 183, 0.18);
+  color: #63e2b7;
+}
+
+.reverse-tab-badge {
+  font-size: 11px;
+  background: rgba(99, 226, 183, 0.22);
+  border-radius: 999px;
+  padding: 0 6px;
+  color: #63e2b7;
+}
+
+/* 聚合结果：命中来源 / 缓存提示 */
+.reverse-item-sources {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 2px;
+}
+
+.reverse-cache-hint {
   font-size: 12px;
-  color: #e88080;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 8px;
 }
 
 /* 结果展示 */
@@ -9322,6 +8082,36 @@ html.light-mode .reverse-empty {
   color: #888;
 }
 
+html.light-mode .reverse-view-tabs {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+html.light-mode .reverse-tab {
+  color: #777;
+}
+
+html.light-mode .reverse-tab:hover {
+  color: #444;
+}
+
+html.light-mode .reverse-tab.active {
+  background: rgba(99, 226, 183, 0.2);
+  color: #1f9c75;
+}
+
+html.light-mode .reverse-tab-badge {
+  background: rgba(99, 226, 183, 0.25);
+  color: #1f9c75;
+}
+
+html.light-mode .reverse-item-sources {
+  color: #999;
+}
+
+html.light-mode .reverse-cache-hint {
+  color: #999;
+}
+
 /* ==================== PA 右键属性菜单 ==================== */
 .pa-ctx-backdrop {
   position: fixed;
@@ -9392,4 +8182,86 @@ html.light-mode .pa-ctx-item:hover {
   background: #f0f7f4;
   color: #18a058;
 }
+
+
+
+
+
+
+
+/* 搜索框左侧：搜索类型折叠卡片触发按钮 */
+.jt-type-trigger {
+  flex: none;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 4px;
+  border: 1px solid #3d3d45;
+  background: #2d2d33;
+  color: #b8e2c9;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+
+.jt-type-trigger:hover {
+  background: #3d3d45;
+  color: #fff;
+  border-color: #4a7c3a;
+}
+
+/* 折叠卡片内容：类型词条换行排布 */
+.jt-type-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 240px;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.jt-dir-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+}
+
+.jt-dir-item {
+  padding: 6px 8px;
+  font-size: 13px;
+  color: #d8d8de;
+  background: #26262e;
+  border: 1px solid #33333c;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jt-dir-item:hover {
+  border-color: #63e2b7;
+  color: #63e2b7;
+}
 </style>
+
+
+

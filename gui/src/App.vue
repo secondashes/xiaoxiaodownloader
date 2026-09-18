@@ -2,7 +2,20 @@
   <n-config-provider :theme="naiveTheme" :locale="zhCN" :date-locale="dateZhCN">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-layout">
+        <!-- 里/美好世界自定义标题栏：随模式变色（里=暗 / 表=亮），兼作拖动区与窗口控制 -->
+        <div class="win-titlebar" :class="settings.ui_mode_hot ? 'tb-light' : 'tb-dark'">
+          <span class="tb-badge">{{ settings.ui_mode_hot ? '美好世界' : '里世界' }}</span>
+          <span class="tb-app">小小浏览器</span>
+          <div class="tb-controls">
+            <button title="最小化" @click="winCtl('minimize')">—</button>
+            <button title="最大化/还原" @click="winCtl('maximize')">▢</button>
+            <button class="tb-close" title="关闭" @click="winCtl('close')">✕</button>
+          </div>
+        </div>
+
+        <!-- 经典下载器界面 = 里世界（ui_mode_hot=true 时整屏切换为美好世界 ModernHome） -->
+        <div class="win-frame" :class="{ 'win-maxed': winMaxed }" v-show="!settings.ui_mode_hot">
+          <div class="app-layout">
           <LeftPanel
             :settings="settings"
             :site="settings.site || 'bunkr'"
@@ -34,6 +47,7 @@
             @reverse-set-proxy="handleReverseSetProxy"
             @oreno-set-proxy="handleOrenoSetProxy"
             :xhamster-user="xhamsterUser"
+            :fc2-user="fc2User"
             :pornhub-user="pornhubUser"
             :xvideos-user="xvideosUser"
             :javdb-user="javdbUser"
@@ -74,6 +88,15 @@
             @iwara-logout="handleIwaraLogout"
             @iwara-set-proxy="handleIwaraSetProxy"
             :follow-tags="twFollowTags"
+            @common-proxy="handleCommonProxy"
+            @sniffer-open="handleSnifferOpen"
+            @leak-edge-login="handleLeakEdgeLogin"
+            @leak-edge-harvest="handleLeakEdgeHarvest"
+            :leak-edge-running="leakEdgeRunning"
+            :tw-follows="twFollowItems"
+            :media-proxy-port="mediaProxyPort"
+            @tw-open-user="handleTwOpenUser"
+            @tw-get-follows="handleTwGetFollows"
             :theme-mode="settings.theme || 'dark'"
             @toggle-theme="toggleTheme"
             @tw-add-follow-tag="handleTwAddFollowTag"
@@ -104,6 +127,8 @@
             @download-update="handleDownloadUpdate"
             @install-update="handleInstallUpdate"
             @shortcut-change="handleShortcutChange"
+            @cancel-login="handleCancelLogin"
+            @restart-app="handleRestartApp"
           />
           <RightPanel
             v-show="!detailVisible"
@@ -137,6 +162,7 @@
             :ex-detail-loading="exDetailLoading"
             :ex-inline-detail="exInlineDetail"
             :ex-fav-mode="exFavMode"
+            :ex-popular-mode="exPopularMode"
             :ex-batch-running="exBatchDownloading"
             :ex-batch-progress="exBatchProgress"
             :batch-file-collected="batchFileCollected"
@@ -225,8 +251,53 @@
             :or-detail-loading="orDetailLoading"
             :or-batch-running="orBatchRunning"
             :or-batch-progress="orBatchProgress"
+            :xh-view="xhView"
+            :xh-tab="xhTab"
+            :xh-home-items="xhHomeItems"
+            :xh-home-loading="xhHomeLoading"
+            :xh-home-error="xhHomeError"
+            :xh-home-sort="xhHomeSort"
+            :xh-home-has-more="xhHomeHasMore"
+            :xh-cats-loading="xhCatsLoading"
+            :xh-cats-trending="xhCatsTrending"
+            :xh-cats-groups="xhCatsGroups"
+            :xh-cats-error="xhCatsError"
+            :xh-cat-name="xhCatName"
+            :xh-cat-items="xhCatItems"
+            :xh-cat-loading="xhCatLoading"
+            :xh-cat-error="xhCatError"
+            :xh-cat-has-more="xhCatHasMore"
+            :xh-shorts-items="xhShortsItems"
+            :xh-shorts-loading="xhShortsLoading"
+            :xh-shorts-error="xhShortsError"
+            :xh-shorts-has-more="xhShortsHasMore"
+            :xh-notif="xhNotif"
+            :xh-notif-loading="xhNotifLoading"
+            :xh-my-tab="xhMyTab"
+            :xh-my-items="xhMyItems"
+            :xh-my-loading="xhMyLoading"
+            :xh-my-error="xhMyError"
+            :xh-my-has-more="xhMyHasMore"
+            :xh-my-username="xhMyUsername"
+            :xh-detail="xhDetail"
+            :xh-detail-loading="xhDetailLoading"
+            :xh-detail-error="xhDetailError"
+            :xh-comments="xhComments"
+            :xh-comment-count="xhCommentCount"
+            :xh-user="xhUser"
+            :xh-user-items="xhUserItems"
+            :xh-user-loading="xhUserLoading"
+            :xh-user-error="xhUserError"
+            :xh-user-has-more="xhUserHasMore"
+            :xh-user-tab="xhUserTab"
+            :xh-user-profile="xhUserProfile"
+            :xh-subscribe-loading="xhSubscribeLoading"
+            :xh-comment-sending="xhCommentSending"
+            :xh-batch-running="xhBatchRunning"
+            :xh-batch-progress="xhBatchProgress"
             :asmr-view="asmrView"
             :asmr-items="asmrItems"
+            :asmr-recommend="asmrRecommend"
             :asmr-list-loading="asmrListLoading"
             :asmr-has-more="asmrHasMore"
             :asmr-error="asmrError"
@@ -240,6 +311,8 @@
             :asmr-files="asmrFiles"
             :asmr-detail-loading="asmrDetailLoading"
             :asmr-logged-in="asmrLoggedIn"
+            :asmr-related="asmrRelated"
+            :asmr-related-pending="asmrRelatedPending"
             :asmr-batch-running="asmrBatchRunning"
             :asmr-batch-progress="asmrBatchProgress"
             :reverse-active="reverseActive"
@@ -253,10 +326,21 @@
             @pixiv-command="handlePixivCommand"
             @reverse-search="handleReverseSearch"
             @reverse-reset="handleReverseReset"
+            @reverse-cancel="handleReverseCancel"
+            @reverse-download="handleReverseDownload"
+            :reverse-merged="reverseMerged"
+            :reverse-cached="reverseCached"
             :javdb-detail="javdbDetail"
             :javdb-detail-loading="javdbDetailLoading"
             :javdb-batch-running="javdbBatchRunning"
             :javdb-batch-progress="javdbBatchProgress"
+            :javdb-user="javdbUser"
+            :javdb-search-field="javdbSearchField"
+            :javdb-tags-vocab="javdbTagsVocab"
+            :javdb-tags-mode="javdbTagsMode"
+            :javdb-hot="javdbHotKeywords"
+            :javdb-dir="javdbDir"
+            :javdb-mode-recommend="javdbModeRecommend"
             :auto-translating="autoTranslating"
             :auto-translate-mode="autoTranslateMode"
             :translated-titles="translatedTitles"
@@ -319,6 +403,30 @@
             @or-toggle-favorite="handleOrenoToggleFavorite"
             @or-sort-update="handleOrenoSortUpdate"
             @or-batch-download="handleOrenoBatchDownload"
+            @xh-tab="handleXhTab"
+            @xh-home="p => handleXhHome(p || 1)"
+            @xh-home-more="handleXhHomeMore"
+            @xh-home-sort="handleXhHomeSort"
+            @xh-open-category="handleXhOpenCategory"
+            @xh-cat-back="handleXhCatBack"
+            @xh-cat-more="handleXhCatMore"
+            @xh-open-categories="handleXhOpenCategories"
+            @xh-shorts-reload="handleXhShortsReload"
+            @xh-shorts-more="handleXhShortsMore"
+            @xh-notifications="handleXhNotifications"
+            @xh-my-tab="t => handleXhMy(t || 'favorites', 1)"
+            @xh-my-more="handleXhMyMore"
+            @xh-open-detail="handleXhOpenDetail"
+            @xh-detail-back="handleXhDetailBack"
+            @xh-open-user="handleXhOpenUser"
+            @xh-user-back="handleXhUserBack"
+            @xh-user-more="handleXhUserMore"
+            @xh-user-tab="handleXhUserTab"
+            @xh-subscribe="handleXhSubscribe"
+            @xh-add-comment="handleXhAddComment"
+            @xh-search-tag="handleXhSearchTag"
+            @xh-search="handleXhSearch"
+            @xh-batch-download="handleXhBatchDownload"
             @asmr-popular="handleAsmrPopular"
             @asmr-works="handleAsmrWorks"
             @asmr-favorites="handleAsmrFavorites"
@@ -333,10 +441,22 @@
             @asmr-open-circle="handleAsmrOpenCircle"
             @asmr-open-va="handleAsmrOpenVa"
             @asmr-batch-download="handleAsmrBatchDownload"
+            @asmr-download-files="handleAsmrDownloadFiles"
             @javdb-open-detail="handleJavdbOpenDetail"
             @javdb-detail-back="handleJavdbDetailBack"
             @javdb-download-images="handleJavdbDownloadImages"
             @javdb-batch-download="handleJavdbBatchDownload"
+            @javdb-home="p => handleJavdbHome(p || 1)"
+            @javdb-open-actor="u => handleJavdbOpenActor(u)"
+            @javdb-search-tag="handleJavdbSearchTag"
+            @javdb-search-field="setJavdbSearchField"
+            @javdb-hot="handleJavdbHotSearch"
+            @javdb-open-list="handleJavdbOpenList"
+            @javdb-dir="handleJavdbDir"
+            @javdb-dir-page="handleJavdbDirPage"
+            @javdb-dir-clear="handleJavdbDirClear"
+            @javdb-mode="handleJavdbTagsMode"
+            @javdb-logout="handleJavdbLogout"
             @search="handleSearch"
             @load-more="handleLoadMore"
             @go-page="handleGoPage"
@@ -354,7 +474,10 @@
             @update:ex-search="handleExSearchUpdate"
             @ex-favorites="handleExFavorites"
             @ex-open-gallery="handleExOpenGallery"
+            @ex-popular="handleExPopular"
             @ex-batch-download="handleExBatchDownload"
+            @ex-batch-cancel="handleExBatchCancel"
+            @show-collected-files="handleShowCollectedFiles"
             @clear-batch-tasks="handleClearBatchTasks"
             @ex-close-detail="handleExCloseDetail"
             @ex-save-torrent="handleExSaveTorrent"
@@ -368,6 +491,13 @@
             @ex-delete-hidden-tag="handleExDeleteHiddenTag"
             @add-favorite="handleAddFavorite"
             @pa-download-artist="handlePaDownloadArtist"
+            @pa-fav-toggle="handlePaFavToggle"
+            @site-back="handleSiteBack"
+            @site-back-root="handleSiteBackRoot"
+            :gs-state="gsStates[settings.site || 'bunkr'] || null"
+            :local-favorites="localFavorites"
+            @gs-command="handleGsCommand"
+            @gs-restore-state="handleGsRestoreState"
           />
 
           <!-- 迅雷式下载管理视图（左侧"下载状态"按钮切换，占据主内容区） -->
@@ -386,10 +516,17 @@
             @resume-all="resumeAllTasks"
             @cancel="cancelTask"
             @remove="removeTask"
+            @clear-all="clearAllTasks"
             @toggle-shutdown="toggleShutdown"
             @open-folder="handleOpenTaskFolder"
             @locate-file="handleLocateTaskFile"
           />
+          </div><!-- /app-layout（flex：左面板 + 右侧内容区横排） -->
+        </div>
+
+        <!-- 美好世界 = 热门平台主界面（B站/抖音/小红书等；完全替换经典界面，进出只靠三连 Alt） -->
+        <div class="win-frame" :class="{ 'win-maxed': winMaxed }" v-show="settings.ui_mode_hot">
+          <ModernHome />
         </div>
 
         <!-- 下载重名手动改名弹窗（skip_duplicates + manual_rename 开启时触发） -->
@@ -469,6 +606,9 @@
           :captcha-patterns="wvLogin.captchaPatterns"
           :credentials="wvLogin.credentials"
           :manual-confirm="wvLogin.manualConfirm"
+          :confirm-hint="wvLogin.confirmHint"
+          :confirm-text="wvLogin.confirmText"
+          :auto-grab-pattern="wvLogin.autoGrabPattern"
           :code-regex="wvLogin.codeRegex"
           :watch-login-url="wvLogin.watchLoginUrl"
           :title="`${wvLogin.site} webview 登录`"
@@ -476,18 +616,36 @@
           @login-failed="err => message.error(err || '登录失败')"
           @login-code="handleSiteLoginCode"
         />
+
+        <!-- ASMR 后台迷你播放器：有播放任务且全量播放器（asmr 详情）不可见时悬浮右下 -->
+        <AsmrMiniPlayer
+          v-if="audioPlayer.track && !(settings.site === 'asmr' && asmrView === 'detail' && !detailVisible)"
+          @jump-back="handleAsmrMiniJumpBack"
+        />
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, watchEffect, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, watchEffect, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { darkTheme, zhCN, dateZhCN, createDiscreteApi } from 'naive-ui'
 import LeftPanel from './components/LeftPanel.vue'
 import RightPanel from './components/RightPanel.vue'
 import DownloadManagerPanel from './components/DownloadManagerPanel.vue'
-import WebviewLoginModal from './components/WebviewLoginModal.vue'
+// f5b 代码分割：美好世界主界面/登录弹窗按需加载（无 ref 契约，异步包裹零行为差异）
+const ModernHome = defineAsyncComponent(() => import('./components/ModernHome.vue'))
+const WebviewLoginModal = defineAsyncComponent(() => import('./components/WebviewLoginModal.vue'))
+// 上次停留在美好世界：立刻预取 ModernHome 分包。defineAsyncComponent 只在首次渲染时才
+// 开始下载分块，若等到首帧再拉，美好世界用户会先看到一段空白（或里世界的残留）。
+try {
+  const bootHot = !!(window.api && window.api.uiModeHotAtBoot === true)
+  const lsHot = localStorage.getItem('mh_ui_mode_hot') === '1'
+  if (bootHot || lsHot) import('./components/ModernHome.vue').catch(() => {})
+} catch (e) { /* 隐私模式 */ }
+import AsmrMiniPlayer from './components/AsmrMiniPlayer.vue'
+import { playerState as audioPlayer, setProxyPort as setAsmrProxyPort } from './audioPlayer.js'
+import { gsConfigFor } from './siteConfigs.js'
 
 // 独立的消息提示（用于在非 Provider 组件中弹出 Toast）
 const { message, dialog } = createDiscreteApi(['message', 'dialog'], {
@@ -499,6 +657,9 @@ const { message, dialog } = createDiscreteApi(['message', 'dialog'], {
 // ============================
 const settings = reactive({
   custom_path: '',
+  // 表世界（美好世界）专属保存位置：留空 = 用户下载夹。
+  // 只影响表世界的媒体下载 / 流媒体拼接 / Word 导出，不动里世界与各站下载路径
+  surface_save_path: '',
   site: 'bunkr',
   pawchive_search_mode: 'artist',
   pawchive_subfolder: 'date_post',
@@ -512,7 +673,9 @@ const settings = reactive({
   exhentai_page_max: 0,        // 最大页数（0=不限）
   // Twitter/X 专属设置
   twitter_proxy: 'http://127.0.0.1:10809',
+  fc2_proxy: 'http://127.0.0.1:10809',   // FC2 国内必须代理（webview 登录 + 浏览 + 下载）
   twitter_subfolder: 'media',
+  twitter_md5_dedup: true, // MD5 查重：同内容只保留最早发布的一份
   // Iwara 专属设置（代理留空 = 直连）
   iwara_proxy: '',
   // Hanime1 / Oreno3D / EroMMDTube 专属设置（H站国内需代理；O3D/E站 默认直连）
@@ -537,8 +700,10 @@ const settings = reactive({
   asmr_smooth: false,           // 音质流畅优先（优先低码率流畅播放）
   asmr_smart_path: true,        // 智能路径（按文件夹结构整理下载目录）
   // 识图（反向图片搜索）设置
-  reverse_proxy: '',            // 识图代理（Google/Yandex 国内必须；留空 = 直连）
+  reverse_proxy: '',            // 识图代理（默认只给 Lenso.ai 用；留空 = 直连）
+  reverse_proxy_all: false,     // true = 所有识图站点都走该代理（默认只给需要代理的站点）
   reverse_lenso_token: '',      // Lenso.ai API Token（官方 API 需付费订阅；留空跳过该站）
+  reverse_saucenao_api_key: '', // SauceNAO API Key（免费注册获取；留空走免费配额）
   asmr_sound_effect: '',        // 效果音偏好（如：耳舐め/環境音）
   asmr_audio_type: 'mp3',       // 音频类型偏好（mp3>flac>wav>opus>m4a>aac 顺序）
   asmr_show_hot: true,          // 详情页显示热门作品
@@ -566,7 +731,20 @@ const settings = reactive({
   disable_disk_check: false,
   ignore: [],
   include: [],
-  float_visible: true,
+  float_visible: false,  // 默认不开悬浮窗（2026-09-17 用户要求：避免旁人看到下载历史）
+  // 主界面模式：false=经典下载器界面（里世界）/ true=热门平台界面（美好世界，ModernHome）
+  // 取值优先级（都是为了"打开程序一次都不闪里世界"）：
+  //   1) 主进程从 settings.json 同步读出、随命令行传入的启动模式（首帧之前就可用）
+  //   2) localStorage 缓存的上次模式（浏览器环境下/旧版 preload 的兜底）
+  //   3) 默认里世界
+  // 后端 settings 到达后会再校准一次（见 _pyEvt_settings），并写回 localStorage。
+  ui_mode_hot: (() => {
+    try {
+      const boot = window.api && window.api.uiModeHotAtBoot
+      if (typeof boot === 'boolean') return boot
+    } catch (e) { /* ignore */ }
+    try { return localStorage.getItem('mh_ui_mode_hot') === '1' } catch (e) { return false } /* 隐私模式 */
+  })(),
   // 全局自动翻译（每站搜索结果常驻）：目标语言 + 持续自动翻译开关
   auto_translate_to: 'zh-CN',
   auto_translate_mode: false,
@@ -582,6 +760,10 @@ function saveSettings() {
 
 function updateSettings(newSettings) {
   Object.assign(settings, newSettings)
+  // 界面模式写回 localStorage：保证下次启动首帧就是正确界面，不闪里世界
+  if ('ui_mode_hot' in newSettings) {
+    try { localStorage.setItem('mh_ui_mode_hot', newSettings.ui_mode_hot ? '1' : '0') } catch (e) { /* 隐私模式 */ }
+  }
   saveSettings()
 }
 
@@ -605,7 +787,9 @@ const url = ref('')
 const backendReady = ref(false)
 const inspecting = ref(false)
 let inspectWatchdog = null  // 解析看门狗：后端长时间无响应时解除 loading
-const inspectProgress = reactive({ current: 0, total: 0 })
+let searchWatchdog = null   // 搜索看门狗：后端只发 search_start 就静默时解除转圈
+let javdbDetailWatchdog = null  // JavDB 详情看门狗：loading 后无结果事件时解除
+const inspectProgress = reactive({ current: 0, total: 0, filename: '' })
 const albumInfo = reactive({ album_name: '', album_id: '', is_album: false })
 const fileList = ref([])
 const downloading = ref(false)
@@ -631,8 +815,9 @@ const history = ref([])
 
 // 下载任务（用于悬浮窗汇总显示）
 const downloadTasks = ref([])
-// 悬浮窗显示状态（默认开，与后端悬浮窗同步）
-const floatVisible = ref(true)
+// 悬浮窗显示状态（默认关：避免旁人看到下载历史；用户可在设置里开）
+const floatVisible = ref(false)
+const leakEdgeRunning = ref(false)  // Leakedzone：专用 Edge 调试实例运行中（过盾抓 Cookie 流程）
 
 // 本地媒体代理端口（在线播放：图片/视频经 127.0.0.1 流式代理）
 const mediaProxyPort = ref(0)
@@ -660,8 +845,17 @@ const exGalleryDetail = ref(null)   // EX 画廊详情（完整信息 + 分组�
 const exDetailLoading = ref(false)  // 详情加载中
 // EX 内联详情模式：从搜索结果/收藏点开作品时，搜索结果保留在上方，详情+文件列表追加在下方（不跳转）
 const exInlineDetail = ref(false)
+// 点击画廊 → 新开详情界面并自动解析出图片缩略图（不再用"追加在结果最下方"的内联模式）
+const exAutoParseGallery = ref(false)
+// 通用站点状态仓（模块化架构 m5）：后端 gs_state {site, ...} 按 site 存取，GenericSiteView 消费
+const gsStates = ref({})
+// 详情打开来源标记（通用返回逻辑 m8）：从搜索结果点开详情时记录站点键，
+// 返回时直接回到搜索结果（列表数据仍在），而非弹站点视图栈
+const detailFromSearch = ref('')
 const exFavMode = ref(false)        // 当前搜索结果视图是否为"我的收藏"模式
+const exPopularMode = ref(false)    // 当前结果视图是否为"EX 首页推荐"
 const exBatchDownloading = ref(false)  // EX 批量下载进行中（inspect_complete 时追加而非替换 fileList）
+const exBatchCancelled = ref(false)    // 用户请求取消批量（派发循环中止；已派发的等返回后收尾且不自动下载）
 const exBatchPending = ref(0)            // EX 批量下载待完成的 inspect_complete 计数（异步返回时减一）
 const exBatchTotal = ref(0)              // EX 批量下载总画廊数（进度显示 done/total）
 // 批量进度（传给 RightPanel 按钮）：done = 总数 - 待完成
@@ -802,6 +996,72 @@ const iwBatchRunning = ref(false)
 const iwBatchProgress = reactive({ done: 0, total: 0, message: '' })
 
 // ============================
+// xHamster 浏览视图（类 App 布局：底部 Tab 首页/分类/短视频/消息/我的 + 顶部搜索）
+// ============================
+// xhView: ''=空态 | 'home'=首页 | 'categories'=分类 | 'category'=分类列表 | 'shorts'=短视频
+//         | 'notifications'=消息 | 'my'=我的 | 'detail'=视频详情 | 'user'=用户主页
+const xhView = ref('')
+const xhTab = ref('home')             // 底部 Tab 当前页（home/categories/shorts/notifications/my）
+// 首页（newest=新着 / views=最多播放 / rating=最高评分）
+const xhHomeSort = ref('newest')
+const xhHomeItems = ref([])
+const xhHomeLoading = ref(false)
+const xhHomeError = ref('')
+const xhHomePage = ref(1)
+const xhHomeHasMore = ref(false)
+// 分类（热门 + 分组）
+const xhCatsLoading = ref(false)
+const xhCatsTrending = ref([])
+const xhCatsGroups = ref([])
+const xhCatsError = ref('')
+// 分类列表（点某个分类进入）
+const xhCatSlug = ref('')
+const xhCatName = ref('')
+const xhCatItems = ref([])
+const xhCatLoading = ref(false)
+const xhCatError = ref('')
+const xhCatPage = ref(1)
+const xhCatHasMore = ref(false)
+// 短视频
+const xhShortsItems = ref([])
+const xhShortsLoading = ref(false)
+const xhShortsError = ref('')
+const xhShortsPage = ref(1)
+const xhShortsHasMore = ref(false)
+// 消息中心
+const xhNotif = ref(null)             // {logged_in, counts, message}
+const xhNotifLoading = ref(false)
+// 我的（登录用户的视频/收藏）
+const xhMyTab = ref('favorites')      // 我的关注：favorites=关注用户列表（我的视频已移除）
+const xhMyItems = ref([])
+const xhMyLoading = ref(false)
+const xhMyError = ref('')
+const xhMyPage = ref(1)
+const xhMyHasMore = ref(false)
+const xhMyUsername = ref('')
+// 视频详情（含播放直链/tags/评论）
+const xhDetail = ref(null)
+const xhDetailLoading = ref(false)
+const xhDetailError = ref('')
+const xhComments = ref([])
+const xhCommentCount = ref(0)
+const xhDetailFrom = ref('home')       // 详情返回目标视图（home/category/my/user）
+// 用户主页
+const xhUser = ref('')                 // 用户名
+const xhUserItems = ref([])
+const xhUserLoading = ref(false)
+const xhUserError = ref('')
+const xhUserPage = ref(1)
+const xhUserHasMore = ref(false)
+const xhUserTab = ref('videos')
+const xhUserProfile = ref(null)
+const xhSubscribeLoading = ref(false)
+const xhCommentSending = ref(false)
+// 批量下载（浏览区勾选多个视频 URL）
+const xhBatchRunning = ref(false)
+const xhBatchProgress = reactive({ done: 0, total: 0, message: '' })
+
+// ============================
 // Hanime1 主页/详情/用户中心（H站，与 Iwara 模式一致）
 // ============================
 // haView: ''=普通搜索 | 'home'=主页分区 | 'user'=用户中心 | 'detail'=视频详情
@@ -833,7 +1093,21 @@ const pixivActiveFeed = ref('')
 const pixivBatchRunning = ref(false)
 const pixivBatchProgress = reactive({ done: 0, total: 0, message: '' })
 // 列表翻页上下文：feed 翻页记住 kind/page（搜索模式走 doSearch，不走这里）
-const pixivListCtx = reactive({ mode: '', kind: 'home', content: 'illust', restrict: 'public', allow_r18: true, user_id: '', umode: 'following' })
+const pixivListCtx = reactive({ mode: '', kind: 'home', content: 'illust', restrict: 'public', allow_r18: true, user_id: '', umode: 'following', feedKind: '' })
+// Pixiv 各 feed 数据快照（切换秒显，后台刷新后替换）：feed_kind → {items,page,total_pages,total_results}
+const pixivFeedCache = new Map()
+// 缓存优先恢复：切到已有快照的 feed 时立即显示旧数据（不转圈），刷新结果到达后整体替换
+function pixivRestoreCache(feedKind) {
+  const snap = pixivFeedCache.get(feedKind)
+  if (!snap || !snap.items?.length) return false
+  pixivState.view = ''
+  searchResults.value = snap.items
+  searchPage.value = snap.page || 1
+  searchTotalPages.value = snap.total_pages || 0
+  searchTotalResults.value = snap.total_results || 0
+  searching.value = false
+  return true
+}
 // 主页：分区列表 [{title, items}]（最新上市/最新上傳 + 每个分类）
 const haSections = ref([])
 const haHomeLoading = ref(false)
@@ -919,6 +1193,9 @@ const asmrIndexLoading = ref(false)
 // 详情（含音轨文件列表）
 const asmrDetail = ref(null)
 const asmrFiles = ref([])
+const asmrRelated = ref([])           // 相似作品（同社团随详情立即下发 + tags 后台补齐合并）
+const asmrRelatedPending = ref(false) // tags 推荐后台补齐进行中（空态提示用）
+const asmrRecommend = ref([])         // 收藏页推荐流（收藏 tags 相同标签作品）
 const asmrDetailLoading = ref(false)
 // 批量下载
 const asmrBatchRunning = ref(false)
@@ -931,12 +1208,16 @@ const reverseActive = ref(false)      // 识图视图激活（占用右侧内容
 const reverseRunning = ref(false)      // 搜索进行中
 const reverseSites = ref([])           // [{key,name,status:running|done|failed,results,url,error}]
 const reversePaste = ref('')           // 左侧粘贴板内容（后端 cache/reverse_paste.txt 持久化）
+const reverseSession = ref('')         // 当前搜索会话 id（用于丢弃上一轮的过期回传）
+const reverseMerged = ref([])          // 跨站去重 + 相似度排序后的聚合结果
+const reverseCached = ref(false)       // 本次结果是否来自本地缓存（未消耗站点配额）
 
 // ============================
 // 通用 webview OAuth 三站（xhamster/pornhub/xvideos）状态
 // AP1 阶段：登录用户名显示 + webview 弹窗状态 + OAuth 配置
 // ============================
 const xhamsterUser = ref('')
+const fc2User = ref('')
 const pornhubUser = ref('')
 const xvideosUser = ref('')
 const javdbUser = ref('')
@@ -953,6 +1234,21 @@ const javdbDetail = ref(null)
 const javdbDetailLoading = ref(false)
 const javdbBatchRunning = ref(false)
 const javdbBatchProgress = reactive({ done: 0, total: 0 })
+// JavDB 列表上下文（首页最新影片 / 演员主页 / 通用列表页）：翻页走对应命令而非搜索命令
+const javdbListCtx = reactive({
+  mode: '',   // ''（普通搜索）/ 'home' / 'actor' / 'url'
+  url: '',    // actor 模式的演员页链接 / url 模式的列表页链接
+  label: '',  // url 模式的列表标题（翻页时透传）
+})
+// JavDB 搜索类型（影片/演员/系列/片商/导演/番号/标签）+ 标签词库 + 热搜 + 目录导航
+const javdbSearchField = ref('all')     // f= 参数：all/actor/series/maker/director/coded/tag
+const javdbTagsVocab = ref(null)        // 5 模式标签词表（后端 javdb_tags_vocab 下发）
+const javdbTagsMode = ref('censored')   // 标签页当前模式 key（有码/无码/欧美/FC2/动漫）
+const javdbHotKeywords = ref([])        // 热搜关键词（后端离线词表）
+const javdbDir = reactive({ kind: '', label: '', items: [], page: 1, hasMore: false, params: '' })
+// 第五行：当前 tags 模式的主要推荐作品（横滚条）+ 待匹配的加载标记
+const javdbModeRecommend = reactive({ mode: '', label: '', items: [] })
+const javdbRecommendPending = reactive({ mode: '', label: '' })
 // webview 登录弹窗（共用 WebviewLoginModal 组件）
 const wvLogin = reactive({
   visible: false,
@@ -963,7 +1259,10 @@ const wvLogin = reactive({
   successPatterns: [],
   captchaPatterns: [],
   credentials: null,          // 登录页自动预填账号（javdb 邮箱密码登录）
-  manualConfirm: false,       // 手动确认模式（EX：底部提示+确认按钮，用户点确认才抓 cookie）
+  manualConfirm: false,       // 手动确认模式（EX/javdb：底部取消+确定按钮，用户点确定才抓 cookie）
+  confirmHint: undefined,     // 手动确认栏提示文案（undefined=用组件默认）
+  confirmText: undefined,     // 手动确认按钮文案（undefined=用组件默认）
+  autoGrabPattern: null,      // 自动抓取模式（javdb 已改为手动确认模式，不再使用）
   codeRegex: null,            // OAuth 授权码提取（pixiv://account/login?code=xxx 拦截）
   watchLoginUrl: false,       // 登录 URL 动态更新模式（后端生成 OAuth URL 后推给弹窗重载）
 })
@@ -1035,6 +1334,7 @@ const exBatchFolderName = ref('')          // 输入框值（默认 = 当前搜�
 const exBatchParentFolder = ref('')        // 确认后保存的母文件夹名（传给下载 options）
 const exBatchFolderPendingUrls = ref([])   // 待批量下载的画廊 URL（确认后继续解析）
 const batchFolderContext = ref('ex')        // 母文件夹弹窗上下文（ex / javdb：确认后走对应批量逻辑）
+const pixivNovelFmtOverride = ref('')      // Pixiv 小说下载格式一次性覆盖（txt/docx，详情下载按钮设置）
 
 
 // RightPanel 组件引用（转发 ExHentai 种子/磁力事件）
@@ -1119,10 +1419,12 @@ function handleResolveMedia(item) {
   })
 }
 
-function handlePythonEvent(event) {
-  switch (event.event) {
-    case 'ready':
-      backendReady.value = true
+// ============================
+// f4：后端事件处理器注册表（原 handlePythonEvent 193 case 逐字迁入各函数；
+// 顶层 break→return，嵌套循环/switch 内的 break 语义不变；多标签 case 为多键映射）
+// ============================
+function _pyEvt_ready(event) {
+backendReady.value = true
       backendError.value = ''
       addLog('系统', '后端已就绪')
       requestSettings()
@@ -1130,6 +1432,12 @@ function handlePythonEvent(event) {
       requestTasks()
       // P3 设置功能：监听主进程触发的快捷键事件
       setupShortcutTriggeredListener()
+      // 3 连 Alt 唤出悬浮面板
+      setupTripleAltListener()
+      // 标题栏最大化状态：切换圆角贴边样式
+      if (window.api && window.api.onWinMaxState) {
+        window.api.onWinMaxState((maxed) => { winMaxed.value = !!maxed })
+      }
       // 关闭弹窗勾选"记住我的选择"后，主进程直接写 settings.json → 同步本地 + 后端缓存
       setupCloseActionListener()
       // 加载搜索历史与本地收藏
@@ -1138,36 +1446,29 @@ function handlePythonEvent(event) {
         window.api.sendCommand({ cmd: 'get_favorites' })
         // 拉取全部站点登录信息（账号卡片：用户名/Cookie/账号档案）
         window.api.sendCommand({ cmd: 'get_login_info' })
-        // 统一提示：正在后台静默检查登录状态（不弹各站单独的提示，避免来回切换观感）
-        message.loading('正在后台检查各站登录状态（需外网环境的站点请保持代理通畅）', {
-          duration: 4000,
-        })
-        // 静默检查 ExHentai 登录状态（cookie 已持久化时自动恢复显示）
-        window.api.sendCommand({ cmd: 'exhentai_check_login', silent: true })
-        // 静默检查 Twitter 登录状态
-        window.api.sendCommand({ cmd: 'twitter_check_login', silent: true })
-        // 静默检查通用 webview OAuth 三站登录状态（xhamster/pornhub/xvideos，cookie 已持久化时自动恢复）
-        window.api.sendCommand({ cmd: 'xhamster_check_login', silent: true })
-        window.api.sendCommand({ cmd: 'pornhub_check_login', silent: true })
-        window.api.sendCommand({ cmd: 'xvideos_check_login', silent: true })
-        // 静默检查 JavDB 登录状态（cookie "记住装置"约 7 天，过期提示重新登录）
-        window.api.sendCommand({ cmd: 'javdb_check_login', silent: true })
-        // 静默检查谷歌邮箱 / Oreno3D / EroMMDTube 登录状态（cookie 已持久化时自动恢复）
-        window.api.sendCommand({ cmd: 'google_check_login', silent: true })
-        window.api.sendCommand({ cmd: 'oreno3d_check_login', silent: true })
-        window.api.sendCommand({ cmd: 'erommdtube_check_login', silent: true })
-        // 加载 X 关注分类标签（本地持久化）
-        window.api.sendCommand({ cmd: 'twitter_get_follow_tags' })
-        // 加载 EX 隐藏标签列表（长期保存）
-        window.api.sendCommand({ cmd: 'exhentai_get_hidden_tags' })
+        // 各站登录状态检查 + 标签加载延后 2.5 秒批量发送——启动首秒让位给
+        // 首屏命令（设置/任务/当前站点首页），避免十几个网络检查把命令队列占满
+        //（每个检查 0.5~2 秒网络串行，曾导致"打开很卡"）
+        setTimeout(() => {
+          if (!window.api) return
+          // 启动检查全部后台静默（结果只刷新账号卡片，不弹任何提示——用户点了
+          // 对应站点才发现登录失效时再提示）
+          // exhentai/twitter/xhamster/javdb 的启动检查后端已后台执行并推送结果，不再重复发
+          window.api.sendCommand({ cmd: 'pornhub_check_login', silent: true })
+          window.api.sendCommand({ cmd: 'xvideos_check_login', silent: true })
+          window.api.sendCommand({ cmd: 'google_check_login', silent: true })
+          window.api.sendCommand({ cmd: 'oreno3d_check_login', silent: true })
+          window.api.sendCommand({ cmd: 'erommdtube_check_login', silent: true })
+          window.api.sendCommand({ cmd: 'twitter_get_follow_tags' })
+          window.api.sendCommand({ cmd: 'exhentai_get_hidden_tags' })
+        }, 2500)
       }
-      break
+}
 
-    case 'inspect_start':
-      // 批量模式：静默（不清空已收集的文件、不显示全局 loading，避免视图闪烁）
-      if (exBatchDownloading.value || exBatchPending.value > 0) {
+function _pyEvt_inspect_start(event) {
+if (exBatchDownloading.value || exBatchPending.value > 0) {
         addLog('解析', `后台解析: ${event.url}`)
-        break
+        return
       }
       clearTimeout(inspectWatchdog)  // 后端已响应，解除点击时的看门狗
       inspecting.value = true
@@ -1175,15 +1476,20 @@ function handlePythonEvent(event) {
       inspectProgress.current = 0
       inspectProgress.total = 0
       addLog('解析', `开始解析: ${event.url}`)
-      break
+      // 重挂看门狗：后端确认接收后仍可能在解析中途静默（hang/崩溃），
+      // 无保护会永久转圈；progress 事件会持续刷新
+      armInspectWatchdog(300000)
+}
 
-    case 'inspect_progress':
-      inspectProgress.current = event.current
+function _pyEvt_inspect_progress(event) {
+inspectProgress.current = event.current
       inspectProgress.total = event.total
-      break
+      inspectProgress.filename = event.filename || ''
+      armInspectWatchdog(300000)
+}
 
-    case 'inspect_complete':
-      clearTimeout(inspectWatchdog)
+function _pyEvt_inspect_complete(event) {
+clearTimeout(inspectWatchdog)
       inspecting.value = false
       albumInfo.album_name = event.album_name
       albumInfo.album_id = event.album_id
@@ -1209,17 +1515,8 @@ function handlePythonEvent(event) {
         if (exBatchPending.value > 0) {
           exBatchPending.value -= 1
           if (exBatchPending.value === 0) {
-            exBatchDownloading.value = false
             addLog('系统', `批量解析全部完成，共收集 ${fileList.value.length} 个文件`)
-            // 自动提交下载任务（批量下载=解析+下载一步到位，无需手动再点下载）
-            const selected = fileList.value.filter(it => it.selected)
-            if (selected.length) {
-              addLog('系统', `后台批量解析完成，自动开始下载 ${selected.length} 个文件`)
-              message.success(`批量解析完成，已自动开始下载 ${selected.length} 个文件（失败项会在任务结束后生成清单）`)
-              handleDownload(selected, { fromBatch: true })
-            } else {
-              message.warning('批量解析完成，但没有可下载的文件')
-            }
+            finishExBatch(exBatchCancelled.value)
           }
         }
       } else {
@@ -1238,10 +1535,10 @@ function handlePythonEvent(event) {
           addLog('解析', `增量更新: 已下载过 ${dlCount} 个（默认不勾选），新内容 ${fileList.value.length - dlCount} 个`)
         }
       }
-      break
+}
 
-    case 'inspect_error':
-      clearTimeout(inspectWatchdog)
+function _pyEvt_inspect_error(event) {
+clearTimeout(inspectWatchdog)
       inspecting.value = false
       addLog('错误', event.message)
       // 后台批量解析中某个画廊失败：同样递减计数，避免批量状态卡死
@@ -1249,65 +1546,100 @@ function handlePythonEvent(event) {
         exBatchPending.value -= 1
         message.error(`批量解析中一个画廊失败: ${event.message}`)
         if (exBatchPending.value === 0) {
-          exBatchDownloading.value = false
-          const selected = fileList.value.filter(it => it.selected)
-          if (selected.length) {
-            addLog('系统', `后台批量解析完成（部分失败），自动开始下载 ${selected.length} 个文件`)
-            message.info(`部分画廊解析失败，已收集 ${selected.length} 个文件自动下载`)
-            handleDownload(selected, { fromBatch: true })
-          } else {
-            message.warning('批量解析全部失败，没有可下载的文件')
+          if (exBatchCancelled.value) {
+            addLog('系统', '批量解析已取消（部分画廊解析失败）')
           }
+          finishExBatch(exBatchCancelled.value)
         }
       }
-      break
+}
 
-    case 'search_start':
-      searching.value = true
-      break
+function _pyEvt_search_start(event) {
+searching.value = true
+      armSearchWatchdog()
+}
 
-    case 'search_result':
+function _pyEvt_search_result(event) {
+{
+      // Pixiv 迟到过滤——必须先于任何状态/列表写入：插画/小说关注更新等后台任务
+      // 交错到达，feed 与当前所选不符 → 整条丢弃。此前过滤排在列表替换之后，
+      // "丢弃"时列表已被旧数据覆盖（点A出B 未绝根的原因）。补页静默丢，首发记日志。
+      if (event.site === 'pixiv' && pixivListCtx.feedKind && event.feed_kind
+          && event.feed_kind !== pixivListCtx.feedKind) {
+        if (!event.append) addLog('P站', '已丢弃迟到的旧列表数据（你已切换到其他内容）')
+        return
+      }
+      clearTimeout(searchWatchdog)
       searching.value = false
       searchHasMore.value = !!event.has_more
       searchPage.value = event.page
       searchTotalPages.value = event.total_pages || 0
       searchTotalResults.value = event.total_results || 0
+      // Pixiv 关注更新的后台补页（append）：只追加新条目去重，不替换列表
+      //（避免重置勾选/滚动位置），也不拽视图、不刷日志
+      if (event.site === 'pixiv' && event.append && pixivActiveFeed.value === event.feed_kind) {
+        const seen = new Set(searchResults.value.map(w => String(w.illust_id || w.novel_id || '')))
+        searchResults.value = [...searchResults.value, ...(event.items || []).filter(w => !seen.has(String(w.illust_id || w.novel_id || '')))]
+        searchTotalResults.value = searchResults.value.length
+        const snap = pixivFeedCache.get(event.feed_kind)
+        if (snap) pixivFeedCache.set(event.feed_kind, { ...snap, items: searchResults.value })
+        return
+      }
       // 翻页模式：每页替换结果（统一页码逻辑）
       searchResults.value = event.items || []
-      // Pixiv：列表数据到达 → 退出用户页/详情视图回到列表，记录功能栏高亮 feed
+      // Pixiv：列表数据到达 → 退出用户页/详情视图回到列表，写 feed 快照缓存
       if (event.site === 'pixiv') {
-        pixivState.view = ''
-        if (event.feed_kind) pixivActiveFeed.value = event.feed_kind
-        else if (!pixivListCtx.mode) pixivActiveFeed.value = ''
+        if (event.feed_kind && !event.append) {
+          pixivFeedCache.set(event.feed_kind, {
+            items: event.items || [], page: event.page, total_pages: event.total_pages,
+            total_results: event.total_results,
+          })
+        }
+        const keepDetail = pixivState.view === 'detail'
+          && (pixivState.detailLoading || (event.page || 1) > 1)
+        if (!keepDetail) {
+          pixivState.view = ''
+          if (event.feed_kind) pixivActiveFeed.value = event.feed_kind
+          else if (!pixivListCtx.mode) pixivActiveFeed.value = ''
+        }
       }
       // EX 我的收藏模式（翻页走收藏命令而非搜索命令）
       exFavMode.value = event.query === '__ex_favorites__'
+      exPopularMode.value = event.feed_kind === 'exhentai_popular'
       const displayQuery = exFavMode.value ? '我的收藏' : event.query
       addLog('搜索', `「${displayQuery}」第 ${event.page}${event.total_pages ? `/${event.total_pages}` : ''} 页，${(event.items || []).length} 个结果`)
       // 持续自动翻译模式：搜索结果到达后自动翻译一次
       maybeAutoTranslateAfterSearch()
-      break
+      return
+    }
+}
 
-    case 'search_error':
+function _pyEvt_search_error(event) {
+if (event.site === 'pixiv' && pixivListCtx.feedKind && event.feed_kind
+          && event.feed_kind !== pixivListCtx.feedKind) {
+        addLog('P站', `后台任务失败（已忽略）：${event.message || ''}`)
+        return
+      }
+      clearTimeout(searchWatchdog)
       searching.value = false
       addLog('错误', event.message)
-      break
+}
 
-    case 'download_start':
-      downloading.value = true
+function _pyEvt_download_start(event) {
+downloading.value = true
       addLog('下载', `开始下载 ${event.total_files} 个文件`)
-      break
+}
 
-    case 'file_start':
-      downloadProgress[event.filename] = {
+function _pyEvt_file_start(event) {
+downloadProgress[event.filename] = {
         completed: 0,
         status: 'downloading',
         size: event.size,
       }
-      break
+}
 
-    case 'file_progress':
-      if (!downloadProgress[event.filename]) {
+function _pyEvt_file_progress(event) {
+if (!downloadProgress[event.filename]) {
         downloadProgress[event.filename] = { completed: 0, status: 'downloading', size: null }
       }
       downloadProgress[event.filename].completed = event.completed
@@ -1317,7 +1649,9 @@ function handlePythonEvent(event) {
       if (event.task_id) {
         const task = downloadTasks.value.find(t => t.id === event.task_id)
         if (task) {
-          const file = task.files.find(f => f.status === 'downloading')
+          // 必须按文件名精确匹配——此前按"第一个 downloading 状态"匹配，
+          // 多文件并发下载时进度互相覆盖（进度条波动/倒退的根源）
+          const file = task.files.find(f => f.filename === event.filename)
           if (file) {
             file.completed = event.completed
             file.speed = event.speed || 0
@@ -1325,55 +1659,68 @@ function handlePythonEvent(event) {
         }
       }
       updateFloatData()
-      break
+}
 
-    case 'file_complete':
-      if (downloadProgress[event.filename]) {
+function _pyEvt_file_complete(event) {
+if (downloadProgress[event.filename]) {
         downloadProgress[event.filename].status = event.success ? 'completed' : 'failed'
         downloadProgress[event.filename].completed = 100
+      }
+      // 下载管理（迅雷式详情）：记录文件完成/失败时间 + 清掉实时速度
+      if (event.task_id) {
+        const t = downloadTasks.value.find(t => t.id === event.task_id)
+        if (t) {
+          const f = (t.files || []).find(f => f.filename === event.filename && f.status !== 'completed')
+            || (t.files || []).find(f => f.filename === event.filename)
+          if (f) {
+            f.finished_at = Date.now()
+            f.speed = 0
+            if (event.success) { f.status = 'completed'; f.completed = 100 }
+          }
+        }
       }
       addLog(
         event.success ? '完成' : '失败',
         `${event.filename} ${event.success ? '下载完成' : '下载失败'}`
       )
-      break
+}
 
-    case 'task_paused':
-      // 暂停已生效（后端正在协同停止下载中的文件），明确反馈
-      message.info(event.message || '任务已暂停')
+function _pyEvt_task_paused(event) {
+message.info(event.message || '任务已暂停')
       addLog('下载', event.message || '任务已暂停')
-      break
+}
 
-    case 'task_retry':
-      // 重试按钮结果反馈（运行中不可重试 / 已重置 N 个失败文件 / 单文件重试）
-      if (event.ok) {
+function _pyEvt_task_retry(event) {
+if (event.ok) {
         message.success(event.message || '重试已开始')
       } else {
         message.warning(event.message || '无法重试')
       }
       addLog('下载', event.message || '')
       requestTasks()
-      break
+}
 
-    case 'download_complete':
-      downloading.value = false
+function _pyEvt_download_complete(event) {
+downloading.value = false
       addLog('下载', `全部完成 (用时 ${event.execution_time}秒)`)
-      break
+}
 
-    case 'download_error':
-      downloading.value = false
+function _pyEvt_download_error(event) {
+downloading.value = false
       addLog('错误', event.message)
-      break
+}
 
-    case 'history':
-      history.value = event.items || []
-      break
+function _pyEvt_history(event) {
+history.value = event.items || []
+}
 
-    case 'settings':
-      // 后端返回已保存的设置，覆盖默认值（记忆功能）
-      Object.assign(settings, event.settings || {})
-      // 应用悬浮窗可见性记忆：true 则创建/显示，false 则不创建（避免启动一闪而过）
-      floatVisible.value = settings.float_visible !== false
+function _pyEvt_settings(event) {
+Object.assign(settings, event.settings || {})
+      // 界面模式同步回 localStorage：后端是权威值，写回后下次启动首帧即正确（不闪里世界）
+      try { localStorage.setItem('mh_ui_mode_hot', settings.ui_mode_hot ? '1' : '0') } catch (e) { /* 隐私模式 */ }
+      // 应用悬浮窗可见性记忆：只有显式 true 才创建/显示（默认关——避免旁人看到
+      // 下载历史；旧 settings.json 缺该键时也不开，避免启动一闪而过）
+      floatVisible.value = settings.float_visible === true
       if (window.api && window.api.setFloatVisible) {
         window.api.setFloatVisible(floatVisible.value)
       }
@@ -1382,36 +1729,35 @@ function handlePythonEvent(event) {
       autoTranslateMode.value = false
       // P3：设置加载完成后，把已保存的快捷键注册到主进程 + 应用不息屏状态
       syncP3SettingsToMain()
-      break
+}
 
-    case 'tasks_snapshot':
-      downloadTasks.value = event.tasks || []
+function _pyEvt_tasks_snapshot(event) {
+downloadTasks.value = event.tasks || []
       updateFloatData()
-      break
+}
 
-    case 'pa_artist_dl_progress':
-      addLog('PA', `画师「${event.artist || ''}」后台解析中: ${event.current || 0}/${event.total || 0} 个帖子`)
-      break
+function _pyEvt_pa_artist_dl_progress(event) {
+addLog('PA', `画师「${event.artist || ''}」后台解析中: ${event.current || 0}/${event.total || 0} 个帖子`)
+}
 
-    case 'pa_artist_dl_done':
-      message.success(`画师「${event.artist || ''}」解析完成，${event.files || 0} 个文件已加入后台下载`)
+function _pyEvt_pa_artist_dl_done(event) {
+message.success(`画师「${event.artist || ''}」解析完成，${event.files || 0} 个文件已加入后台下载`)
       addLog('PA', `画师「${event.artist || ''}」下载任务已提交（${event.files || 0} 个文件）`)
       requestTasks()
-      break
+}
 
-    case 'pa_artist_dl_error':
-      message.error(event.message || '解析画师内容失败')
+function _pyEvt_pa_artist_dl_error(event) {
+message.error(event.message || '解析画师内容失败')
       addLog('PA', `画师下载失败: ${event.message || '未知错误'}`)
-      break
+}
 
-    case 'media_proxy_ready':
-      // 本地媒体代理就绪（在线播放）
-      mediaProxyPort.value = event.port || 0
-      break
+function _pyEvt_media_proxy_ready(event) {
+mediaProxyPort.value = event.port || 0
+      setAsmrProxyPort(event.port || 0)
+}
 
-    case 'media_url_resolved':
-      // 在线播放直链解析完成：回填到文件列表条目（预览弹窗监听同一对象，自动刷新）
-      if (event.item_page) {
+function _pyEvt_media_url_resolved(event) {
+if (event.item_page) {
         const item = fileList.value.find(f => f.item_page === event.item_page)
         if (item) {
           item.media_url = event.media_url || ''
@@ -1425,38 +1771,35 @@ function handlePythonEvent(event) {
           message.warning(event.message || '直链解析失败，无法在线播放')
         }
       }
-      break
+}
 
-    case 'thumbnails_cached':
-      // 后台缩略图缓存完成：把还在直连原图的条目换成本地缓存路径
-      // （修复首次查看时直连 twimg/iwara 等原图加载失败且无刷新的问题）
-      applyCachedThumbnails(event.items || [])
-      break
+function _pyEvt_thumbnails_cached(event) {
+applyCachedThumbnails(event.items || [])
+}
 
-    case 'cache_cleared':
-      if (event.cleared) {
+function _pyEvt_cache_cleared(event) {
+if (event.cleared) {
         addLog('系统', `缓存已清除: ${event.cache_dir}`)
         message.success(`缓存已清除（缩略图 + 相册信息）：${event.cache_dir}`)
       } else {
         addLog('系统', `缓存目录不存在，无需清除: ${event.cache_dir}`)
         message.info('缓存目录不存在，无需清除')
       }
-      break
+}
 
-    case 'log':
-      addLog(event.type, event.message)
-      break
+function _pyEvt_log(event) {
+addLog(event.type, event.message)
+}
 
-    case 'backend_error':
-      // 后端启动失败（未找到 Python / 进程异常退出），显示明确原因
-      backendReady.value = false
+function _pyEvt_backend_error(event) {
+backendReady.value = false
       backendError.value = event.message || '后端启动失败'
       message.error(backendError.value)
       addLog('错误', backendError.value)
-      break
+}
 
-    case 'pawchive_login_result':
-      pawchiveLoginLoading.value = false
+function _pyEvt_pawchive_login_result(event) {
+pawchiveLoginLoading.value = false
       if (event.logout) {
         // 退出登录
         pawchiveUser.value = ''
@@ -1479,10 +1822,10 @@ function handlePythonEvent(event) {
         }
         addLog('错误', `Pawchive 登录失败: ${event.message || ''}`)
       }
-      break
+}
 
-    case 'exhentai_login_result':
-      if (event.logout) {
+function _pyEvt_exhentai_login_result(event) {
+if (event.logout) {
         exhentaiUser.value = ''
         if (!event.silent) message.info(event.message || '已退出 ExHentai 登录')
         addLog('系统', 'ExHentai 已退出登录')
@@ -1501,10 +1844,10 @@ function handlePythonEvent(event) {
         }
         addLog('系统', `ExHentai 未登录: ${event.message || ''}`)
       }
-      break
+}
 
-    case 'twitter_login_result':
-      if (event.logout) {
+function _pyEvt_twitter_login_result(event) {
+if (event.logout) {
         twitterUser.value = ''
         if (!event.silent) message.info(event.message || '已退出 X 登录')
         addLog('系统', 'X (Twitter) 已退出登录')
@@ -1523,10 +1866,175 @@ function handlePythonEvent(event) {
         }
         addLog('系统', `X (Twitter) 未登录: ${event.message || ''}`)
       }
-      break
+}
 
-    case 'iwara_login_result':
-      iwaraLoginLoading.value = false
+function _pyEvt_xhamster_home_loading(event) {
+xhHomeLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_home(event) {
+xhHomeLoading.value = false
+      xhHomeError.value = event.error || ''
+      if (event.error) return
+      if ((event.page || 1) <= 1) xhHomeItems.value = event.items || []
+      else xhHomeItems.value.push(...(event.items || []))
+      xhHomePage.value = event.page || 1
+      xhHomeHasMore.value = !!event.has_more
+      if (event.sort) xhHomeSort.value = event.sort
+      if (!['detail', 'user', 'category'].includes(xhView.value)) {
+        xhView.value = 'home'
+        xhTab.value = 'home'
+      }
+}
+
+function _pyEvt_xhamster_categories_loading(event) {
+xhCatsLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_categories(event) {
+xhCatsLoading.value = false
+      xhCatsError.value = event.error || ''
+      if (event.error) return
+      xhCatsTrending.value = event.trending || []
+      xhCatsGroups.value = event.groups || []
+}
+
+function _pyEvt_xhamster_category_loading(event) {
+xhCatLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_category(event) {
+xhCatLoading.value = false
+      xhCatError.value = event.error || ''
+      if (event.error) return
+      if ((event.page || 1) <= 1) xhCatItems.value = event.items || []
+      else xhCatItems.value.push(...(event.items || []))
+      xhCatPage.value = event.page || 1
+      xhCatHasMore.value = !!event.has_more
+}
+
+function _pyEvt_xhamster_shorts_loading(event) {
+xhShortsLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_shorts(event) {
+xhShortsLoading.value = false
+      xhShortsError.value = event.error || ''
+      if (event.error) return
+      if ((event.page || 1) <= 1) xhShortsItems.value = event.items || []
+      else xhShortsItems.value.push(...(event.items || []))
+      xhShortsPage.value = event.page || 1
+      xhShortsHasMore.value = !!event.has_more
+}
+
+function _pyEvt_xhamster_detail_loading(event) {
+xhDetailLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_video_detail(event) {
+xhDetailLoading.value = false
+      xhDetailError.value = event.error || ''
+      if (event.error) {
+        xhDetail.value = null
+        return
+      }
+      xhDetail.value = event.video || null
+      xhComments.value = event.comments || []
+      xhCommentCount.value = event.comment_count || 0
+      if (event.video) {
+if (!xhView.value) detailFromSearch.value = 'xhamster'
+                navPushView('xhamster', 'detail')
+        xhView.value = 'detail'
+      }
+}
+
+function _pyEvt_xhamster_notifications_loading(event) {
+xhNotifLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_notifications(event) {
+xhNotifLoading.value = false
+      xhNotif.value = {
+        logged_in: !!event.logged_in,
+        counts: event.counts || {},
+        message: event.message || '',
+      }
+}
+
+function _pyEvt_xhamster_my_loading(event) {
+xhMyLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_my(event) {
+xhMyLoading.value = false
+      if (event.logged_in && event.username) xhMyUsername.value = event.username
+      // 未登录 / 过期才当错误；空列表的提示文案只展示、仍写入 items
+      const myLoggedOut = event.logged_in === false
+      xhMyError.value = myLoggedOut ? (event.message || '未登录') : ''
+      if (myLoggedOut) {
+        xhMyItems.value = []
+        xhMyHasMore.value = false
+        return
+      }
+      if ((event.page || 1) <= 1) xhMyItems.value = event.items || []
+      else xhMyItems.value.push(...(event.items || []))
+      xhMyPage.value = event.page || 1
+      xhMyHasMore.value = !!event.has_more
+      if (event.tab) xhMyTab.value = event.tab
+}
+
+function _pyEvt_xhamster_user_loading(event) {
+xhUserLoading.value = !!event.loading
+}
+
+function _pyEvt_xhamster_user_videos(event) {
+xhUserLoading.value = false
+      xhUserError.value = event.error || ''
+      if (event.username) xhUser.value = event.username
+      if (event.profile) xhUserProfile.value = event.profile
+      if (event.tab) xhUserTab.value = event.tab
+      if (event.keep_items) return
+      if (event.error) return
+      if ((event.page || 1) <= 1) xhUserItems.value = event.items || []
+      else xhUserItems.value.push(...(event.items || []))
+      xhUserPage.value = event.page || 1
+      xhUserHasMore.value = !!event.has_more
+}
+
+function _pyEvt_xhamster_subscribe_result(event) {
+xhSubscribeLoading.value = false
+      if (event.message) {
+        if (event.ok) message.success(event.message)
+        else message.warning(event.message)
+      }
+      if (xhDetail.value && event.user_id && String(xhDetail.value.author_id || '') === String(event.user_id || '')) {
+        xhDetail.value.subscribed = !!event.subscribed
+      }
+      if (xhUserProfile.value && (event.username === xhUser.value || String(xhUserProfile.value.id || '') === String(event.user_id || ''))) {
+        xhUserProfile.value.subscribed = !!event.subscribed
+      }
+}
+
+function _pyEvt_xhamster_comment_result(event) {
+xhCommentSending.value = false
+      if (event.ok) message.success(event.message || '评论已发布')
+      else message.warning(event.message || '评论失败')
+}
+
+function _pyEvt_xhamster_batch_progress(event) {
+xhBatchProgress.done = event.done || 0
+      xhBatchProgress.total = event.total || 0
+      xhBatchProgress.message = event.message || ''
+}
+
+function _pyEvt_xhamster_batch_done(event) {
+xhBatchRunning.value = false
+      message.info(event.message || `批量下载完成：${event.done || 0}/${event.total || 0}`)
+      addLog('下载', `xHamster 批量下载完成: ${event.done || 0}/${event.total || 0}，失败 ${event.failed || 0}`)
+}
+
+function _pyEvt_iwara_login_result(event) {
+iwaraLoginLoading.value = false
       if (event.logout) {
         iwaraUser.value = ''
         if (!event.silent) message.info(event.message || '已退出 Iwara 登录')
@@ -1546,10 +2054,10 @@ function handlePythonEvent(event) {
           addLog('系统', `Iwara 未登录: ${event.message || ''}`)
         }
       }
-      break
+}
 
-    case 'iwara_site_changed':
-      iwSite.value = event.site || 'iwara'
+function _pyEvt_iwara_site_changed(event) {
+iwSite.value = event.site || 'iwara'
       message.info(event.message || '站点已切换')
       // 切换 IW/AI 站后重新加载主页最近更新（详情页属于旧站点，一并返回）
       iwHomeItems.value = []
@@ -1558,17 +2066,17 @@ function handlePythonEvent(event) {
       iwDetail.value = null
       iwComments.value = []
       handleIwHome(1)
-      break
+}
 
-    case 'iwara_home':
-      iwHomeLoading.value = false
+function _pyEvt_iwara_home(event) {
+iwHomeLoading.value = false
       iwHomeError.value = event.error || ''
-      if (event.error) break
+      if (event.error) return
       // 强校验：丢弃来自错误站点的数据（防止未切换 AI 站时显示 AI 站内容）
       if (event.site && event.site !== iwSite.value) {
         console.warn('[iwara_home] 丢弃站点不匹配的数据', { expected: iwSite.value, got: event.site })
         addLog('系统', `丢弃 IW/${iwSite.value === 'ai' ? 'AI' : '普通'}站不匹配的旧数据`)
-        break
+        return
       }
       if ((event.page || 1) <= 1) {
         iwHomeItems.value = event.items || []
@@ -1581,19 +2089,19 @@ function handlePythonEvent(event) {
       if (event.mode !== undefined) iwHomeMode.value = event.mode || ''
       if (iwView.value !== 'detail') iwView.value = 'home'
       maybeAutoTranslateAfterSearch()
-      break
+}
 
-    case 'iwara_home_loading':
-      iwHomeLoading.value = !!event.loading
-      break
+function _pyEvt_iwara_home_loading(event) {
+iwHomeLoading.value = !!event.loading
+}
 
-    case 'iwara_follow_list':
-      iwFollowLoading.value = false
+function _pyEvt_iwara_follow_list(event) {
+iwFollowLoading.value = false
       iwFollowError.value = event.error || ''
-      if (event.error) break
+      if (event.error) return
       if (event.site && event.site !== iwSite.value) {
         console.warn('[iwara_follow_list] 丢弃站点不匹配数据', { expected: iwSite.value, got: event.site })
-        break
+        return
       }
       if ((event.page || 1) <= 1) {
         iwFollowItems.value = event.items || []
@@ -1603,19 +2111,19 @@ function handlePythonEvent(event) {
       iwFollowPage.value = event.page || 1
       iwFollowHasMore.value = !!event.has_more
       iwFollowTotal.value = event.total || 0
-      break
+}
 
-    case 'iwara_follow_loading':
-      iwFollowLoading.value = !!event.loading
-      break
+function _pyEvt_iwara_follow_loading(event) {
+iwFollowLoading.value = !!event.loading
+}
 
-    case 'iwara_friend_list':
-      iwFriendLoading.value = false
+function _pyEvt_iwara_friend_list(event) {
+iwFriendLoading.value = false
       iwFriendError.value = event.error || ''
-      if (event.error) break
+      if (event.error) return
       if (event.site && event.site !== iwSite.value) {
         console.warn('[iwara_friend_list] 丢弃站点不匹配数据', { expected: iwSite.value, got: event.site })
-        break
+        return
       }
       if ((event.page || 1) <= 1) {
         iwFriendItems.value = event.items || []
@@ -1625,14 +2133,31 @@ function handlePythonEvent(event) {
       iwFriendPage.value = event.page || 1
       iwFriendHasMore.value = !!event.has_more
       iwFriendTotal.value = event.total || 0
-      break
+}
 
-    case 'iwara_friend_loading':
-      iwFriendLoading.value = !!event.loading
-      break
+function _pyEvt_iwara_friend_loading(event) {
+iwFriendLoading.value = !!event.loading
+}
 
-    case 'iwara_follow_result':
-      if (event.success) {
+function _pyEvt_iwara_user_profile(event) {
+{
+      // 后台补齐的关注/好友个人说明与缺失头像：按 username 匹配渐进更新
+      const patchUser = (u) => {
+        if (u.username !== event.username) return
+        if (event.bio) u.bio = event.bio
+        if (event.avatar && !u.avatar) {
+          u.avatar = event.avatar
+          u.thumbnail = event.avatar
+        }
+      }
+      iwFollowItems.value.forEach(patchUser)
+      iwFriendItems.value.forEach(patchUser)
+      return
+    }
+}
+
+function _pyEvt_iwara_follow_result(event) {
+if (event.success) {
         message.success(event.message || '操作成功')
         // 同步更新关注/好友列表与详情页中的关注状态
         const following = !!event.following
@@ -1649,50 +2174,52 @@ function handlePythonEvent(event) {
       } else {
         message.error(event.message || '操作失败')
       }
-      break
+}
 
-    case 'iwara_video_detail':
-      iwDetailLoading.value = false
+function _pyEvt_iwara_video_detail(event) {
+iwDetailLoading.value = false
       if (event.error || !event.video) {
         message.error(event.error || '获取视频详情失败')
-        break
+        return
       }
       // 强校验：丢弃来自错误站点的视频详情
       if (event.site && event.site !== iwSite.value) {
         console.warn('[iwara_video_detail] 丢弃站点不匹配数据', { expected: iwSite.value, got: event.site })
         addLog('系统', `丢弃 IW/${iwSite.value === 'ai' ? 'AI' : '普通'}站不匹配的视频详情`)
-        break
+        return
       }
       iwDetail.value = event.video
       iwComments.value = event.comments || []
       iwCommentsPage.value = 1
       iwCommentsHasMore.value = (event.comment_count || 0) > (iwComments.value.length)
+if (!iwView.value) detailFromSearch.value = 'iwara'
+            navPushView('iwara', 'detail')
       iwView.value = 'detail'
-      break
+}
 
-    case 'iwara_detail_loading':
-      iwDetailLoading.value = !!event.loading
-      break
+function _pyEvt_iwara_detail_loading(event) {
+iwDetailLoading.value = !!event.loading
+}
 
-    case 'iwara_comments':
-      if (event.error) {
+function _pyEvt_iwara_comments(event) {
+if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       iwComments.value.push(...(event.comments || []))
       iwCommentsPage.value = event.page || 1
       iwCommentsHasMore.value = !!event.has_more
-      break
+}
 
-    case 'iwara_batch_progress':
-      iwBatchRunning.value = true
+function _pyEvt_iwara_batch_progress(event) {
+iwBatchRunning.value = true
       iwBatchProgress.done = event.done || 0
       iwBatchProgress.total = event.total || 0
       iwBatchProgress.message = event.message || ''
-      break
+}
 
-    case 'iwara_batch_done':
-      iwBatchRunning.value = false
+function _pyEvt_iwara_batch_done(event) {
+iwBatchRunning.value = false
       iwBatchProgress.done = event.done || 0
       iwBatchProgress.total = event.total || 0
       iwBatchProgress.message = ''
@@ -1700,10 +2227,10 @@ function handlePythonEvent(event) {
         message.info(event.message)
         addLog('下载', event.message)
       }
-      break
+}
 
-    case 'hanime_login_result':
-      hanimeLoginLoading.value = false
+function _pyEvt_hanime_login_result(event) {
+hanimeLoginLoading.value = false
       if (event.logout) {
         hanimeUser.value = ''
         if (!event.silent) message.info(event.message || '已退出 Hanime1 登录')
@@ -1723,18 +2250,17 @@ function handlePythonEvent(event) {
           addLog('系统', `Hanime1 未登录: ${event.message || ''}`)
         }
       }
-      break
+}
 
-    case 'hanime_proxy_set':
-      // 后端确认代理设置（含自动补 http:// 前缀）
-      if ((event.proxy || '') !== settings.hanime_proxy) {
+function _pyEvt_hanime_proxy_set(event) {
+if ((event.proxy || '') !== settings.hanime_proxy) {
         settings.hanime_proxy = event.proxy || ''
         saveSettings()
       }
-      break
+}
 
-    case 'pixiv_login_result':
-      pixivLoginLoading.value = false
+function _pyEvt_pixiv_login_result(event) {
+pixivLoginLoading.value = false
       if (event.logout) {
         pixivUser.value = ''
         if (!event.silent) message.info(event.message || '已退出 Pixiv 登录')
@@ -1755,57 +2281,86 @@ function handlePythonEvent(event) {
           addLog('系统', `Pixiv 未登录: ${event.message || ''}`)
         }
       }
-      break
+}
 
-    case 'pixiv_oauth_url':
-      // 后端生成 PKCE 登录 URL → 推给已打开的 webview 弹窗（watchLoginUrl 模式自动重载）
-      if (event.url && wvLogin.site === 'pixiv' && wvLogin.visible) {
+function _pyEvt_pixiv_oauth_url(event) {
+if (event.url && wvLogin.site === 'pixiv' && wvLogin.visible) {
         wvLogin.loginUrl = event.url
         addLog('系统', 'Pixiv 登录页已生成（请在弹窗内完成登录与人机验证）')
       }
-      break
+}
 
-    case 'pixiv_user_loading':
-      pixivState.userLoading = !!event.loading
-      break
+function _pyEvt_pixiv_user_loading(event) {
+pixivState.userLoading = !!event.loading
+}
 
-    case 'pixiv_user_result':
-      // 用户主页（自己的/他人的）：信息 + 三类作品首屏
-      pixivState.userLoading = false
-      if (event.error) {
-        message.error(event.error)
-        addLog('P站', event.error)
-        break
+function _pyEvt_pixiv_user_result(event) {
+{
+        const wasUserLoading = pixivState.userLoading
+        pixivState.userLoading = false
+        if (event.error) {
+          message.error(event.error)
+          addLog('P站', event.error)
+          return
+        }
+        if (event.page > 1 && pixivState.userPage) {
+          // 追加模式：只合并当前 tab 类型（不覆盖 user/profile）
+          const up = pixivState.userPage
+          const tk = event.tab
+          if (tk && Array.isArray(event.items)) {
+            const seen = new Set((up[tk] || []).map(w => String(w.illust_id || w.novel_id || '')))
+            up[tk] = [...(up[tk] || []), ...event.items.filter(w => !seen.has(String(w.illust_id || w.novel_id || '')))]
+            if (up.has_more) up.has_more = { ...(up.has_more || {}), [tk]: !!event.has_more }
+            if (up.page) up.page = { ...(up.page || {}), [tk]: event.page }
+          }
+        } else {
+          pixivState.userPage = event
+          // 首屏三类型逐个到达：迟到的 page=1 事件不得把用户从详情页拽走
+          //（用户页点开作品"一闪而过就没内容"的真凶）
+          if (wasUserLoading || pixivState.view === 'user') pixivState.view = 'user'
+        }
       }
-      pixivState.userPage = event
-      pixivState.view = 'user'
-      break
+}
 
-    case 'pixiv_detail_loading':
-      pixivState.detailLoading = !!event.loading
-      break
+function _pyEvt_pixiv_detail_loading(event) {
+pixivState.detailLoading = !!event.loading
+}
 
-    case 'pixiv_detail_result':
-      // 作品详情（插画多页原图 / 小说正文 + 评论区）
-      pixivState.detailLoading = false
+function _pyEvt_pixiv_detail_result(event) {
+pixivState.detailLoading = false
       if (event.error) {
         message.error(event.error)
         addLog('P站', event.error)
-        break
+        return
       }
       pixivState.detail = event
       pixivState.view = 'detail'
-      break
+      addLog('P站', `详情已加载：${(event.detail || {}).album_name || event.item_id}（评论 ${event.total_comments ?? 0}）`)
+}
 
-    case 'pixiv_related_result':
-      // 相关作品（详情页点击后懒加载）
-      pixivState.related = { kind: event.kind, item_id: event.item_id, items: event.items || [] }
+function _pyEvt_pixiv_author_works(event) {
+if (pixivState.detail && String(pixivState.detail.item_id) === String(event.item_id)) {
+        pixivState.detail = { ...pixivState.detail, author_works: event.works || [] }
+      }
+}
+
+function _pyEvt_pixiv_novel_images(event) {
+if (pixivState.detail && String(pixivState.detail.item_id) === String(event.item_id)
+          && pixivState.detail.raw) {
+        pixivState.detail = {
+          ...pixivState.detail,
+          raw: { ...pixivState.detail.raw, embedded_images: event.embedded_images || {} },
+        }
+      }
+}
+
+function _pyEvt_pixiv_related_result(event) {
+pixivState.related = { kind: event.kind, item_id: event.item_id, items: event.items || [] }
       if (event.error) addLog('P站', event.error)
-      break
+}
 
-    case 'pixiv_action_result':
-      // 互动结果：点赞/收藏/关注/评论
-      if (event.ok) {
+function _pyEvt_pixiv_action_result(event) {
+if (event.ok) {
         message.success(event.message)
         // 评论操作后刷新详情（重拉评论列表）
         if ((event.action || '').startsWith('comment_') && pixivState.detail) {
@@ -1822,105 +2377,104 @@ function handlePythonEvent(event) {
         message.error(event.message)
       }
       addLog('P站', `互动 ${event.action}: ${event.message}`)
-      break
+}
 
-    case 'pixiv_tags_result':
-      // 常用标签（本地统计）+ 热门标签（置顶常显）
-      pixivState.myTags = event.my_tags || []
+function _pyEvt_pixiv_tags_result(event) {
+pixivState.myTags = event.my_tags || []
       pixivState.trending = event.trending || []
-      break
+}
 
-    case 'pixiv_notification_result':
-      // 消息/提醒
-      if (event.ok) {
+function _pyEvt_pixiv_notification_result(event) {
+if (event.ok) {
         pixivState.notifications = { items: event.items || [], unread: event.unread || 0, message: '' }
       } else {
         pixivState.notifications = { items: [], unread: 0, message: event.message || '加载失败' }
       }
-      break
+}
 
-    case 'pixiv_bookmark_tags_result':
-      // 书签：收藏标签列表
-      pixivState.bookmarkTags = event.ok
+function _pyEvt_pixiv_bookmark_tags_result(event) {
+pixivState.bookmarkTags = event.ok
         ? { content: event.content, tags: event.tags || [], message: '' }
         : { content: '', tags: [], message: event.message || '加载失败' }
-      break
+}
 
-    case 'pixiv_upload_result':
-      // 发布作品结果
-      pixivState.uploadResult = event
+function _pyEvt_pixiv_upload_result(event) {
+pixivState.uploadResult = event
       if (event.ok) message.success(event.message)
       else message.error(event.message)
       addLog('P站', `发布作品: ${event.message}`)
-      break
+}
 
-    case 'pixiv_batch_progress':
-      // 批量下载进度：逐个用户/作品解析并提交任务（多批次）
+function _pyEvt_pixiv_batch_progress(event) {
+pixivBatchRunning.value = true
       pixivBatchProgress.done = event.done || 0
       pixivBatchProgress.total = event.total || 0
       pixivBatchProgress.message = event.message || ''
       addLog('P站', `批量下载 ${event.done || 0}/${event.total || 0}: ${event.message || ''}`)
-      break
+}
 
-    case 'pixiv_batch_done':
-      // 批量下载完成（含失败明细）
-      pixivBatchRunning.value = false
+function _pyEvt_pixiv_batch_done(event) {
+pixivBatchRunning.value = false
       if (event.failed && event.failed.length) {
         message.warning(event.message || '批量下载部分失败')
       } else {
         message.success(event.message || '批量下载已提交')
       }
       addLog('P站', `批量下载完成: ${event.message || ''}`)
-      break
+      if (!detailVisible.value) {
+        detailVisible.value = true
+      }
+}
 
-    case 'pixiv_proxy_set':
-      // 后端确认 Pixiv 代理设置（含自动补 http:// 前缀）
-      if ((event.proxy || '') !== settings.pixiv_proxy) {
+function _pyEvt_pixiv_proxy_set(event) {
+if ((event.proxy || '') !== settings.pixiv_proxy) {
         settings.pixiv_proxy = event.proxy || ''
         saveSettings()
       }
-      break
+}
 
-    case 'hanime_home':
-      haHomeLoading.value = false
+function _pyEvt_hanime_home(event) {
+haHomeLoading.value = false
       haHomeError.value = event.error || ''
-      if (event.error) break
+      if (event.error) return
       haSections.value = event.sections || []
       if (event.genres) haGenres.value = event.genres
       if (event.sorts) haSorts.value = event.sorts
       if (haView.value !== 'detail') haView.value = 'home'
       maybeAutoTranslateAfterSearch()
-      break
+}
 
-    case 'hanime_home_loading':
-      haHomeLoading.value = !!event.loading
-      break
+function _pyEvt_hanime_home_loading(event) {
+haHomeLoading.value = !!event.loading
+}
 
-    case 'hanime_video_detail':
-      haDetailLoading.value = false
+function _pyEvt_hanime_video_detail(event) {
+haDetailLoading.value = false
       if (event.error || !event.video) {
         message.error(event.error || '获取视频详情失败')
-        break
+        return
       }
       haDetail.value = event.video
       haComments.value = event.comments || []
+if (!haView.value) detailFromSearch.value = 'hanime1'
+            navPushView('hanime1', 'detail')
       haView.value = 'detail'
-      break
+}
 
-    case 'hanime_detail_loading':
-      haDetailLoading.value = !!event.loading
-      break
+function _pyEvt_hanime_detail_loading(event) {
+haDetailLoading.value = !!event.loading
+}
 
-    case 'hanime_comments':
-      if (event.error) {
+function _pyEvt_hanime_comments(event) {
+if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       haComments.value = event.items || []
-      break
+}
 
-    case 'hanime_comment_result':
-      if (event.success) {
+function _pyEvt_hanime_comment_result(event) {
+if (event.success) {
         message.success(event.message || '评论发表成功')
         // 刷新当前视频的评论列表
         if (haDetail.value && haDetail.value.video_id === event.video_id) {
@@ -1929,10 +2483,10 @@ function handlePythonEvent(event) {
       } else {
         message.error(event.message || '评论发表失败')
       }
-      break
+}
 
-    case 'hanime_save_result':
-      if (event.success) {
+function _pyEvt_hanime_save_result(event) {
+if (event.success) {
         message.success(event.message || (event.saved ? '已加入稍後觀看' : '已取消收藏'))
         if (haDetail.value && haDetail.value.video_id === event.video_id) {
           haDetail.value.saved = !!event.saved
@@ -1940,14 +2494,14 @@ function handlePythonEvent(event) {
       } else {
         message.error(event.message || '收藏操作失败')
       }
-      break
+}
 
-    case 'hanime_user_videos':
-      haUserLoading.value = false
+function _pyEvt_hanime_user_videos(event) {
+haUserLoading.value = false
       if (event.error) {
         message.error(event.error)
         if ((event.page || 1) <= 1) haUserItems.value = []
-        break
+        return
       }
       if ((event.page || 1) <= 1) {
         haUserItems.value = event.items || []
@@ -1958,21 +2512,21 @@ function handlePythonEvent(event) {
       haUserHasMore.value = !!event.has_more
       haUserLabel.value = event.label || ''
       if (haView.value !== 'detail') haView.value = 'user'
-      break
+}
 
-    case 'hanime_user_loading':
-      haUserLoading.value = !!event.loading
-      break
+function _pyEvt_hanime_user_loading(event) {
+haUserLoading.value = !!event.loading
+}
 
-    case 'hanime_batch_progress':
-      haBatchRunning.value = true
+function _pyEvt_hanime_batch_progress(event) {
+haBatchRunning.value = true
       haBatchProgress.done = event.done || 0
       haBatchProgress.total = event.total || 0
       haBatchProgress.message = event.message || ''
-      break
+}
 
-    case 'hanime_batch_done':
-      haBatchRunning.value = false
+function _pyEvt_hanime_batch_done(event) {
+haBatchRunning.value = false
       haBatchProgress.done = event.done || 0
       haBatchProgress.total = event.total || 0
       haBatchProgress.message = ''
@@ -1980,24 +2534,26 @@ function handlePythonEvent(event) {
         message.info(event.message)
         addLog('下载', event.message)
       }
-      break
+}
 
-    case 'oreno_proxy_set': {
+function _pyEvt_oreno_proxy_set(event) {
+{
       // 后端确认代理设置（含自动补 http:// 前缀；按 site_key 区分 O3D / E站）
       const field = event.site_key === 'erommdtube' ? 'erommd_proxy' : 'oreno_proxy'
       if ((event.proxy || '') !== settings[field]) {
         settings[field] = event.proxy || ''
         saveSettings()
       }
-      break
+      return
     }
+}
 
-    case 'oreno_home':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_home(event) {
+if (orEventStale(event)) return
       orHomeLoading.value = false
       orDataSite.value = event.site_key || siteKey.value
       orHomeError.value = event.error || ''
-      if (event.error) break
+      if (event.error) return
       if ((event.page || 1) <= 1) {
         orHomeItems.value = event.items || []
       } else {
@@ -2008,22 +2564,22 @@ function handlePythonEvent(event) {
       if (event.sorts) orSorts.value = event.sorts
       if (orView.value !== 'detail' && orView.value !== 'list') orView.value = 'home'
       maybeAutoTranslateAfterSearch()
-      break
+}
 
-    case 'oreno_home_loading':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_home_loading(event) {
+if (orEventStale(event)) return
       orHomeLoading.value = !!event.loading
-      break
+}
 
-    case 'oreno_list':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_list(event) {
+if (orEventStale(event)) return
       orListLoading.value = false
       orDataSite.value = event.site_key || siteKey.value
       if (event.error) {
         orListError.value = event.error
         message.error(event.error)
         if ((event.page || 1) <= 1) orList.items = []
-        break
+        return
       }
       orListError.value = ''
       orList.type = event.type || 'tag'
@@ -2037,70 +2593,70 @@ function handlePythonEvent(event) {
       orList.page = event.page || 1
       orList.has_more = !!event.has_more
       orView.value = 'list'
-      break
+}
 
-    case 'oreno_list_loading':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_list_loading(event) {
+if (orEventStale(event)) return
       orListLoading.value = !!event.loading
-      break
+}
 
-    case 'oreno_tags':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_tags(event) {
+if (orEventStale(event)) return
       orTagsLoading.value = false
       orDataSite.value = event.site_key || siteKey.value
       if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       orTags.value = event.tags || []
       orTagGroups.value = event.groups || []
       orTagGroupTitle.value = event.group_title || ''
-      break
+}
 
-    case 'oreno_tags_loading':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_tags_loading(event) {
+if (orEventStale(event)) return
       orTagsLoading.value = !!event.loading
-      break
+}
 
-    case 'oreno_characters':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_characters(event) {
+if (orEventStale(event)) return
       orCharsLoading.value = false
       orDataSite.value = event.site_key || siteKey.value
       if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       orCharacters.value = { popular: event.popular || [], kana_groups: event.kana_groups || {} }
-      break
+}
 
-    case 'oreno_chars_loading':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_chars_loading(event) {
+if (orEventStale(event)) return
       orCharsLoading.value = !!event.loading
-      break
+}
 
-    case 'oreno_authors':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_authors(event) {
+if (orEventStale(event)) return
       orAuthorsLoading.value = false
       orDataSite.value = event.site_key || siteKey.value
       if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       orAuthors.value = event.authors || []
       orAuthorsPage.value = event.page || 1
       orAuthorsHasMore.value = !!event.has_more
-      break
+}
 
-    case 'oreno_authors_loading':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_authors_loading(event) {
+if (orEventStale(event)) return
       orAuthorsLoading.value = !!event.loading
-      break
+}
 
-    case 'oreno_fav_result':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_fav_result(event) {
+if (orEventStale(event)) return
       if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       message.success(event.saved ? '已加入收藏' : '已取消收藏')
       // 详情页同步收藏状态
@@ -2111,35 +2667,37 @@ function handlePythonEvent(event) {
       if (orList.type === 'favorites' && !event.saved) {
         orList.items = orList.items.filter(i => i.video_id !== event.video_id)
       }
-      break
+}
 
-    case 'oreno_video_detail':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_video_detail(event) {
+if (orEventStale(event)) return
       orDetailLoading.value = false
       if (event.error || !event.video) {
         message.error(event.error || '获取视频详情失败')
-        break
+        return
       }
       orDetail.value = event.video
       orDataSite.value = event.site_key || siteKey.value
+if (!orView.value) detailFromSearch.value = 'oreno'
+            navPushView('oreno', 'detail')
       orView.value = 'detail'
-      break
+}
 
-    case 'oreno_detail_loading':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_detail_loading(event) {
+if (orEventStale(event)) return
       orDetailLoading.value = !!event.loading
-      break
+}
 
-    case 'oreno_batch_progress':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_batch_progress(event) {
+if (orEventStale(event)) return
       orBatchRunning.value = true
       orBatchProgress.done = event.done || 0
       orBatchProgress.total = event.total || 0
       orBatchProgress.message = event.message || ''
-      break
+}
 
-    case 'oreno_batch_done':
-      if (orEventStale(event)) break
+function _pyEvt_oreno_batch_done(event) {
+if (orEventStale(event)) return
       orBatchRunning.value = false
       orBatchProgress.done = event.done || 0
       orBatchProgress.total = event.total || 0
@@ -2148,13 +2706,10 @@ function handlePythonEvent(event) {
         message.info(event.message)
         addLog('下载', event.message)
       }
-      break
+}
 
-    // ============================
-    // ASMR 音声站事件
-    // ============================
-    case 'asmr_login_result':
-      asmrLoginLoading.value = false
+function _pyEvt_asmr_login_result(event) {
+asmrLoginLoading.value = false
       if (event.logout) {
         asmrUser.value = ''
         asmrLoggedIn.value = false
@@ -2177,24 +2732,24 @@ function handlePythonEvent(event) {
           addLog('系统', `ASMR 未登录: ${event.message || ''}`)
         }
       }
-      break
+}
 
-    case 'asmr_proxy_set':
-      // 后端确认代理设置（含自动补 http:// 前缀）
-      if ((event.proxy || '') !== settings.asmr_proxy) {
+function _pyEvt_asmr_proxy_set(event) {
+if ((event.proxy || '') !== settings.asmr_proxy) {
         settings.asmr_proxy = event.proxy || ''
         saveSettings()
       }
-      break
+}
 
-    case 'asmr_list':
-      if ((settings.site || 'bunkr') !== 'asmr') break
+function _pyEvt_asmr_list(event) {
+if ((settings.site || 'bunkr') !== 'asmr') return
       asmrListLoading.value = false
       asmrView.value = event.view || 'popular'
       asmrPage.value = event.page || 1
       asmrHasMore.value = !!event.has_more
       asmrError.value = event.error || ''
-      if (event.error) break
+      if (event.view === 'favorites') asmrRecommend.value = event.recommend || []
+      if (event.error) return
       if ((event.page || 1) <= 1) {
         asmrItems.value = event.items || []
       } else {
@@ -2205,19 +2760,31 @@ function handlePythonEvent(event) {
       if (event.orders) asmrOrders.value = event.orders
       searchResults.value = []
       maybeAutoTranslateAfterSearch()
-      break
+}
 
-    // ============================
-    // 识图（反向图片搜索）事件
-    // ============================
-    case 'reverse_start':
+function _pyEvt_move_task_folder_result(event) {
+if (event.ok) {
+        message.success(event.message || '文件夹已移动')
+        addLog('系统', event.message || '文件夹已移动')
+      } else {
+        message.error(event.message || '文件夹移动失败')
+        addLog('错误', event.message || '文件夹移动失败')
+      }
+}
+
+function _pyEvt_reverse_start(event) {
+reverseSession.value = event.session || ''
+      reverseMerged.value = []
+      reverseCached.value = false
       reverseRunning.value = true
       reverseSites.value = (event.sites || []).map(s => ({
         ...s, status: 'running', results: [], url: '', error: '',
       }))
-      break
+}
 
-    case 'reverse_site_update': {
+function _pyEvt_reverse_site_update(event) {
+{
+      if (event.session && event.session !== reverseSession.value) return
       const site = reverseSites.value.find(x => x.key === event.site)
       if (site) {
         site.status = event.status
@@ -2225,80 +2792,202 @@ function handlePythonEvent(event) {
         site.url = event.url || ''
         site.error = event.error || ''
       }
-      break
+      return
     }
+}
 
-    case 'reverse_all_done': {
+function _pyEvt_reverse_all_done(event) {
+{
+      if (event.session && event.session !== reverseSession.value) return
       reverseRunning.value = false
+      reverseMerged.value = event.merged || []
+      reverseCached.value = !!event.cached
+      // 缓存命中路径后端不发逐站 site_update：从 groups 回填站点状态与结果
+      for (const g of (event.groups || [])) {
+        const site = reverseSites.value.find(x => x.key === g.site || x.name === g.name)
+        if (site) {
+          site.status = 'done'
+          site.results = g.results || []
+          site.url = g.url || site.url || ''
+        }
+      }
       const okCount = (event.ok_sites || []).length
       const failCount = (event.failed_sites || []).length
       if (okCount > 0) {
-        message.success(`识图完成：${okCount} 个网站返回结果${failCount ? `（${failCount} 个网站失败已移除）` : ''}`)
+        message.success(
+          `识图完成：${okCount} 个网站返回结果${failCount ? `（${failCount} 个网站失败已移除）` : ''}`
+          + (event.cached ? '（本地缓存）' : ''))
       } else {
         message.error('识图失败：所有网站均未返回结果（请检查网络或代理设置）')
       }
-      addLog('识图', `搜索完成：成功 ${okCount} 个网站，失败 ${failCount} 个`)
-      break
+      addLog('识图', `搜索完成：成功 ${okCount} 个网站，失败 ${failCount} 个${event.cached ? '（缓存）' : ''}`)
+      return
     }
+}
 
-    case 'reverse_error':
+function _pyEvt_reverse_cancelled(event) {
+{
+      if (event.session && event.session !== reverseSession.value) return
+      reverseRunning.value = false
+      addLog('识图', '已取消搜索')
+      return
+    }
+}
+
+function _pyEvt_reverse_error(event) {
+if (event.session && event.session !== reverseSession.value) return
       reverseRunning.value = false
       message.error(event.message || '识图失败')
       addLog('识图', `失败: ${event.message || '未知错误'}`)
-      break
+}
 
-    case 'reverse_paste':
-      reversePaste.value = event.text || ''
-      break
+function _pyEvt_reverse_download_start(event) {
+addLog('识图', `解析下载: ${event.url}`)
+}
 
-    case 'reverse_proxy_set':
-      if ((event.proxy || '') !== settings.reverse_proxy) {
+function _pyEvt_reverse_download_done(event) {
+message.success(`已加入下载：${event.count} 个文件${event.album ? `（${event.album}）` : ''}`)
+      addLog('识图', `已创建下载任务: ${event.url}（${event.count} 个文件）`)
+}
+
+function _pyEvt_reverse_download_error(event) {
+message.error(event.message || '无法下载该结果')
+      addLog('识图', `下载失败: ${event.message || '未知错误'}`)
+}
+
+function _pyEvt_reverse_paste(event) {
+reversePaste.value = event.text || ''
+}
+
+function _pyEvt_reverse_proxy_set(event) {
+if ((event.proxy || '') !== settings.reverse_proxy) {
         settings.reverse_proxy = event.proxy || ''
         saveSettings()
       }
-      break
+      if (!!event.all_sites !== !!settings.reverse_proxy_all) {
+        settings.reverse_proxy_all = !!event.all_sites
+        saveSettings()
+      }
+}
 
-    case 'asmr_list_loading':
-      asmrListLoading.value = !!event.loading
-      break
+function _pyEvt_asmr_list_loading(event) {
+asmrListLoading.value = !!event.loading
+}
 
-    case 'asmr_video_detail':
-      asmrDetailLoading.value = false
+function _pyEvt_asmr_video_detail(event) {
+asmrDetailLoading.value = false
       if (event.error || !event.video) {
         message.error(event.error || '获取作品详情失败')
-        break
+        return
       }
       if (asmrView.value !== 'detail') asmrListPrevView.value = asmrView.value
       asmrDetail.value = event.video
-      asmrFiles.value = event.files || []
+      // 后端音轨字段为 stream_url/media_url，前端播放器用 play_url —— 统一映射（播放修复）
+      asmrFiles.value = (event.files || []).map(f => ({
+        ...f,
+        play_url: f.play_url || f.stream_url || f.media_url || '',
+      }))
       asmrLoggedIn.value = !!event.logged_in
+      asmrRelated.value = event.related || []
+      asmrRelatedPending.value = !!event.related_pending
+if (!asmrView.value) detailFromSearch.value = 'asmr'
+            navPushView('asmr', 'detail')
       asmrView.value = 'detail'
-      break
+}
 
-    case 'asmr_detail_loading':
-      asmrDetailLoading.value = !!event.loading
-      break
+function _pyEvt_asmr_related_extra(event) {
+{
+      // tags 推荐后台补齐（异步架构）：仅当用户仍停留在同一作品详情时合并，防切详情串台
+      if (String(asmrDetail.value?.video_id || '') !== String(event.work_id || '')) return
+      asmrRelatedPending.value = false
+      const extra = (event.items || []).filter(it => it && it.video_id)
+      if (!extra.length) return
+      const seen = new Set(asmrRelated.value.map(r => String(r.video_id)))
+      seen.add(String(asmrDetail.value.video_id || ''))
+      const merged = asmrRelated.value.slice()
+      for (const it of extra) {
+        const id = String(it.video_id)
+        if (seen.has(id)) continue
+        seen.add(id)
+        merged.push(it)
+        if (merged.length >= 12) break
+      }
+      asmrRelated.value = merged
+      return
+    }
+}
 
-    case 'asmr_circles':
-    case 'asmr_tags':
-    case 'asmr_vas':
-      if (event.error) {
+function _pyEvt_pa_fav_result(event) {
+{
+      // 关注结果：回填对应卡片状态
+      if (event.error) { message.error(event.error); return }
+      message.success(event.favorited ? '已关注' : '已取消关注')
+      const favKey = `${event.service}_${event.user_id}`
+      searchResults.value = searchResults.value.map(it => {
+        if (it.site === 'pawchive' && it.user_id && `${it.service}_${it.user_id}` === favKey) {
+          return { ...it, favorited: !!event.favorited }
+        }
+        return it
+      })
+      return
+    }
+}
+
+function _pyEvt_gs_state(event) {
+{
+      // 通用站点状态回流（模块化契约：后端 emit gs_state {site, view, items, ...}）
+      let gsEvent = event
+      const gsSite = event.site || ''
+      // 翻页追加（GSV「加载更多」契约）：page>1 时合并旧列表（后端无状态按页抓；
+      // loading 占位事件 items 为空，直接覆盖会清掉已加载内容）
+      const gsPrev = gsSite ? gsStates.value[gsSite] : null
+      if (gsSite && event.view === 'list' && Number(event.page) > 1 && gsPrev && gsPrev.view === 'list') {
+        const gsKey = i => String((i && (i.album_url || i.video_id)) || '')
+        if (event.loading) {
+          gsEvent = { ...event, items: gsPrev.items || [] }
+        } else {
+          const gsSeen = new Set((gsPrev.items || []).map(gsKey))
+          const gsFresh = (event.items || []).filter(i => !gsSeen.has(gsKey(i)))
+          gsEvent = { ...event, items: [...(gsPrev.items || []), ...gsFresh] }
+        }
+      }
+      if (gsSite) {
+        gsStates.value = { ...gsStates.value, [gsSite]: gsEvent }
+        if (gsSite === 'fc2' && String(event.error || '').startsWith('NEED_LOGIN')) {
+          fc2NeedCookieSync = true   // 后端会话失效：下一条 fc2 命令前自动同步分区 cookie（可能用户在 webview 里刚动过）
+        }
+        // FC2 批量解析提交完成：自动打开下载管理面板（此前任务在后台跑，用户以为"没反应"）
+        if (gsSite === 'fc2' && /已提交/.test(String((event.batchProgress || {}).message || ''))) {
+          if (!detailVisible.value) {
+            detailVisible.value = true
+            message.info('批量下载任务已提交，已为你打开下载管理')
+          }
+        }
+      }
+      return
+    }
+}
+
+function _pyEvt_asmr_detail_loading(event) {
+asmrDetailLoading.value = !!event.loading
+}
+
+function _pyEvt_asmr_circles(event) {
+if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       asmrIndexItems.value = event.items || []
-      break
+}
 
-    case 'asmr_circles_loading':
-    case 'asmr_tags_loading':
-    case 'asmr_vas_loading':
-      asmrIndexLoading.value = !!event.loading
-      break
+function _pyEvt_asmr_circles_loading(event) {
+asmrIndexLoading.value = !!event.loading
+}
 
-    case 'asmr_fav_result':
-      if (event.error) {
+function _pyEvt_asmr_fav_result(event) {
+if (event.error) {
         message.error(event.error)
-        break
+        return
       }
       message.success(event.saved ? '已收藏' : '已取消收藏')
       if (asmrDetail.value && String(asmrDetail.value.video_id) === String(event.video_id)) {
@@ -2308,17 +2997,17 @@ function handlePythonEvent(event) {
       if (asmrView.value === 'favorites' && !event.saved) {
         asmrItems.value = asmrItems.value.filter(i => String(i.video_id) !== String(event.video_id))
       }
-      break
+}
 
-    case 'asmr_batch_progress':
-      asmrBatchRunning.value = true
+function _pyEvt_asmr_batch_progress(event) {
+asmrBatchRunning.value = true
       asmrBatchProgress.done = event.done || 0
       asmrBatchProgress.total = event.total || 0
       asmrBatchProgress.message = event.message || ''
-      break
+}
 
-    case 'asmr_batch_done':
-      asmrBatchRunning.value = false
+function _pyEvt_asmr_batch_done(event) {
+asmrBatchRunning.value = false
       asmrBatchProgress.done = event.done || 0
       asmrBatchProgress.total = event.total || 0
       asmrBatchProgress.message = ''
@@ -2326,10 +3015,14 @@ function handlePythonEvent(event) {
         message.info(event.message)
         addLog('下载', event.message)
       }
-      break
+}
 
-    case 'login_info':
-      loginInfo.value = event.sites || {}
+function _pyEvt_login_info(event) {
+loginInfo.value = event.sites || {}
+      // 登录成功的站点移出"已提醒"名单（再失效时可再次提醒）
+      for (const _li of Object.keys(loginInfo.value)) {
+        if (loginInfo.value[_li] && loginInfo.value[_li].logged_in) loginWarnedSites.delete(_li)
+      }
       // 谷歌邮箱：回填设置区表单邮箱（来自加密凭据库；表单在 LeftPanel 内部自持状态）
       if (loginInfo.value.google && loginInfo.value.google.username) {
         googleEmail.value = loginInfo.value.google.username
@@ -2353,77 +3046,99 @@ function handlePythonEvent(event) {
         }
       }
       siteCreds.value = _savedCreds
-      break
+}
 
-    case 'account_saved':
-      message.success(event.message || '账号档案已更新')
+function _pyEvt_account_saved(event) {
+      // silent=启动恢复/自动保存路径：只进日志不弹窗（2026-09-17 用户要求：启动不得弹出内部信息提醒）
+      if (!event.silent) message.success(event.message || '账号档案已更新')
       addLog('系统', event.message || '')
-      break
+}
 
-    case 'account_error':
-      message.error(event.message || '账号档案操作失败')
+function _pyEvt_account_error(event) {
+message.error(event.message || '账号档案操作失败')
       addLog('错误', event.message || '')
-      break
+}
 
-    case 'exhentai_torrents':
-      if (rightPanelRef.value) rightPanelRef.value.setTorrents(event.torrents)
+function _pyEvt_exhentai_torrents(event) {
+if (rightPanelRef.value) rightPanelRef.value.setTorrents(event.torrents)
       if (event.message) addLog('磁力', event.message)
-      break
+}
 
-    case 'exhentai_torrents_error':
-      if (rightPanelRef.value) rightPanelRef.value.setTorrentsError()
+function _pyEvt_exhentai_torrents_error(event) {
+if (rightPanelRef.value) rightPanelRef.value.setTorrentsError()
       message.error(event.message || '获取种子失败')
       addLog('错误', `获取种子失败: ${event.message || ''}`)
-      break
+}
 
-    case 'exhentai_magnet':
-      if (rightPanelRef.value) rightPanelRef.value.setMagnet(event.magnet)
+function _pyEvt_exhentai_magnet(event) {
+if (rightPanelRef.value) rightPanelRef.value.setMagnet(event.magnet)
       addLog('磁力', `已获取磁力链接: ${event.name || event.infohash || ''}`)
-      break
+}
 
-    case 'exhentai_magnet_error':
-      if (rightPanelRef.value) rightPanelRef.value.setMagnetError()
+function _pyEvt_exhentai_magnet_error(event) {
+if (rightPanelRef.value) rightPanelRef.value.setMagnetError()
       message.error(event.message || '磁力解析失败')
       addLog('错误', `磁力解析失败: ${event.message || ''}`)
-      break
+}
 
-    case 'ex_gallery_info':
-      exDetailLoading.value = false
+function _pyEvt_ex_gallery_info(event) {
+exDetailLoading.value = false
       exGalleryDetail.value = event
       addLog('解析', `画廊详情: ${event.title || ''}`)
-      break
+      // 自动解析：详情界面展示画师/tag 后直接出图片缩略图（需求：点开即见资源，不用再点"解析图片列表"）
+      if (exAutoParseGallery.value && event.url) {
+        exAutoParseGallery.value = false
+        openSearchResult({ album_url: event.url, album_name: event.title || '' })
+      }
+}
 
-    case 'ex_gallery_info_error':
-      exDetailLoading.value = false
+function _pyEvt_ex_gallery_info_error(event) {
+exDetailLoading.value = false
       message.error(event.message || '获取画廊信息失败')
       addLog('错误', `获取画廊信息失败: ${event.message || ''}`)
-      break
+}
 
-    case 'ex_torrent_saved':
-      if (event.success) {
+function _pyEvt_bg_busy(event) {
+message.warning(event.message || '上一个同类任务还在处理中')
+      addLog('提示', event.message || '同类任务进行中')
+}
+
+function _pyEvt_ex_torrents_result(event) {
+if (rightPanelRef.value && rightPanelRef.value.setTorrents) {
+        if (event.error) {
+          rightPanelRef.value.setTorrentsError()
+          message.error(event.error || '种子获取失败')
+        } else {
+          rightPanelRef.value.setTorrents(event.torrents || [])
+          if (!(event.torrents || []).length) message.info('该画廊没有可用种子')
+        }
+      }
+}
+
+function _pyEvt_ex_torrent_saved(event) {
+if (event.success) {
         message.success(event.message || '种子已保存')
         addLog('下载', `种子已保存: ${event.path || ''}`)
       } else {
         message.error(event.message || '种子保存失败')
         addLog('错误', `种子保存失败: ${event.message || ''}`)
       }
-      break
+}
 
-    case 'pa_post_info':
-      paDetailLoading.value = false
+function _pyEvt_pa_post_info(event) {
+paDetailLoading.value = false
       paPostDetail.value = event
       addLog('解析', `帖子详情: ${event.title || ''}`)
-      break
+}
 
-    case 'pa_post_info_error':
-      paDetailLoading.value = false
+function _pyEvt_pa_post_info_error(event) {
+paDetailLoading.value = false
       message.error(event.message || '获取帖子信息失败')
       addLog('错误', `获取帖子信息失败: ${event.message || ''}`)
-      break
+}
 
-    case 'pa_artist_posts':
-      // 画师子项目列表（按发布日期倒序的全部帖子）
-      paArtistPostsLoading.value = false
+function _pyEvt_pa_artist_posts(event) {
+paArtistPostsLoading.value = false
       paArtistPosts.value = event
       paPostDetail.value = null
       exGalleryDetail.value = null
@@ -2433,29 +3148,28 @@ function handlePythonEvent(event) {
       } else {
         addLog('Pawchive', `画师子项目: ${event.artist || ''} 共 ${(event.posts || []).length} 个帖子`)
       }
-      break
+}
 
-    case 'pa_artist_posts_error':
-      paArtistPostsLoading.value = false
+function _pyEvt_pa_artist_posts_error(event) {
+paArtistPostsLoading.value = false
       message.error(event.message || '获取画师帖子列表失败')
       addLog('错误', `获取画师帖子列表失败: ${event.message || ''}`)
-      break
+}
 
-    case 'ex_hidden_tags':
-      // 隐藏标签列表（增删后后端回推最新列表）
-      exHiddenTags.value = event.tags || []
-      break
+function _pyEvt_ex_hidden_tags(event) {
+exHiddenTags.value = event.tags || []
+}
 
-    case 'search_history':
-      searchHistory.value = event.items || []
-      break
+function _pyEvt_search_history(event) {
+searchHistory.value = event.items || []
+}
 
-    case 'translate_result':
-      // 有道翻译结果（成功/失败都回传，前端面板显示 translation 或 error）
-      translateResult.value = event
-      break
+function _pyEvt_translate_result(event) {
+translateResult.value = event
+}
 
-    case 'translate_batch_result': {
+function _pyEvt_translate_batch_result(event) {
+{
       // 全局自动翻译：批量译文回填到 translatedTitles 映射
       autoTranslating.value = false
       // 结果到达：清掉看门狗
@@ -2468,10 +3182,10 @@ function handlePythonEvent(event) {
       const titles = (pending && pending.titles) || collectCurrentTitles()
       translateBatchPending.delete(event.batch_id)
       // 代际校验：用户已关闭翻译开关（gen 已 +1）→ 迟到结果丢弃，不再回填
-      if (pending && pending.gen !== translateBatchGen) break
+      if (pending && pending.gen !== translateBatchGen) return
       if (!event.ok) {
         message.error(event.error || '翻译失败（Google 免费端点不可达，可在左侧翻译面板配置代理或更换引擎）')
-        break
+        return
       }
       if (Array.isArray(event.translations)) {
         const map = { ...translatedTitles.value }
@@ -2483,18 +3197,17 @@ function handlePythonEvent(event) {
         }
         translatedTitles.value = map
       }
-      break
+      return
     }
+}
 
-    case 'github_update_info':
-      // GitHub 仓库更新检查结果
-      githubChecking.value = false
+function _pyEvt_github_update_info(event) {
+githubChecking.value = false
       githubUpdateInfo.value = event
-      break
+}
 
-    case 'changelog_info':
-      // 更新日志拉取结果（点"检查更新"时先弹更新说明）
-      changelogLoading.value = false
+function _pyEvt_changelog_info(event) {
+changelogLoading.value = false
       if (event.ok) {
         changelogInfo.value = event
         changelogModalVisible.value = true
@@ -2503,22 +3216,20 @@ function handlePythonEvent(event) {
         // 更新日志拉取失败时仍走原更新检查流程，保证功能可用
         handleCheckGithubUpdate()
       }
-      break
+}
 
-    case 'update_download_progress':
-      // 更新安装包下载进度（后端流式推送，限频 0.5s）
-      updateDownload.downloading = true
+function _pyEvt_update_download_progress(event) {
+updateDownload.downloading = true
       updateDownload.received = event.received || 0
       updateDownload.total = event.total || updateDownload.total || 0
       updateDownload.percent = event.percent || 0
       updateDownload.speed = event.speed || 0
       updateDownload.fileName = event.file_name || updateDownload.fileName
       updateDownload.path = event.path || updateDownload.path
-      break
+}
 
-    case 'update_download_done':
-      // 更新安装包下载完成
-      updateDownload.downloading = false
+function _pyEvt_update_download_done(event) {
+updateDownload.downloading = false
       updateDownload.done = true
       updateDownload.percent = 100
       updateDownload.received = event.size || updateDownload.received
@@ -2528,64 +3239,60 @@ function handlePythonEvent(event) {
       updateDownload.speed = 0
       message.success('更新安装包下载完成，点"立即安装"覆盖更新（数据不丢失）')
       addLog('完成', `更新安装包已下载: ${updateDownload.fileName}`)
-      break
+}
 
-    case 'update_download_error':
-      // 更新安装包下载/运行失败
-      updateDownload.downloading = false
+function _pyEvt_update_download_error(event) {
+updateDownload.downloading = false
       updateDownload.error = event.error || '下载失败'
       message.error(`更新下载失败: ${updateDownload.error}`)
       addLog('错误', `更新下载失败: ${updateDownload.error}`)
-      break
+}
 
-    case 'update_installer_launched':
-      // 更新安装包已运行（NSIS 向导接管，覆盖安装即更新）
-      message.info('更新安装程序已启动，按提示完成覆盖安装（登录与下载数据保留）')
-      break
+function _pyEvt_update_installer_launched(event) {
+message.info('更新安装程序已启动，按提示完成覆盖安装（登录与下载数据保留）')
+}
 
-    case 'github_update_marked':
-      // 用户已确认更新完成 → 仅记录基准，不再自动连 GitHub（手动点击才检查）
-      if (githubUpdateInfo.value && typeof githubUpdateInfo.value === 'object') {
+function _pyEvt_github_update_marked(event) {
+if (githubUpdateInfo.value && typeof githubUpdateInfo.value === 'object') {
         githubUpdateInfo.value = { ...githubUpdateInfo.value, has_update: false }
       }
-      break
+}
 
-    case 'local_favorites':
-      localFavorites.value = event.items || []
-      break
+function _pyEvt_local_favorites(event) {
+localFavorites.value = event.items || []
+}
 
-    case 'local_favorites_saved':
-      if (event.duplicate) {
+function _pyEvt_local_favorites_saved(event) {
+if (event.duplicate) {
         message.info(event.message || '已在收藏中')
       } else {
         message.success(event.message || '已收藏到本地')
       }
       // 刷新收藏列表
       if (window.api) window.api.sendCommand({ cmd: 'get_favorites' })
-      break
+}
 
-    case 'local_favorites_error':
-      message.error(event.message || '收藏失败')
-      break
+function _pyEvt_local_favorites_error(event) {
+message.error(event.message || '收藏失败')
+}
 
-    // ---------- X (Twitter) 关注列表 / 关注管理 ----------
-    case 'twitter_follow_loading':
-      twFollowLoading.value = !!event.loading
-      break
+function _pyEvt_twitter_follow_loading(event) {
+twFollowLoading.value = !!event.loading
+}
 
-    case 'twitter_follow_list':
-      twFollowLoading.value = false
+function _pyEvt_twitter_follow_list(event) {
+twFollowLoading.value = false
       if (event.refresh_failed) {
         // 已展示缓存，仅后台刷新失败
         addLog('X', `刷新关注列表失败（继续显示缓存）: ${event.refresh_failed}`)
-        break
+        return
       }
       if (event.error) {
         twFollowError.value = event.error
         if (!event.append) twFollowItems.value = []
         message.error(event.error)
         addLog('错误', event.error)
-        break
+        return
       }
       twFollowError.value = ''
       // 后台返回较慢时用户可能已切到用户详情/浏览视图，避免覆盖当前视图
@@ -2603,37 +3310,38 @@ function handlePythonEvent(event) {
       if (!event.cached) {
         addLog('X', `获取${event.label || '关注列表'}：${(event.items || []).length} 人`)
       }
-      break
+}
 
-    case 'twitter_browse_loading':
-      twBrowseLoading.value = !!event.loading
+function _pyEvt_twitter_browse_loading(event) {
+twBrowseLoading.value = !!event.loading
       if (event.loading) {
         twBrowseProgress.done = 0
         twBrowseProgress.total = 0
         twBrowseError.value = ''
       }
-      break
+}
 
-    case 'twitter_browse_progress':
-      twBrowseProgress.done = event.done || 0
+function _pyEvt_twitter_browse_progress(event) {
+twBrowseProgress.done = event.done || 0
       twBrowseProgress.total = event.total || 0
-      break
+}
 
-    case 'twitter_user_feed_loading':
-      twUserFeedLoading.value = !!event.loading
-      break
+function _pyEvt_twitter_user_feed_loading(event) {
+twUserFeedLoading.value = !!event.loading
+}
 
-    case 'twitter_user_feed': {
+function _pyEvt_twitter_user_feed(event) {
+{
       // 仅在用户详情视图时应用；快速切换博主时丢弃旧博主的数据（防串台）
-      if (twFollowMode.value !== 'user') break
+      if (twFollowMode.value !== 'user') return
       if (event.error) {
         twUserFeed.value = []
         message.error(event.error)
         addLog('错误', event.error)
-        break
+        return
       }
       if (twUserFeedUserId.value && event.user_id
-        && String(event.user_id) !== twUserFeedUserId.value) break
+        && String(event.user_id) !== twUserFeedUserId.value) return
       twUserFeed.value = event.append
         ? twUserFeed.value.concat(event.items || [])
         : (event.items || [])
@@ -2642,19 +3350,19 @@ function handlePythonEvent(event) {
       if (!event.append) {
         addLog('X', `博主内容流：@${event.screen_name || ''} ${(event.items || []).length} 条推文`)
       }
-      break
+      return
     }
+}
 
-    case 'twitter_browse_feed':
-      // 用户可能已离开浏览视图，迟到的结果不覆盖当前视图
-      if (!['browse', ''].includes(twFollowMode.value)) break
+function _pyEvt_twitter_browse_feed(event) {
+if (!['browse', ''].includes(twFollowMode.value)) return
       twFollowMode.value = 'browse'
       if (event.error) {
         twBrowseError.value = event.error
         if (!event.items?.length && !event.cached) twBrowseFeed.value = []
         message.error(event.error)
         addLog('错误', event.error)
-        break
+        return
       }
       twBrowseError.value = ''
       if (event.items) twBrowseFeed.value = event.items
@@ -2669,11 +3377,10 @@ function handlePythonEvent(event) {
       if (!event.cached) {
         addLog('X', `浏览模式：${(event.items || []).length} 条最近更新${event.append ? '（已追加）' : ''}`)
       }
-      break
+}
 
-    case 'twitter_cache_cleared':
-      // 清缓存后同步清空前端对应视图状态
-      twBrowseFeed.value = []
+function _pyEvt_twitter_cache_cleared(event) {
+twBrowseFeed.value = []
       twBrowseUpdatedAt.value = null
       twBrowseHasMore.value = false
       twBrowseNextOffset.value = 0
@@ -2683,24 +3390,24 @@ function handlePythonEvent(event) {
       twFollowMode.value = ''
       message.success(event.message || '已清除 Twitter 缓存')
       addLog('系统', event.message || '已清除 Twitter 缓存')
-      break
+}
 
-    case 'twitter_follows':
-      // 我的分类（已归类的关注，本地数据）
-      twFollowLoading.value = false
+function _pyEvt_twitter_follows(event) {
+twFollowLoading.value = false
       if (!['user', 'browse'].includes(twFollowMode.value)) {
         twFollowMode.value = 'follows'
       }
       twFollowError.value = ''
       twFollowItems.value = event.items || []
       twFollowHasMore.value = false
-      break
+}
 
-    case 'twitter_follow_tags':
-      twFollowTags.value = event.tags || []
-      break
+function _pyEvt_twitter_follow_tags(event) {
+twFollowTags.value = event.tags || []
+}
 
-    case 'twitter_follow_result': {
+function _pyEvt_twitter_follow_result(event) {
+{
       // 关注/取关结果：更新列表中对应卡片的按钮状态
       const idx = twFollowItems.value.findIndex(
         u => String(u.user_id) === String(event.user_id),
@@ -2713,74 +3420,327 @@ function handlePythonEvent(event) {
         message.error(event.message || '操作失败')
         addLog('错误', event.message || '')
       }
-      break
+      return
     }
+}
 
-    // ---------- 重名文件手动改名（下载去重） ----------
-    case 'download_rename_prompt':
-      renameQueue.value.push(event)
+function _pyEvt_download_rename_prompt(event) {
+renameQueue.value.push(event)
       if (!renameModal.visible) showNextRenamePrompt()
-      break
+}
 
-    // ---------- 通用 webview OAuth 站点（xhamster/pornhub/xvideos/javdb/google/oreno3d/erommdtube）登录结果 ----------
-    case 'site_login_result': {
+function _pyEvt_site_login_result(event) {
+{
       const siteKey = event.site
       const userRefs = {
-        xhamster: xhamsterUser, pornhub: pornhubUser, xvideos: xvideosUser,
+        xhamster: xhamsterUser, fc2: fc2User, pornhub: pornhubUser, xvideos: xvideosUser,
         javdb: javdbUser, google: googleUser, oreno3d: oreno3dUser, erommdtube: erommdtubeUser,
       }
       const userRef = userRefs[siteKey]
       if (event.logout) {
         if (userRef) userRef.value = ''
+        // 同步刷新本地登录信息缓存（否则 siteLoggedIn 残留 true，登录表单回不来）
+        if (loginInfo.value[siteKey]) loginInfo.value[siteKey].logged_in = false
         if (!event.silent) message.info(event.message || `已退出 ${siteKey} 登录`)
         addLog('系统', `${siteKey} 已退出登录`)
+        // FC2：退出后直接弹出内置浏览器登录界面（登录 → 确认抓 cookie → 全功能恢复）
+        if (siteKey === 'fc2') {
+          setTimeout(() => handleSiteOAuthLogin('fc2', (() => {
+            const cred = loginInfo.value.fc2 || {}
+            return cred.email ? { email: cred.email, password: cred.password || '' } : null
+          })()), 600)
+        }
       } else if (event.logged_in) {
         const uname = event.username || '已登录'
         if (userRef) userRef.value = uname
         if (!event.silent) message.success(event.message || `${siteKey} 登录成功`)
         addLog('系统', `${siteKey} 登录成功: ${uname}`)
+        // xHamster：登录成功自动进入浏览首页（修复登录后右侧无界面）
+        if (siteKey === 'xhamster' && settings.site === 'xhamster' && !xhView.value) {
+          handleXhHome(1)
+        }
       } else {
         if (userRef) userRef.value = ''
         let hint = event.message || `${siteKey} 未登录或登录失效`
-        // javdb cookie 约 7 天有效（"记住装置"），过期提示重新登录
-        if (siteKey === 'javdb') hint = 'JavDB 登录已失效（"记住装置"约 7 天），请在左侧重新登录'
+        // javdb cookie 约 7 天有效（"记住装置"），过期提示重新登录（网络异常除外）
+        if (siteKey === 'javdb' && !event.network_issue) hint = 'JavDB 登录已失效（"记住装置"约 7 天），请在左侧重新登录'
         if (!event.silent) message.warning(hint)
         addLog('系统', `${siteKey} 未登录`)
       }
-      break
+      return
     }
+}
 
-    // ---------- JavDB 详情 ----------
-    case 'javdb_detail_loading':
+function _pyEvt_javdb_detail_loading(event) {
+clearTimeout(javdbDetailWatchdog)
       javdbDetailLoading.value = !!event.loading
-      break
+      // 详情结束时同步解除全局解析转圈（手动粘贴链接走 inspect 命令时，
+      // JavDB 后端流程不发 inspect 终止事件，inspecting 会卡满 120s 看门狗）
+      if (!event.loading) {
+        clearTimeout(inspectWatchdog)
+        inspecting.value = false
+      }
+      // loading 后 60s 无 video_detail/error 事件时解除转圈（后端静默兜底）
+      if (event.loading) {
+        javdbDetailWatchdog = setTimeout(() => {
+          if (javdbDetailLoading.value) {
+            javdbDetailLoading.value = false
+            addLog('错误', 'JavDB 详情解析超时（后端长时间无响应）')
+            message.error('JavDB 详情解析超时，请重试')
+          }
+        }, 60000)
+      }
+}
 
-    case 'javdb_video_detail':
+function _pyEvt_javdb_video_detail(event) {
+clearTimeout(javdbDetailWatchdog)
       javdbDetailLoading.value = false
+      clearTimeout(inspectWatchdog)
+      inspecting.value = false
       if (event.error) {
         message.error(event.error)
         addLog('错误', event.error)
-        break
+        return
       }
       javdbDetail.value = event.video || null
       addLog('解析', `JavDB 详情: ${event.video?.title || ''}（${event.video?.magnets?.length || 0} 磁力 / ${event.video?.previews?.length || 0} 预览图）`)
-      break
+}
 
-    // ---------- JavDB 批量下载进度 ----------
-    case 'javdb_batch_progress':
-      javdbBatchRunning.value = true
+function _pyEvt_javdb_batch_progress(event) {
+javdbBatchRunning.value = true
       javdbBatchProgress.done = event.done || 0
       javdbBatchProgress.total = event.total || 0
-      break
+}
 
-    case 'javdb_batch_done':
-      javdbBatchRunning.value = false
+function _pyEvt_javdb_batch_done(event) {
+javdbBatchRunning.value = false
       if (event.message) {
         message.info(event.message)
         addLog('下载', event.message)
       }
-      break
-  }
+}
+
+function _pyEvt_javdb_tags_vocab(event) {
+javdbTagsVocab.value = event.modes || null
+      // 首次拿到词库：进入站点默认加载当前 tags 模式的推荐作品（第五行）
+      if (
+        javdbTagsVocab.value && (settings.site || '') === 'javdb' &&
+        !javdbModeRecommend.items.length && !searchResults.value.length && !searching.value
+      ) {
+        const m = javdbTagsVocab.value.find(x => x.key === javdbTagsMode.value) || javdbTagsVocab.value[0]
+        if (m) handleJavdbTagsMode(m)
+      }
+}
+
+function _pyEvt_javdb_hot_search(event) {
+javdbHotKeywords.value = event.keywords || []
+}
+
+function _pyEvt_javdb_directory(event) {
+javdbDir.kind = event.kind || ''
+      javdbDir.label = event.label || ''
+      javdbDir.items = event.items || []
+      javdbDir.page = event.page || 1
+      javdbDir.hasMore = !!event.has_more
+}
+
+const PY_EVENT_HANDLERS = {
+  'ready': _pyEvt_ready,
+  'inspect_start': _pyEvt_inspect_start,
+  'inspect_progress': _pyEvt_inspect_progress,
+  'inspect_complete': _pyEvt_inspect_complete,
+  'inspect_error': _pyEvt_inspect_error,
+  'search_start': _pyEvt_search_start,
+  'search_result': _pyEvt_search_result,
+  'search_error': _pyEvt_search_error,
+  'download_start': _pyEvt_download_start,
+  'file_start': _pyEvt_file_start,
+  'file_progress': _pyEvt_file_progress,
+  'file_complete': _pyEvt_file_complete,
+  'task_paused': _pyEvt_task_paused,
+  'task_retry': _pyEvt_task_retry,
+  'download_complete': _pyEvt_download_complete,
+  'download_error': _pyEvt_download_error,
+  'history': _pyEvt_history,
+  'settings': _pyEvt_settings,
+  'tasks_snapshot': _pyEvt_tasks_snapshot,
+  'pa_artist_dl_progress': _pyEvt_pa_artist_dl_progress,
+  'pa_artist_dl_done': _pyEvt_pa_artist_dl_done,
+  'pa_artist_dl_error': _pyEvt_pa_artist_dl_error,
+  'media_proxy_ready': _pyEvt_media_proxy_ready,
+  'media_url_resolved': _pyEvt_media_url_resolved,
+  'thumbnails_cached': _pyEvt_thumbnails_cached,
+  'cache_cleared': _pyEvt_cache_cleared,
+  'log': _pyEvt_log,
+  'backend_error': _pyEvt_backend_error,
+  'pawchive_login_result': _pyEvt_pawchive_login_result,
+  'exhentai_login_result': _pyEvt_exhentai_login_result,
+  'twitter_login_result': _pyEvt_twitter_login_result,
+  'xhamster_home_loading': _pyEvt_xhamster_home_loading,
+  'xhamster_home': _pyEvt_xhamster_home,
+  'xhamster_categories_loading': _pyEvt_xhamster_categories_loading,
+  'xhamster_categories': _pyEvt_xhamster_categories,
+  'xhamster_category_loading': _pyEvt_xhamster_category_loading,
+  'xhamster_category': _pyEvt_xhamster_category,
+  'xhamster_shorts_loading': _pyEvt_xhamster_shorts_loading,
+  'xhamster_shorts': _pyEvt_xhamster_shorts,
+  'xhamster_detail_loading': _pyEvt_xhamster_detail_loading,
+  'xhamster_video_detail': _pyEvt_xhamster_video_detail,
+  'xhamster_notifications_loading': _pyEvt_xhamster_notifications_loading,
+  'xhamster_notifications': _pyEvt_xhamster_notifications,
+  'xhamster_my_loading': _pyEvt_xhamster_my_loading,
+  'xhamster_my': _pyEvt_xhamster_my,
+  'xhamster_user_loading': _pyEvt_xhamster_user_loading,
+  'xhamster_user_videos': _pyEvt_xhamster_user_videos,
+  'xhamster_subscribe_result': _pyEvt_xhamster_subscribe_result,
+  'xhamster_comment_result': _pyEvt_xhamster_comment_result,
+  'xhamster_batch_progress': _pyEvt_xhamster_batch_progress,
+  'xhamster_batch_done': _pyEvt_xhamster_batch_done,
+  'iwara_login_result': _pyEvt_iwara_login_result,
+  'iwara_site_changed': _pyEvt_iwara_site_changed,
+  'iwara_home': _pyEvt_iwara_home,
+  'iwara_home_loading': _pyEvt_iwara_home_loading,
+  'iwara_follow_list': _pyEvt_iwara_follow_list,
+  'iwara_follow_loading': _pyEvt_iwara_follow_loading,
+  'iwara_friend_list': _pyEvt_iwara_friend_list,
+  'iwara_friend_loading': _pyEvt_iwara_friend_loading,
+  'iwara_user_profile': _pyEvt_iwara_user_profile,
+  'iwara_follow_result': _pyEvt_iwara_follow_result,
+  'iwara_video_detail': _pyEvt_iwara_video_detail,
+  'iwara_detail_loading': _pyEvt_iwara_detail_loading,
+  'iwara_comments': _pyEvt_iwara_comments,
+  'iwara_batch_progress': _pyEvt_iwara_batch_progress,
+  'iwara_batch_done': _pyEvt_iwara_batch_done,
+  'hanime_login_result': _pyEvt_hanime_login_result,
+  'hanime_proxy_set': _pyEvt_hanime_proxy_set,
+  'pixiv_login_result': _pyEvt_pixiv_login_result,
+  'pixiv_oauth_url': _pyEvt_pixiv_oauth_url,
+  'pixiv_user_loading': _pyEvt_pixiv_user_loading,
+  'pixiv_user_result': _pyEvt_pixiv_user_result,
+  'pixiv_detail_loading': _pyEvt_pixiv_detail_loading,
+  'pixiv_detail_result': _pyEvt_pixiv_detail_result,
+  'pixiv_author_works': _pyEvt_pixiv_author_works,
+  'pixiv_novel_images': _pyEvt_pixiv_novel_images,
+  'pixiv_related_result': _pyEvt_pixiv_related_result,
+  'pixiv_action_result': _pyEvt_pixiv_action_result,
+  'pixiv_tags_result': _pyEvt_pixiv_tags_result,
+  'pixiv_notification_result': _pyEvt_pixiv_notification_result,
+  'pixiv_bookmark_tags_result': _pyEvt_pixiv_bookmark_tags_result,
+  'pixiv_upload_result': _pyEvt_pixiv_upload_result,
+  'pixiv_batch_progress': _pyEvt_pixiv_batch_progress,
+  'pixiv_batch_done': _pyEvt_pixiv_batch_done,
+  'pixiv_proxy_set': _pyEvt_pixiv_proxy_set,
+  'hanime_home': _pyEvt_hanime_home,
+  'hanime_home_loading': _pyEvt_hanime_home_loading,
+  'hanime_video_detail': _pyEvt_hanime_video_detail,
+  'hanime_detail_loading': _pyEvt_hanime_detail_loading,
+  'hanime_comments': _pyEvt_hanime_comments,
+  'hanime_comment_result': _pyEvt_hanime_comment_result,
+  'hanime_save_result': _pyEvt_hanime_save_result,
+  'hanime_user_videos': _pyEvt_hanime_user_videos,
+  'hanime_user_loading': _pyEvt_hanime_user_loading,
+  'hanime_batch_progress': _pyEvt_hanime_batch_progress,
+  'hanime_batch_done': _pyEvt_hanime_batch_done,
+  'oreno_proxy_set': _pyEvt_oreno_proxy_set,
+  'oreno_home': _pyEvt_oreno_home,
+  'oreno_home_loading': _pyEvt_oreno_home_loading,
+  'oreno_list': _pyEvt_oreno_list,
+  'oreno_list_loading': _pyEvt_oreno_list_loading,
+  'oreno_tags': _pyEvt_oreno_tags,
+  'oreno_tags_loading': _pyEvt_oreno_tags_loading,
+  'oreno_characters': _pyEvt_oreno_characters,
+  'oreno_chars_loading': _pyEvt_oreno_chars_loading,
+  'oreno_authors': _pyEvt_oreno_authors,
+  'oreno_authors_loading': _pyEvt_oreno_authors_loading,
+  'oreno_fav_result': _pyEvt_oreno_fav_result,
+  'oreno_video_detail': _pyEvt_oreno_video_detail,
+  'oreno_detail_loading': _pyEvt_oreno_detail_loading,
+  'oreno_batch_progress': _pyEvt_oreno_batch_progress,
+  'oreno_batch_done': _pyEvt_oreno_batch_done,
+  'asmr_login_result': _pyEvt_asmr_login_result,
+  'asmr_proxy_set': _pyEvt_asmr_proxy_set,
+  'asmr_list': _pyEvt_asmr_list,
+  'move_task_folder_result': _pyEvt_move_task_folder_result,
+  'reverse_start': _pyEvt_reverse_start,
+  'reverse_site_update': _pyEvt_reverse_site_update,
+  'reverse_all_done': _pyEvt_reverse_all_done,
+  'reverse_cancelled': _pyEvt_reverse_cancelled,
+  'reverse_error': _pyEvt_reverse_error,
+  'reverse_download_start': _pyEvt_reverse_download_start,
+  'reverse_download_done': _pyEvt_reverse_download_done,
+  'reverse_download_error': _pyEvt_reverse_download_error,
+  'reverse_paste': _pyEvt_reverse_paste,
+  'reverse_proxy_set': _pyEvt_reverse_proxy_set,
+  'asmr_list_loading': _pyEvt_asmr_list_loading,
+  'asmr_video_detail': _pyEvt_asmr_video_detail,
+  'asmr_related_extra': _pyEvt_asmr_related_extra,
+  'pa_fav_result': _pyEvt_pa_fav_result,
+  'gs_state': _pyEvt_gs_state,
+  'asmr_detail_loading': _pyEvt_asmr_detail_loading,
+  'asmr_circles': _pyEvt_asmr_circles,
+  'asmr_tags': _pyEvt_asmr_circles,
+  'asmr_vas': _pyEvt_asmr_circles,
+  'asmr_circles_loading': _pyEvt_asmr_circles_loading,
+  'asmr_tags_loading': _pyEvt_asmr_circles_loading,
+  'asmr_vas_loading': _pyEvt_asmr_circles_loading,
+  'asmr_fav_result': _pyEvt_asmr_fav_result,
+  'asmr_batch_progress': _pyEvt_asmr_batch_progress,
+  'asmr_batch_done': _pyEvt_asmr_batch_done,
+  'login_info': _pyEvt_login_info,
+  'account_saved': _pyEvt_account_saved,
+  'account_error': _pyEvt_account_error,
+  'exhentai_torrents': _pyEvt_exhentai_torrents,
+  'exhentai_torrents_error': _pyEvt_exhentai_torrents_error,
+  'exhentai_magnet': _pyEvt_exhentai_magnet,
+  'exhentai_magnet_error': _pyEvt_exhentai_magnet_error,
+  'ex_gallery_info': _pyEvt_ex_gallery_info,
+  'ex_gallery_info_error': _pyEvt_ex_gallery_info_error,
+  'bg_busy': _pyEvt_bg_busy,
+  'ex_torrents_result': _pyEvt_ex_torrents_result,
+  'ex_torrent_saved': _pyEvt_ex_torrent_saved,
+  'pa_post_info': _pyEvt_pa_post_info,
+  'pa_post_info_error': _pyEvt_pa_post_info_error,
+  'pa_artist_posts': _pyEvt_pa_artist_posts,
+  'pa_artist_posts_error': _pyEvt_pa_artist_posts_error,
+  'ex_hidden_tags': _pyEvt_ex_hidden_tags,
+  'search_history': _pyEvt_search_history,
+  'translate_result': _pyEvt_translate_result,
+  'translate_batch_result': _pyEvt_translate_batch_result,
+  'github_update_info': _pyEvt_github_update_info,
+  'changelog_info': _pyEvt_changelog_info,
+  'update_download_progress': _pyEvt_update_download_progress,
+  'update_download_done': _pyEvt_update_download_done,
+  'update_download_error': _pyEvt_update_download_error,
+  'update_installer_launched': _pyEvt_update_installer_launched,
+  'github_update_marked': _pyEvt_github_update_marked,
+  'local_favorites': _pyEvt_local_favorites,
+  'local_favorites_saved': _pyEvt_local_favorites_saved,
+  'local_favorites_error': _pyEvt_local_favorites_error,
+  'twitter_follow_loading': _pyEvt_twitter_follow_loading,
+  'twitter_follow_list': _pyEvt_twitter_follow_list,
+  'twitter_browse_loading': _pyEvt_twitter_browse_loading,
+  'twitter_browse_progress': _pyEvt_twitter_browse_progress,
+  'twitter_user_feed_loading': _pyEvt_twitter_user_feed_loading,
+  'twitter_user_feed': _pyEvt_twitter_user_feed,
+  'twitter_browse_feed': _pyEvt_twitter_browse_feed,
+  'twitter_cache_cleared': _pyEvt_twitter_cache_cleared,
+  'twitter_follows': _pyEvt_twitter_follows,
+  'twitter_follow_tags': _pyEvt_twitter_follow_tags,
+  'twitter_follow_result': _pyEvt_twitter_follow_result,
+  'download_rename_prompt': _pyEvt_download_rename_prompt,
+  'site_login_result': _pyEvt_site_login_result,
+  'javdb_detail_loading': _pyEvt_javdb_detail_loading,
+  'javdb_video_detail': _pyEvt_javdb_video_detail,
+  'javdb_batch_progress': _pyEvt_javdb_batch_progress,
+  'javdb_batch_done': _pyEvt_javdb_batch_done,
+  'javdb_tags_vocab': _pyEvt_javdb_tags_vocab,
+  'javdb_hot_search': _pyEvt_javdb_hot_search,
+  'javdb_directory': _pyEvt_javdb_directory,
+}
+
+function handlePythonEvent(event) {
+  const h = PY_EVENT_HANDLERS[event && event.event]
+  if (h) h(event)
 }
 
 // ============================
@@ -2803,6 +3763,16 @@ function isPawchiveUrl(text) {
 // 判断输入是否为 ExHentai 画廊链接（exhentai.org / e-hentai.org）
 function isExhentaiUrl(text) {
   return /(e-hentai|exhentai)\.org\/g\/\d+\/[0-9a-f]+/i.test(text)
+}
+
+// 判断输入是否为 xHamster 链接（任意子域的 xhamster.com 页面，走后端 xhamster_inspect）
+function isXhamsterUrl(text) {
+  return /^https?:\/\/([a-z0-9-]+\.)*xhamster\.com\//i.test((text || '').trim())
+}
+
+// 判断输入是否为 FC2 内容页链接（video.fc2.com/content/{id} 或 /a/content/{id}，走后端 fc2_inspect）
+function isFc2Url(text) {
+  return /^https?:\/\/([a-z0-9-]+\.)*fc2\.com\/(?:a\/)?content\/[0-9A-Za-z]{12,20}/i.test((text || '').trim())
 }
 
 // 判断输入是否为 JavDB 链接（javdb.com/v/{id} 详情页）
@@ -2841,14 +3811,29 @@ function isAsmrUrl(text) {
   return /^https?:\/\/(www\.)?(asmr-100|asmr)\.\w+\/work\/\d+/i.test((text || '').trim())
 }
 
-const siteNames = { bunkr: 'Bunkr', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', pixiv: 'P站', oreno3d: 'O3D', erommdtube: 'E站', asmr: '音声' }
+const siteNames = { bunkr: 'Bunkr', coomerst: 'Coomer', coomerfans: 'CoomerFans', fapello: 'Fapello', leakedzone: 'Leakedzone', coomer: 'Coomer', pawchive: 'Pawchive', exhentai: 'EX', twitter: 'X', iwara: 'Iwara', hanime: 'H站', pixiv: 'P站', oreno3d: 'O3D', erommdtube: 'E站', asmr: '音声' }
 function siteNameOf(s) {
   return siteNames[s] || (s ? String(s) : '未知')
 }
 
+// 每站只提醒一次（本会话内）：切入站点时若已知登录失效/未登录，此时才提示
+// （启动期的登录检查全部后台静默，不再打扰）
+const loginWarnedSites = new Set()
+
 // 切换站点（Bunkr / Coomer），清空当前结果并持久化设置
 function updateSite(site) {
   settings.site = site
+  // 用户主动切站时才做登录提醒（启动静默检查的结果只更新账号卡片）
+  if (loginInfo.value[site] && loginInfo.value[site].logged_in === false
+      && !loginWarnedSites.has(site)) {
+    loginWarnedSites.add(site)
+    message.warning(`${siteNameOf(site)} 未登录或登录已失效，可点左侧登录卡片重新登录`)
+  }
+  // 通用站点框架：切到配置驱动站点时若尚无状态，自动发首屏命令（GSV 工具条按钮的前置）
+  if (gsConfigFor(site) && !gsStates.value[site]) {
+    const homeBtn = (gsConfigFor(site).toolbar.buttons || []).find(b => b.cmd === 'home')
+    if (homeBtn) handleGsCommand({ site, cmd: 'home', ...(homeBtn.args || {}) })
+  }
   // 切换站点后清空旧站点的搜索结果与文件列表，避免混淆
   searchResults.value = []
   fileList.value = []
@@ -2877,8 +3862,8 @@ function updateSite(site) {
 function handleSearch() {
   const text = searchQuery.value.trim()
   if (!text) return
-  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isPixivUrl(text) || isOrenoUrl(text) || isAsmrUrl(text) || isJavdbUrl(text)) {
-    // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR / JavDB 链接，直接解析（后端按链接自动路由）
+  if (isBunkrUrl(text) || isCoomerUrl(text) || isPawchiveUrl(text) || isExhentaiUrl(text) || isTwitterUrl(text) || isIwaraUrl(text) || isHanimeUrl(text) || isPixivUrl(text) || isOrenoUrl(text) || isAsmrUrl(text) || isJavdbUrl(text) || isXhamsterUrl(text) || isFc2Url(text)) {
+    // 粘贴的是 Bunkr / Coomer / Pawchive / ExHentai / Twitter / Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR / JavDB / xHamster / FC2 链接，直接解析（后端按链接自动路由）
     url.value = text
     cameFromSearch.value = false
     handleInspect()
@@ -2895,6 +3880,22 @@ function doSearch(query, page) {
     return
   }
   searching.value = true
+  // 新搜索：清当前站链式详情快照（返回链以新搜索结果为界）
+  if (settings.site) {
+    detailSnapClear(settings.site)
+    if (settings.site === 'oreno3d' || settings.site === 'erommdtube') detailSnapClear('oreno')
+  }
+  // 搜索时退出下载管理面板与文件收集锁定视图——此前在下载/文件列表界面
+  // 搜索后结果区被面板挡住（RightPanel v-show="!detailVisible"），看起来"无法搜索跳转"
+  if (detailVisible.value) detailVisible.value = false
+  batchFileCollected.value = false
+  // 搜索时退出 EX 画廊详情/内联详情/收藏视图（EX 详情覆盖搜索结果区，搜了"没反应"）
+  if (settings.site === 'exhentai') {
+    exGalleryDetail.value = null
+    exInlineDetail.value = false
+    exFavMode.value = false
+    exPopularMode.value = false
+  }
   paHomeMode.value = false   // 新搜索退出 PA 主页模式（翻页不再走主页命令）
   if (page === 1) {
     searchResults.value = []
@@ -2908,6 +3909,12 @@ function doSearch(query, page) {
     // 新搜索：清空 EX 批量母文件夹，避免误套用
     exBatchParentFolder.value = ''
   }
+  // 通用站点框架：全局搜索框路由到站点 gs 搜索（GSV 列表渲染，不进通用搜索结果区）
+  if (gsConfigFor(settings.site || '')) {
+    searching.value = false
+    handleGsCommand({ site: settings.site, cmd: 'search', query, page })
+    return
+  }
   // 退出 X 关注视图 / Iwara 主页等视图，展示搜索结果
   twFollowMode.value = ''
   twFollowItems.value = []
@@ -2915,16 +3922,24 @@ function doSearch(query, page) {
   haView.value = ''
   orView.value = ''
   asmrView.value = ''
+  xhView.value = ''   // xHamster 浏览视图让位给搜索结果
   // Pixiv：搜索时退出用户页/详情视图，翻页走搜索命令（不走 feed 翻页）
   pixivState.view = ''
   pixivListCtx.mode = ''
   pixivActiveFeed.value = ''
+  pixivListCtx.feedKind = ''   // 搜索结果的 feed_kind 为空，清空期望值防误杀
   exFavMode.value = false
   exGalleryDetail.value = null
   paPostDetail.value = null
   paArtistPosts.value = null
   javdbDetail.value = null
+  javdbListCtx.mode = ''
+  javdbListCtx.url = ''
+  javdbListCtx.label = ''
+  javdbDir.kind = ''    // 新搜索退出目录浏览视图
   const options = JSON.parse(JSON.stringify(settings))
+  // JavDB：附带搜索类型（影片/演员/系列/片商/导演/番号/标签 → f= 参数）
+  if ((settings.site || 'bunkr') === 'javdb') options.javdb_field = javdbSearchField.value
   window.api.sendCommand({
     cmd: 'search',
     query,
@@ -2958,7 +3973,7 @@ function handleGoPage(page) {
     handlePawchiveHome(target)
     return
   }
-  // Pixiv feed/收藏/关注粉丝列表模式：翻页走对应命令（App API offset 分页）
+  // Pixiv feed/收藏/关注粉丝列表模式：翻页走对应命令（收藏为 next_url 游标分页，页码顺序前进）
   if ((settings.site || 'bunkr') === 'pixiv' && pixivListCtx.mode) {
     if (pixivListCtx.mode === 'feed') {
       window.api.sendCommand({ cmd: 'pixiv_feed', kind: pixivListCtx.kind, page: target })
@@ -2975,6 +3990,20 @@ function handleGoPage(page) {
       })
     } else {
       pixivListCtx.mode = ''
+    }
+    return
+  }
+  // JavDB 首页/演员/通用列表模式：翻页走对应命令（非搜索命令）
+  if ((settings.site || 'bunkr') === 'javdb' && javdbListCtx.mode) {
+    if (javdbListCtx.mode === 'home') {
+      window.api.sendCommand({ cmd: 'javdb_home', page: target })
+    } else if (javdbListCtx.mode === 'url') {
+      window.api.sendCommand({
+        cmd: 'javdb_open_url', url: javdbListCtx.url,
+        label: javdbListCtx.label || '', page: target,
+      })
+    } else {
+      window.api.sendCommand({ cmd: 'javdb_actor', url: javdbListCtx.url, page: target })
     }
     return
   }
@@ -3006,6 +4035,8 @@ function openSearchResult(item) {
   cameFromSearch.value = true
   paPostDetail.value = null
   paArtistPosts.value = null
+  // Pixiv 小说格式选择（详情"下载小说（txt/word）"下拉设置），handleInspect 发命令时取用
+  pixivNovelFmtOverride.value = item._novel_fmt || ''
   // 解析媒体时退出 Iwara 视图（主页/详情），展示文件列表
   iwView.value = ''
   iwDetail.value = null
@@ -3015,6 +4046,10 @@ function openSearchResult(item) {
   haDetail.value = null
   orView.value = ''
   orDetail.value = null
+  // 解析媒体时退出 xHamster 浏览视图，展示文件列表
+  xhView.value = ''
+  xhDetail.value = null
+  xhComments.value = []
   // 解析媒体时退出 X 关注/浏览视图，展示文件列表
   twFollowMode.value = ''
   twViewUser.value = null
@@ -3023,19 +4058,35 @@ function openSearchResult(item) {
 }
 
 // 解析反馈：点击瞬间立即进入"解析中"（乐观更新，不等后端 inspect_start 事件），
-// 并挂 120s 看门狗防止后端无响应导致 loading 卡死
-function beginInspectFeedback() {
-  inspecting.value = true
-  inspectProgress.current = 0
-  inspectProgress.total = 0
+// 并挂看门狗防止后端无响应导致 loading 卡死
+function armInspectWatchdog(ms) {
   clearTimeout(inspectWatchdog)
   inspectWatchdog = setTimeout(() => {
     if (inspecting.value) {
       inspecting.value = false
-      addLog('错误', '解析超时（后端 120 秒无响应），请检查网络或代理后重试')
+      addLog('错误', '解析超时（后端长时间无响应），请检查网络或代理后重试')
       message.error('解析超时：后端长时间无响应，请检查网络/代理后重试')
     }
-  }, 120000)
+  }, ms)
+}
+
+function beginInspectFeedback() {
+  inspecting.value = true
+  inspectProgress.current = 0
+  inspectProgress.total = 0
+  armInspectWatchdog(120000)
+}
+
+// 搜索看门狗：search_start 后 90s 无 result/error 时解除转圈（后端静默兜底）
+function armSearchWatchdog(ms = 90000) {
+  clearTimeout(searchWatchdog)
+  searchWatchdog = setTimeout(() => {
+    if (searching.value) {
+      searching.value = false
+      addLog('错误', '搜索超时（后端长时间无响应）')
+      message.error('搜索超时：后端长时间无响应，请重试')
+    }
+  }, ms)
 }
 
 function handleInspect() {
@@ -3044,6 +4095,12 @@ function handleInspect() {
   if (!window.api) {
     console.error('[App] window.api 未定义！')
     addLog('错误', 'window.api 未定义，preload 可能未加载')
+    return
+  }
+  // EX 批量解析进行中：单个 inspect 的 inspect_complete 会被误计入批量计数、
+  // 文件混入批量收集列表（原 handleExOpenGallery 内的同款保护，点开画廊改为仅查看后移到这里）
+  if (exBatchDownloading.value || exBatchPending.value > 0) {
+    message.info('批量解析进行中，请等批量结束后再解析（画廊详情仍可点开浏览）')
     return
   }
   fileList.value = []
@@ -3056,6 +4113,11 @@ function handleInspect() {
   exBatchParentFolder.value = ''
   // reactive 对象是 Proxy，无法被 IPC 克隆，必须先转成纯对象
   const options = JSON.parse(JSON.stringify(settings))
+  // Pixiv 小说格式一次性覆盖（txt/docx）
+  if (pixivNovelFmtOverride.value) {
+    options.pixiv_novel_fmt = pixivNovelFmtOverride.value
+    pixivNovelFmtOverride.value = ''
+  }
   console.log('[App] 发送 inspect 命令')
   window.api.sendCommand({
     cmd: 'inspect',
@@ -3109,6 +4171,8 @@ async function handleDownload(selectedItems, opts = {}) {
     album_name: opts.album_name ?? (opts.fromBatch ? '' : (albumInfo.album_name || '')),
     album_id: opts.fromBatch ? undefined : (albumInfo.album_id || undefined),
   })
+  // 通用反馈：提交后马上提示（下载管理面板会自动收到任务快照）
+  message.success(`任务已提交（${plainItems.length} 个文件）`)
 }
 
 function findDuplicateItems(items) {
@@ -3196,7 +4260,7 @@ function handlePawchiveLogin(username, password) {
     addLog('错误', 'window.api 未定义')
     return
   }
-  pawchiveLoginLoading.value = true
+  setLoginLoading('pawchive', true)
   window.api.sendCommand({
     cmd: 'pawchive_login',
     username,
@@ -3209,7 +4273,91 @@ function handlePawchiveLogout() {
   window.api.sendCommand({ cmd: 'pawchive_logout' })
 }
 
-function handlePawchiveFavorites() {
+// 通用站点命令上行（模块化契约：{site, cmd, ...payload} → `${site}_${cmd}` 发后端）
+let lastFc2Cookies = ''
+// FC2 分区 cookie 同步开关：只有后端报 NEED_LOGIN 后才允许从分区拉 cookie 推给后端。
+// 此前每条命令前置同步——重启后会把分区里冻结的旧会话倒灌覆盖后端 restore 出的新会话
+//（FC2 服务端轮换会话后旧快照已作废），导致反复要求重新登录。
+let fc2NeedCookieSync = false
+// FC2 多级返回：把上一推入视图的状态快照写回站点状态（Fc2View 保存的不可变快照恢复）
+function handleGsRestoreState(payload) {
+  if (!payload || payload.site !== 'fc2' || !payload.state) return
+  gsStates.value = { ...gsStates.value, fc2: payload.state }
+}
+
+async function handleGsCommand(evt) {
+  if (!window.api || !evt || !evt.site || !evt.cmd) return
+  const { site, cmd, ...payload } = evt
+  // 通用框架：卡片 item 可能是 Vue 响应式 Proxy——JSON.stringify 能通过但 IPC
+  // structuredClone 依然拒绝（"object could not be cloned"，命令静默丢失），
+  // 必须无条件深拷贝成纯对象再发
+  const safePayload = JSON.parse(JSON.stringify(payload))
+  // FC2：需要登录的内容 → 直接打开内置浏览器登录弹窗（不发给后端）
+  if (site === 'fc2' && cmd === 'open-login') {
+    handleSiteOAuthLogin('fc2')
+    return
+  }
+  // FC2：仅在后端报 NEED_LOGIN 后同步分区 cookie（正常时后端受控 dict 自转并回写账号档案，
+  // 每命令前置同步反而会在重启后把分区旧会话倒灌覆盖后端 restore 的新会话 → 反复要求重登）
+  if (site === 'fc2' && fc2NeedCookieSync && window.api.siteGetCookies) {
+    fc2NeedCookieSync = false
+    try {
+      const r = await window.api.siteGetCookies('fc2')
+      if (r && r.ok && r.count > 3 && r.cookieStr && r.cookieStr !== lastFc2Cookies) {
+        lastFc2Cookies = r.cookieStr
+        window.api.sendCommand({ cmd: 'fc2_set_cookies', cookie_str: r.cookieStr })
+        await new Promise(res => setTimeout(res, 400))  // 等后端应用 cookie（同队列 FIFO 保序）
+      }
+    } catch (e) { /* 刷新失败不阻塞命令 */ }
+  }
+  window.api.sendCommand({ cmd: `${site}_${cmd}`, ...safePayload })
+}
+
+// 通用返回（多层）：弹出站点视图栈并恢复上一层视图；栈空回落该站主页。
+// 覆盖 iwara / asmr（视图状态可由现有 handler 恢复）；其余站维持各自返回逻辑。
+function handleSiteBack(site) {
+  const prev = navPopView(site)
+  if (site === 'iwara') {
+    if (prev === 'following') { handleIwFollowing(1); return }
+    if (prev === 'friends') { handleIwFriends(1); return }
+    handleIwHome(1)
+    return
+  }
+  if (site === 'asmr') {
+    if (prev === 'favorites') { handleAsmrFavorites(1); return }
+    if (prev === 'works') { handleAsmrWorks(1); return }
+    handleAsmrPopular(1)
+    return
+  }
+}
+
+// 回到站点起点（清空视图栈 + 搜索上下文，回到该站主页内容流）
+const SITE_BACK_ROOT_SITES = ['iwara', 'asmr', 'xhamster', 'hanime1', 'oreno']
+function handleSiteBackRoot(site) {
+  navClearView(site)
+  cameFromSearch.value = false
+  searchQuery.value = ''
+  searchResults.value = []
+  fileList.value = []
+  if (site === 'iwara') { handleIwHome(1); return }
+  if (site === 'asmr') { handleAsmrPopular(1); return }
+  if (site === 'xhamster') { handleXhTab('home'); return }
+  if (site === 'hanime1') { handleHaHome(); return }
+  if (site === 'oreno') { handleOrHome(1); return }
+}
+
+// PA 关注/取关画师（kemono API）
+function handlePaFavToggle(payload) {
+  if (!window.api || !payload || !payload.user_id) return
+  window.api.sendCommand({
+    cmd: 'pawchive_favorite',
+    service: payload.service,
+    user_id: payload.user_id,
+    unfavorite: !!payload.favorited,
+  })
+}
+
+function handlePawchiveFavorites(favType) {
   if (!window.api) return
   // 清空当前列表，以"我的收藏"作为搜索结果展示
   searchQuery.value = ''
@@ -3218,7 +4366,7 @@ function handlePawchiveFavorites() {
   searchResults.value = []
   searching.value = true
   paHomeMode.value = false
-  window.api.sendCommand({ cmd: 'pawchive_favorites' })
+  window.api.sendCommand({ cmd: 'pawchive_favorites', fav_type: favType === 'post' ? 'post' : 'creator' })
 }
 
 // PA 主页模式（全站最新帖子流，支持翻页）
@@ -3347,7 +4495,7 @@ function handleTranslateFree(payload) {
   const { text = '', from = 'auto', to = 'zh-CN' } = payload || {}
   translateResult.value = null  // 清空旧结果，触发面板 loading
   // 根据设置里的引擎选择后端命令：默认 google_free（translate_free）
-  const engine = settings.value?.translate_engine || 'google_free'
+  const engine = settings.translate_engine || 'google_free'
   const cmd = engine === 'youdao' ? 'translate_youdao' : 'translate_free'
   window.api.sendCommand({ cmd, text, from, to })
 }
@@ -3447,22 +4595,69 @@ function maybeAutoTranslateAfterSearch() {
 // ============================
 // P3 设置功能：快捷键 / 拟态模式
 // ============================
-// 快捷键变更：保存 settings + 通知主进程注册/注销
-function handleShortcutChange(action, accelerator) {
-  if (!settings.value) return
-  const key = `shortcut_${action}`
-  // 通过 updateSettings 触发持久化（与 LeftPanel update() 同路径）
-  updateSettings({ [key]: accelerator || '' })
-  // 通知主进程注册
-  if (window.api && window.api.registerShortcut) {
-    window.api.registerShortcut(action, accelerator || '').catch(() => {})
+// 快捷键变更：保存 settings + 通知主进程注册/注销。
+// （2026-09-14 修复真凶：settings 是 reactive 对象不是 ref，`settings.value`
+//   恒 undefined → 本函数曾在第一行直接 return——录入后从不保存、从不注册，
+//   即"快捷键录制一直不可用"的根因）
+// 通用代理（Pornhub / GitHub 更新共用）：保存并立即应用到 Pornhub webview 会话。
+// 留空 = 默认 http://127.0.0.1:10809；填 off = 直连（用户挂 VPN 场景）
+const COMMON_PROXY_DEFAULT = 'http://127.0.0.1:10809'
+function handleCommonProxy(v) {
+  const val = (v || '').trim()
+  updateSettings({ common_proxy: val })
+  const eff = (!val || val.toLowerCase() === 'off') ? val : (val.startsWith('http') || val.startsWith('socks') ? val : 'http://' + val)
+  if (window.api) {
+    window.api.siteSetProxy('pornhub', eff || 'http://127.0.0.1:10809').catch(() => {})
+    window.api.sendCommand({ cmd: 'common_proxy', proxy: val })
   }
+  addLog('系统', val ? `通用代理已更新：${eff}` : '通用代理已恢复默认（http://127.0.0.1:10809）')
+}
+
+// 手动抓取（资源嗅探）：打开独立全量窗口（内置浏览器 + 实时媒体捕获，复刻 res-downloader）
+function handleSnifferOpen() {
+  if (window.api && window.api.snifferOpen) window.api.snifferOpen()
+}
+
+// Leakedzone：Edge 过盾登录（真实浏览器引擎过 Turnstile；CDP 抓 Cookie+UA 保存）
+function handleLeakEdgeLogin() {
+  if (window.api && window.api.leakEdgeLogin) {
+    message.info('正在打开专用 Edge 窗口…', 3000)
+    window.api.leakEdgeLogin()
+  }
+}
+function handleLeakEdgeHarvest() {
+  if (window.api && window.api.leakEdgeHarvest) window.api.leakEdgeHarvest()
+}
+
+
+async function handleShortcutChange(action, accelerator) {
+  updateSettings({ [`shortcut_${action}`]: accelerator || '' })
+  if (!window.api || !window.api.registerShortcut) return
+  try {
+    const r = await window.api.registerShortcut(action, accelerator || '')
+    if (r && r.ok === false) {
+      // 注册失败（组合被系统/其它程序占用）：回滚设置并提示
+      updateSettings({ [`shortcut_${action}`]: '' })
+      addLog('错误', `快捷键注册失败：${r.error || '未知错误'}`)
+      message.error(`快捷键注册失败：${r.error || '该组合可能已被其它程序占用'}`)
+    } else if (accelerator) {
+      addLog('系统', `快捷键已注册：${formatShortcutLog(accelerator)}`)
+    }
+  } catch { /* IPC 异常静默 */ }
+}
+
+// ============================
+// 主界面模式（经典 ↔ 热门平台里模式）：切换手势为「连按 3 次单独 Alt」
+// （setupTripleAltListener），界面上不展示任何切换按钮
+// ============================
+function formatShortcutLog(acc) {
+  return String(acc || '').split('+').map(x => x.trim()).filter(Boolean).join(' + ')
 }
 
 // 启动时同步设置到主进程（注册全部快捷键）
 function syncP3SettingsToMain() {
-  if (!window.api || !settings.value) return
-  const s = settings.value
+  if (!window.api || !settings) return
+  const s = settings
   const actions = [
     'quick_minimize',
     'toggle_mimic',
@@ -3473,6 +4668,11 @@ function syncP3SettingsToMain() {
     if (acc && window.api.registerShortcut) {
       window.api.registerShortcut(a, acc).catch(() => {})
     }
+  }
+  // 通用代理（Pornhub / GitHub 更新共用）：留空 = 默认 http://127.0.0.1:10809
+  const cp = s.common_proxy || 'http://127.0.0.1:10809'
+  if (window.api.siteSetProxy) {
+    window.api.siteSetProxy('pornhub', cp).catch(() => {})
   }
 }
 
@@ -3490,6 +4690,92 @@ function setupShortcutTriggeredListener() {
       }
     }
   })
+}
+
+// ============================
+// 连按 3 次单独 Alt（1.5 秒内）：切换 经典下载器 ↔ 热门平台 里模式
+// （界面上不展示切换按钮，此为唯一入口；1.5 秒内三连，重复三连来回切换）
+// ============================
+let altTapTimes = []
+let tripleAltInited = false
+// ============================
+// 登录转圈取消：网络不佳时后端登录结果迟迟不回，转圈永不复位导致「再也登不上」。
+// ① 各登录按钮转圈旁提供「取消」（LeftPanel emit cancel-login）；
+// ② 60 秒无响应自动复位兜底。取消/超时只复位前端等待，后端跑完的结果仍会照常刷账号卡。
+// ============================
+const loginLoadingRefs = {
+  pawchive: pawchiveLoginLoading,
+  iwara: iwaraLoginLoading,
+  hanime: hanimeLoginLoading,
+  pixiv: pixivLoginLoading,
+  asmr: asmrLoginLoading,
+}
+const loginLoadingTimers = {}
+const LOGIN_LOADING_TIMEOUT = 60000
+
+function setLoginLoading(key, val) {
+  const r = loginLoadingRefs[key]
+  if (!r) return
+  if (loginLoadingTimers[key]) {
+    clearTimeout(loginLoadingTimers[key])
+    loginLoadingTimers[key] = null
+  }
+  r.value = val
+  if (val) {
+    loginLoadingTimers[key] = setTimeout(() => {
+      if (r.value) {
+        r.value = false
+        addLog('系统', '登录等待已超时自动取消（60 秒无响应，网络不佳），可重新点击登录')
+      }
+    }, LOGIN_LOADING_TIMEOUT)
+  }
+}
+
+function handleCancelLogin(key) {
+  setLoginLoading(key, false)
+  addLog('系统', '已取消登录等待——后端仍会在后台尝试，登录结果稍后自动刷新到账号卡')
+}
+
+// 里/美好世界自定义标题栏：窗口控制 + 最大化状态（最大化时容器去圆角贴边）
+const winMaxed = ref(false)
+
+function winCtl(action) {
+  window.api && window.api.winControl && window.api.winControl(action)
+}
+
+async function handleRestartApp() {
+  addLog('系统', '正在重启应用……（重启后保持当前停留的世界）')
+  try {
+    if (window.api && window.api.restartApp) {
+      await window.api.restartApp()
+    }
+  } catch (e) { /* 重启中进程退出，忽略 */ }
+}
+
+function toggleUiMode() {
+  const next = !settings.ui_mode_hot
+  updateSettings({ ui_mode_hot: next })
+  // 美好世界 = 正常网站模式（白）；里世界 = 含 NSFW 内容的站点模式（黑）
+  message.success(next ? '已切换到美好世界（正常网站模式）' : '已切换到里世界（NSFW 站点模式）')
+  addLog('系统', next ? '三连Alt：进入美好世界（正常网站模式）' : '三连Alt：进入里世界（NSFW 站点模式）')
+}
+function setupTripleAltListener() {
+  if (tripleAltInited) return
+  tripleAltInited = true
+  window.addEventListener('keydown', (e) => {
+    const code = e.code || ''
+    if (code !== 'AltLeft' && code !== 'AltRight' && e.key !== 'Alt') return
+    // 仅统计"单独按 Alt"（同时按着其他修饰键的组合不算）
+    if (e.ctrlKey || e.shiftKey || e.metaKey) return
+    // 阻止 Alt 激活窗口菜单栏/标题栏快捷键
+    e.preventDefault()
+    const now = Date.now()
+    altTapTimes = altTapTimes.filter(t => now - t < 1500)
+    altTapTimes.push(now)
+    if (altTapTimes.length < 3) return
+    altTapTimes = []
+    toggleUiMode()
+  }, true)
 }
 
 // 关闭弹窗"记住我的选择"→ 主进程已写 settings.json，这里同步：
@@ -3590,17 +4876,30 @@ function handleExFavorites(page = 1) {
 }
 
 // EX 画廊详情（点击搜索结果 → 完整信息 + 分组标签 + 种子入口）
-// 同时自动解析全部图片并展示文件列表（点开链接自动解析展示）
+// 点开仅查看详情（封面/元数据/标签），不再自动解析下载；
+// 下载走详情里的「解析图片列表」按钮或工具栏批量下载（显式动作）
 // 注意参数名用 galleryUrl 而非 url，避免遮蔽（shadow）外层 url ref 导致 url.value = url 自赋值
+// EX 首页推荐（与主站 exhentai.org 首页相同的最新画廊列表）
+function handleExPopular(page = 1) {
+  if (!window.api) return
+  exFavMode.value = false
+  exPopularMode.value = true
+  pixivState.view = '' // 防御：退出其他站视图态
+  searching.value = false
+  window.api.sendCommand({ cmd: 'exhentai_popular', page })
+}
+
 function handleExOpenGallery(galleryUrl) {
   if (!window.api || !galleryUrl) return
   // 同步 URL 栏 + 标记来自搜索（"后退"按钮可用，回到搜索结果）
   url.value = galleryUrl
   searchQuery.value = galleryUrl
   cameFromSearch.value = true
-  // 内联详情模式：搜索结果/收藏列表还在时，详情+文件列表追加在结果下方（不跳转新界面）
-  exInlineDetail.value = searchResults.value.length > 0
-  // 退出其他站点视图，进入 EX 详情+文件列表视图
+  // 统一逻辑：点开画廊 = 新开详情界面（封面/画师/tag + 图片预览），自动解析出图；← 后退回列表
+  // （搜索结果与我的收藏行为一致；不再使用内联追加模式）
+  exInlineDetail.value = false
+  exAutoParseGallery.value = true
+  // 退出其他站点视图，进入 EX 详情视图
   paPostDetail.value = null
   paArtistPosts.value = null
   iwView.value = ''
@@ -3613,22 +4912,15 @@ function handleExOpenGallery(galleryUrl) {
   twFollowMode.value = ''
   twViewUser.value = null
   twNavStack.value = []
-  // 1) 画廊详情（标题/标签/上传者/评分/封面 + 第1页缩略图）—— 立即返回
+  // 批量解析进行中也允许点开查看详情（只有单个解析会被拦）
   exDetailLoading.value = true
   window.api.sendCommand({ cmd: 'exhentai_gallery_info', url: galleryUrl })
-  // 批量解析进行中：不再发单个 inspect（其 inspect_complete 会被误计入批量计数、
-  // 文件也会混入批量收集列表——"点画廊增加批量任务"的根因），详情仍可浏览
-  if (exBatchDownloading.value || exBatchPending.value > 0) {
-    message.info('批量解析进行中，画廊详情可浏览；单个画廊的图片解析请在批量结束后进行')
-    return
+  // 详情视图的显示条件是 fileList 为空：清掉旧文件列表并解锁批量视图锁定
+  // （此前点开自动解析时也会清空，行为保持一致）
+  if (fileList.value.length) {
+    fileList.value = []
+    batchFileCollected.value = false
   }
-  // 2) 自动解析全部图片直链，进入文件列表视图（带批量下载）
-  fileList.value = []
-  beginInspectFeedback()  // 点击瞬间立即显示"解析中"，不再无反馈
-  // 解锁批量视图锁定（批量已结束：单个画廊解析正常显示文件列表）
-  batchFileCollected.value = false
-  const options = JSON.parse(JSON.stringify(settings))
-  window.api.sendCommand({ cmd: 'inspect', url: galleryUrl, options })
 }
 
 // EX 批量下载：把多个画廊的全部图片解析后追加到 fileList，统一勾选下载
@@ -3680,20 +4972,65 @@ async function confirmExBatchFolder(useFolder) {
   message.info(`后台批量解析 ${exBatchPending.value} 个画廊，${tip}完成后自动下载（可继续浏览其他页面）`)
   const options = JSON.parse(JSON.stringify(settings))
   // 顺序解析（并发会触发 EX 限流 509）；解析结果会通过 inspect_complete 累加进 fileList
+  exBatchCancelled.value = false
   for (const u of urls) {
+    if (exBatchCancelled.value) break  // 用户点了「取消批量」：剩余画廊不再派发
     if (!u) continue
     url.value = u
     window.api.sendCommand({ cmd: 'inspect', url: u, options })
     // 间隔 1.5s 防 509
     await new Promise(r => setTimeout(r, 1500))
   }
+  // 取消时：已派发的等返回后按 cancelled 收尾（不自动下载）；一个都没派发则立即收尾
+  if (exBatchCancelled.value && exBatchPending.value === 0) {
+    finishExBatch(true)
+    return
+  }
   // 注：exBatchPending 异步递减；全部完成后 inspect_complete handler 内自动提交下载任务
   addLog('系统', `后台批量解析请求已派发（${exBatchPending.value} 个画廊待返回）`)
+}
+
+// 批量解析收尾（inspect_complete / inspect_error / 取消共用）：cancelled=true 不自动下载
+function finishExBatch(cancelled) {
+  exBatchDownloading.value = false
+  exBatchCancelled.value = false
+  const selected = fileList.value.filter(it => it.selected)
+  if (cancelled) {
+    addLog('系统', `批量解析已取消，共收集 ${fileList.value.length} 个文件（未自动下载）`)
+    message.info(`批量解析已取消，已收集 ${fileList.value.length} 个文件，可点「查看收集的文件」勾选后手动下载`)
+    return
+  }
+  if (selected.length) {
+    addLog('系统', `后台批量解析完成，自动开始下载 ${selected.length} 个文件`)
+    message.success(`批量解析完成，已自动开始下载 ${selected.length} 个文件（失败项会在任务结束后生成清单）`)
+    handleDownload(selected, { fromBatch: true })
+  } else {
+    message.warning('批量解析完成，但没有可下载的文件')
+  }
+}
+
+// 取消 EX 批量解析：中止剩余派发；已派发的等返回后收尾（不自动下载）
+function handleExBatchCancel() {
+  if (!exBatchDownloading.value) return
+  exBatchCancelled.value = true
+  message.info('正在取消批量解析：已发出的请求会完成，剩余画廊不再解析')
+  addLog('系统', '用户取消批量解析：停止派发剩余画廊')
 }
 
 function handleExCloseDetail() {
   exGalleryDetail.value = null
   exInlineDetail.value = false
+}
+
+// 查看批量收集的文件：解锁视图锁定，回文件列表（可对单个文件勾选/取消后再下载）
+// cameFromSearch=true 让文件列表显示「后退」按钮（标题为"清空文件列表返回"，返回会丢弃预览列表，
+// 不影响已提交的下载任务）
+function handleShowCollectedFiles() {
+  if (!fileList.value.length) return
+  batchFileCollected.value = false
+  exInlineDetail.value = false
+  cameFromSearch.value = true
+  addLog('系统', `查看批量收集的文件：共 ${fileList.value.length} 个（可单独勾选/取消后点下载）`)
 }
 
 // 下载 .torrent 种子文件到 downloads/torrents/
@@ -3814,7 +5151,7 @@ function handleRefreshLogin(site) {
   else if (site === 'iwara') window.api.sendCommand({ cmd: 'iwara_check_login' })
   else if (site === 'hanime') window.api.sendCommand({ cmd: 'hanime_check_login' })
   else if (site === 'asmr') window.api.sendCommand({ cmd: 'asmr_check_login', notify: true })
-  else if (['xhamster', 'pornhub', 'xvideos', 'oreno3d', 'erommdtube'].includes(site)) window.api.sendCommand({ cmd: `${site}_check_login`, notify: true })
+  else if (['xhamster', 'pornhub', 'xvideos', 'oreno3d', 'erommdtube', 'fc2', 'javdb', 'leakedzone'].includes(site)) window.api.sendCommand({ cmd: `${site}_check_login`, notify: true })
 }
 
 // 退出 ExHentai 登录（清除已保存 cookie）
@@ -3861,7 +5198,7 @@ function handleTwitterSetProxy(proxy) {
 // ============================
 function handleIwaraLogin(email, password) {
   if (!window.api || !email.trim() || !password) return
-  iwaraLoginLoading.value = true
+  setLoginLoading('iwara', true)
   window.api.sendCommand({ cmd: 'iwara_login', email: email.trim(), password })
 }
 
@@ -3885,6 +5222,7 @@ function handleIwaraSetProxy(proxy) {
 // mode: ''=最近更新（默认）| 'subscribed'=我关注的更新（订阅流）
 function handleIwHome(page = 1, mode = '') {
   if (!window.api) return
+  navPushView('iwara', 'home')
   iwView.value = 'home'
   if (page <= 1 || mode !== iwHomeMode.value) {
     // 换模式或刷新第一页时清空旧内容
@@ -3908,6 +5246,7 @@ function handleIwSubscribed() {
 // 我的关注列表
 function handleIwFollowing(page = 1) {
   if (!window.api) return
+  navPushView('iwara', 'following')
   iwView.value = 'following'
   searchResults.value = []
   if (page <= 1) iwFollowItems.value = []
@@ -3922,6 +5261,7 @@ function handleIwFollowingMore() {
 // 我的好友列表
 function handleIwFriends(page = 1) {
   if (!window.api) return
+  navPushView('iwara', 'friends')
   iwView.value = 'friends'
   searchResults.value = []
   if (page <= 1) iwFriendItems.value = []
@@ -3948,12 +5288,21 @@ function handleIwFollow(userId, follow) {
 // 打开视频详情
 function handleIwOpenDetail(videoId) {
   if (!window.api) return
+  // 链式详情：快照当前详情，返回时逐级恢复
+  if (iwView.value === 'detail' && iwDetail.value) {
+    detailSnapPush('iwara', { detail: iwDetail.value, comments: iwComments.value })
+  }
   window.api.sendCommand({ cmd: 'iwara_video_detail', video_id: videoId })
 }
 
-// 关闭视频详情（返回上一层）
+// 关闭视频详情（先弹链式详情快照逐级恢复；弹空后走历史栈/兜底）
 function handleIwDetailBack() {
-  iwView.value = iwHomeItems.value.length ? 'home' : ''
+  const snap = detailSnapPop('iwara')
+  if (snap) { iwDetail.value = snap.detail; iwComments.value = snap.comments; return }
+  if (detailFromSearch.value === 'iwara') { detailFromSearch.value = ''; iwView.value = ''; iwDetail.value = null; iwComments.value = []; return }
+  const prev = navPopView('iwara')
+  if (prev) iwView.value = prev
+  else iwView.value = iwHomeItems.value.length ? 'home' : ''
   iwDetail.value = null
   iwComments.value = []
 }
@@ -4001,6 +5350,288 @@ function handleIwBatchDownload(payload) {
     options: JSON.parse(JSON.stringify(settings)),
   })
   addLog('下载', `批量解析下载：${usernames.length} 个用户、${videoIds.length} 个视频`)
+  // 批量任务已提交：自动打开下载管理面板（后台任务可视化，防"没反应"体感）
+  if (!detailVisible.value) {
+    detailVisible.value = true
+    message.info('批量下载任务已提交，已为你打开下载管理')
+  }
+}
+
+// ============================
+// xHamster 浏览视图：底部 Tab（首页/分类/短视频/消息/我的）+ 详情/用户/分类列表
+// ============================
+// 底部 Tab 切换（进入对应视图；无缓存数据时拉取第一页）
+function handleXhTab(tab) {
+  if (!window.api) return
+  navPushView('xhamster', tab)
+  xhTab.value = tab
+  xhView.value = tab
+  if (tab === 'home') {
+    if (!xhHomeItems.value.length) handleXhHome(1, xhHomeSort.value)
+  } else if (tab === 'categories') {
+    if (!xhCatsTrending.value.length && !xhCatsGroups.value.length) {
+      window.api.sendCommand({ cmd: 'xhamster_categories' })
+    }
+  } else if (tab === 'shorts') {
+    if (!xhShortsItems.value.length) {
+      window.api.sendCommand({ cmd: 'xhamster_shorts', page: 1 })
+    }
+  } else if (tab === 'notifications') {
+    window.api.sendCommand({ cmd: 'xhamster_notifications' })
+  } else if (tab === 'my') {
+    if (!xhMyItems.value.length) handleXhMy(xhMyTab.value, 1)
+  }
+}
+
+// 分类目录刷新（进入或手动刷新）
+function handleXhOpenCategories() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'xhamster_categories' })
+}
+
+// 短视频刷新（清空重载第 1 页）
+function handleXhShortsReload() {
+  if (!window.api) return
+  xhShortsItems.value = []
+  window.api.sendCommand({ cmd: 'xhamster_shorts', page: 1 })
+}
+
+// 消息中心刷新（未登录时后端提示去登录）
+function handleXhNotifications() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'xhamster_notifications' })
+}
+
+// 首页（page 1 换排序时清空旧内容）
+function handleXhHome(page = 1, sort = xhHomeSort.value) {
+  if (!window.api) return
+  xhView.value = 'home'
+  xhTab.value = 'home'
+  if (page <= 1 || sort !== xhHomeSort.value) xhHomeItems.value = []
+  xhHomeSort.value = sort
+  if (page <= 1) searchResults.value = []
+  window.api.sendCommand({ cmd: 'xhamster_home', page, sort })
+}
+
+function handleXhHomeMore() {
+  handleXhHome(xhHomePage.value + 1, xhHomeSort.value)
+}
+
+// 首页排序切换（新着/最多播放/最高评分）
+function handleXhHomeSort(sort) {
+  if (sort === xhHomeSort.value) return
+  handleXhHome(1, sort)
+}
+
+// 点分类进入列表（slug + 名称）
+function handleXhOpenCategory(cat) {
+  if (!window.api || !cat) return
+  xhCatSlug.value = cat.slug || cat.id || ''
+  xhCatName.value = cat.name || xhCatSlug.value
+  if (!xhCatSlug.value) return
+  navPushView('xhamster', 'category')
+  xhView.value = 'category'
+  xhCatItems.value = []
+  xhCatPage.value = 1
+  window.api.sendCommand({ cmd: 'xhamster_category', slug: xhCatSlug.value, page: 1 })
+}
+
+// 分类列表返回（历史栈上一步；栈空回分类 Tab）
+function handleXhCatBack() {
+  xhView.value = navPopView('xhamster') || 'categories'
+  xhCatItems.value = []
+}
+
+function handleXhCatMore() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'xhamster_category', slug: xhCatSlug.value, page: xhCatPage.value + 1 })
+}
+
+function handleXhShortsMore() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'xhamster_shorts', page: xhShortsPage.value + 1 })
+}
+
+// 我的关注：直接加载关注用户列表
+function handleXhMy(tab = 'favorites', page = 1) {
+  if (!window.api) return
+  xhView.value = 'my'
+  xhTab.value = 'my'
+  if (page <= 1 || tab !== xhMyTab.value) xhMyItems.value = []
+  xhMyTab.value = tab
+  window.api.sendCommand({ cmd: 'xhamster_my', tab, page })
+}
+
+function handleXhMyMore() {
+  handleXhMy(xhMyTab.value, xhMyPage.value + 1)
+}
+
+// 打开视频详情（进入时由 xhamster_video_detail 事件入栈）
+function handleXhOpenDetail(item) {
+  if (!window.api || !item) return
+  if (item.kind === 'user') {
+    handleXhOpenUser(item.author || item.album_name)
+    return
+  }
+  if (item.kind === 'gallery') {
+    openSearchResult(item)
+    return
+  }
+  // 链式详情（详情内相关推荐点开下一个）：快照当前详情，返回时逐级恢复；
+  // xhDetailFrom 保留首级详情的来源（链式不覆盖，首级返回仍回正确列表）
+  const chained = xhView.value === 'detail' && xhDetail.value
+  if (chained) detailSnapPush('xhamster', { detail: xhDetail.value, comments: xhComments.value })
+  if (!chained) xhDetailFrom.value = ['home', 'category', 'my', 'user'].includes(xhView.value) ? xhView.value : 'home'
+  xhDetail.value = null
+  xhDetailError.value = ''
+  xhComments.value = []
+  window.api.sendCommand({ cmd: 'xhamster_video_detail', page_url: item.album_url })
+}
+
+// 详情返回（先弹链式详情快照逐级恢复；弹空后走历史栈/搜索来源兜底）
+function handleXhDetailBack() {
+  const snap = detailSnapPop('xhamster')
+  if (snap) { xhDetail.value = snap.detail; xhComments.value = snap.comments; xhDetailError.value = ''; return }
+  if (detailFromSearch.value === 'xhamster') { detailFromSearch.value = ''; xhView.value = ''; xhDetail.value = null; xhComments.value = []; return }
+  const prev = navPopView('xhamster')
+  if (prev) {
+    xhView.value = prev
+  } else {
+    xhView.value = xhDetailFrom.value === 'user' ? 'user' : (xhDetailFrom.value === 'category' ? 'category' : (xhDetailFrom.value === 'my' ? 'my' : 'home'))
+  }
+  xhDetail.value = null
+  xhComments.value = []
+}
+
+// 查看用户主页视频列表（用户页互跳链：详情→作者A→…→作者B，返回逐级恢复）
+function handleXhOpenUser(username) {
+  if (!window.api || !username) return
+  // 链式用户页（已在用户页又点进另一用户）：快照当前用户页上下文
+  if (xhView.value === 'user' && xhUser.value) {
+    detailSnapPush('xhamster_user', {
+      user: xhUser.value, items: xhUserItems.value, page: xhUserPage.value,
+      tab: xhUserTab.value, profile: xhUserProfile.value, hasMore: xhUserHasMore.value,
+    })
+  }
+  navPushView('xhamster', 'user')
+  xhUser.value = username
+  xhUserItems.value = []
+  xhUserPage.value = 1
+  xhUserTab.value = 'videos'
+  xhUserProfile.value = null
+  xhView.value = 'user'
+  window.api.sendCommand({ cmd: 'xhamster_user_videos', username, page: 1, tab: 'videos' })
+}
+
+// 用户主页返回（先弹用户页快照逐级恢复；弹空后走历史栈/详情兜底）
+function handleXhUserBack() {
+  const snap = detailSnapPop('xhamster_user')
+  if (snap) {
+    xhUser.value = snap.user
+    xhUserItems.value = snap.items
+    xhUserPage.value = snap.page
+    xhUserTab.value = snap.tab
+    xhUserProfile.value = snap.profile
+    xhUserHasMore.value = snap.hasMore
+    xhView.value = 'user'
+    return
+  }
+  const prev = navPopView('xhamster')
+  if (prev) xhView.value = prev
+  else if (xhDetail.value) xhView.value = 'detail'
+  else { xhView.value = 'home'; xhTab.value = 'home' }
+}
+
+function handleXhUserMore() {
+  if (!window.api) return
+  window.api.sendCommand({
+    cmd: 'xhamster_user_videos',
+    username: xhUser.value,
+    page: xhUserPage.value + 1,
+    tab: xhUserTab.value,
+  })
+}
+
+function handleXhUserTab(tab) {
+  if (!window.api || !xhUser.value) return
+  xhUserTab.value = tab || 'videos'
+  xhUserItems.value = []
+  xhUserPage.value = 1
+  window.api.sendCommand({
+    cmd: 'xhamster_user_videos',
+    username: xhUser.value,
+    page: 1,
+    tab: xhUserTab.value,
+  })
+}
+
+function handleXhSubscribe(payload) {
+  if (!window.api || !payload) return
+  xhSubscribeLoading.value = true
+  window.api.sendCommand({
+    cmd: 'xhamster_subscribe',
+    user_id: payload.user_id || '',
+    username: payload.username || '',
+    subscribe: payload.subscribe !== false,
+  })
+}
+
+function handleXhAddComment(payload) {
+  if (!window.api || !payload || !payload.text) return
+  xhCommentSending.value = true
+  window.api.sendCommand({
+    cmd: 'xhamster_add_comment',
+    entity_type: payload.entity_type || 'video',
+    entity_id: payload.entity_id || '',
+    text: payload.text,
+    page_url: payload.page_url || '',
+  })
+}
+
+// 点 tag / 分类搜索（走通用搜索命令）
+function handleXhSearchTag(tag) {
+  if (!tag) return
+  searchQuery.value = tag
+  handleSearch()
+}
+
+function handleXhSearch(query) {
+  const q = (query || '').trim()
+  if (!q) return
+  searchQuery.value = q
+  handleSearch()
+}
+
+// 批量下载（浏览区勾选的视频 URL 列表 → 后端逐个解析提交下载）
+function handleXhBatchDownload(payload) {
+  const items = Array.isArray(payload) ? payload : []
+  const urls = items.map(it => (typeof it === 'string' ? it : it && it.album_url)).filter(Boolean)
+  if (!window.api || !urls.length) return
+  xhBatchRunning.value = true
+  xhBatchProgress.done = 0
+  xhBatchProgress.total = urls.length
+  xhBatchProgress.message = '准备中...'
+  try {
+    window.api.sendCommand({
+      cmd: 'xhamster_batch_download',
+      urls,
+      // 卡片是 Vue 响应式 Proxy，直接过 IPC 会 "An object could not be cloned"
+      // → 命令发不出去且 xhBatchRunning 卡死转圈（2026-09-10 实锤），必须深拷贝
+      items: JSON.parse(JSON.stringify(items.filter(it => it && typeof it === 'object'))),
+      options: JSON.parse(JSON.stringify(settings)),
+    })
+  } catch (e) {
+    xhBatchRunning.value = false
+    xhBatchProgress.message = ''
+    message.error(`批量下载命令发送失败：${e?.message || e}`)
+    addLog('错误', `xHamster 批量下载命令发送失败: ${e?.message || e}`)
+  }
+  addLog('下载', `xHamster 批量下载：${urls.length} 个条目（按作者/视频|短视频|画廊 分目录）`)
+  // 批量任务已提交：自动打开下载管理面板（后台任务可视化，防"没反应"体感）
+  if (!detailVisible.value) {
+    detailVisible.value = true
+    message.info('批量下载任务已提交，已为你打开下载管理')
+  }
 }
 
 // ============================
@@ -4008,7 +5639,7 @@ function handleIwBatchDownload(payload) {
 // ============================
 function handleHanimeLogin(email, password) {
   if (!window.api || !email.trim() || !password) return
-  hanimeLoginLoading.value = true
+  setLoginLoading('hanime', true)
   window.api.sendCommand({ cmd: 'hanime_login', email: email.trim(), password })
 }
 
@@ -4029,7 +5660,7 @@ function handleHanimeSetProxy(proxy) {
 // → 打开 WebviewLoginModal（watchLoginUrl 动态加载 + codeRegex 拦截 pixiv://account/login?code=xxx）
 function handlePixivLogin() {
   if (!window.api) return
-  pixivLoginLoading.value = true
+  setLoginLoading('pixiv', true)
   // 先打开弹窗（等后端 pixiv_oauth_url 事件推 URL 进来重载）
   wvLogin.site = 'pixiv'
   wvLogin.loginUrl = ''
@@ -4039,17 +5670,22 @@ function handlePixivLogin() {
   wvLogin.captchaPatterns = [/challenge|captcha|recaptcha|turnstile|gotcha/i]
   wvLogin.credentials = null
   wvLogin.manualConfirm = false
+  wvLogin.autoGrabPattern = null
   // 匹配登录成功后的两种回跳 URL（对齐 ZipFile/pixiv_auth 官方流程）：
   // ① https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback?state=...&code=xxx（https 302，did-navigate 触发，首选）
   // ② pixiv://account/login?code=xxx（callback 页 JS 深链跳转，协议已被主进程接管，兜底）
   wvLogin.codeRegex = /app-api\.pixiv\.net\/web\/v1\/users\/auth\/pixiv\/callback\?.*?\bcode=([^&#\s]+)|pixiv:\/\/account\/login\?code=([^&#\s]+)/
   wvLogin.watchLoginUrl = true
   wvLogin.visible = true
-  // webview 会话代理（国内必须走代理才能打开登录页）
-  if (settings.pixiv_proxy) {
-    window.api.siteSetProxy('pixiv', settings.pixiv_proxy)
-  }
-  window.api.sendCommand({ cmd: 'pixiv_oauth_start' })
+  // webview 会话代理（国内必须走代理才能打开登录页；直连 app-api.pixiv.net 不通=白屏）。
+  // 设置留空时兜底默认 10809（与后端 PIXIV_DEFAULT_PROXY 一致）；等代理落地后再发
+  // oauth_start，避免 webview 先于代理加载导致白屏
+  const pxProxy = settings.pixiv_proxy || 'http://127.0.0.1:10809'
+  Promise.resolve(window.api.siteSetProxy('pixiv', pxProxy))
+    .catch(() => {})
+    .then(() => {
+      window.api.sendCommand({ cmd: 'pixiv_oauth_start' })
+    })
 }
 
 function handlePixivLogout() {
@@ -4095,15 +5731,34 @@ function handlePixivCommand(e) {
   }
   if (cmd === 'pixiv_detail') {
     // 打开作品详情（插画多页原图 / 小说正文）
+    // 链式详情（详情内相关作品点开下一个）：快照当前详情，返回时逐级恢复
+    if (pixivState.view === 'detail' && pixivState.detail) {
+      detailSnapPush('pixiv', { detail: pixivState.detail, related: pixivState.related, detailFrom: pixivState.detailFrom })
+    }
     pixivState.detailFrom = pixivState.view
     pixivState.view = 'detail'
     pixivState.detail = null
     pixivState.related = null
     pixivState.detailLoading = true
+    // 详情失败兜底"重试"按钮：记录本次请求（PixivPanel 详情空态调用）
+    pixivState.detailRetry = () => {
+      pixivState.detailLoading = true
+      window.api.sendCommand({ cmd: 'pixiv_detail', kind: e.kind, item_id: e.item_id })
+    }
     window.api.sendCommand({ cmd: 'pixiv_detail', kind: e.kind, item_id: e.item_id })
     return
   }
   if (cmd === 'pixiv_back') {
+    // 先弹链式详情快照逐级恢复；弹空后按来源回用户页或列表
+    const snap = detailSnapPop('pixiv')
+    if (snap) {
+      pixivState.detail = snap.detail
+      pixivState.related = snap.related
+      pixivState.detailFrom = snap.detailFrom
+      pixivState.view = 'detail'
+      pixivState.detailLoading = false
+      return
+    }
     // 返回上一层：用户页点进的作品回用户页，否则回列表
     pixivState.view = pixivState.detailFrom === 'user' && pixivState.userPage ? 'user' : ''
     return
@@ -4112,6 +5767,11 @@ function handlePixivCommand(e) {
     pixivListCtx.mode = 'feed'
     pixivListCtx.kind = e.kind || 'home'
     pixivActiveFeed.value = pixivListCtx.kind
+    pixivListCtx.feedKind = pixivListCtx.kind
+    if (e.page === 1 && pixivRestoreCache(pixivListCtx.feedKind)) {
+      window.api.sendCommand({ cmd: 'pixiv_feed', kind: pixivListCtx.kind, page: 1 })
+      return
+    }
     window.api.sendCommand({ cmd: 'pixiv_feed', kind: pixivListCtx.kind, page: e.page || 1 })
     return
   }
@@ -4120,6 +5780,8 @@ function handlePixivCommand(e) {
     pixivListCtx.mode = ''
     pixivListCtx.content = e.content || 'illust'
     pixivActiveFeed.value = `follow_${pixivListCtx.content}`
+    pixivListCtx.feedKind = pixivActiveFeed.value
+    pixivRestoreCache(pixivListCtx.feedKind)
     window.api.sendCommand({ cmd: 'pixiv_follow_feed', content: pixivListCtx.content })
     return
   }
@@ -4130,6 +5792,8 @@ function handlePixivCommand(e) {
     pixivListCtx.allow_r18 = e.allow_r18 !== false
     pixivListCtx.user_id = e.user_id || ''
     pixivActiveFeed.value = 'bookmark'
+    pixivListCtx.feedKind = `bookmark_${pixivListCtx.content}`
+    if (e.page === 1) pixivRestoreCache(pixivListCtx.feedKind)
     window.api.sendCommand({
       cmd: 'pixiv_bookmarks', content: pixivListCtx.content,
       restrict: pixivListCtx.restrict, allow_r18: pixivListCtx.allow_r18,
@@ -4142,6 +5806,8 @@ function handlePixivCommand(e) {
     pixivListCtx.umode = e.mode || 'following'
     pixivListCtx.user_id = e.user_id || ''
     pixivActiveFeed.value = `userlist_${pixivListCtx.umode}`
+    pixivListCtx.feedKind = pixivActiveFeed.value
+    if (e.page === 1) pixivRestoreCache(pixivListCtx.feedKind)
     window.api.sendCommand({
       cmd: 'pixiv_user_list', mode: pixivListCtx.umode,
       user_id: pixivListCtx.user_id, page: e.page || 1,
@@ -4150,6 +5816,23 @@ function handlePixivCommand(e) {
   }
   if (cmd === 'pixiv_batch_download') {
     // 批量解析下载（多批次：每个用户一个后台任务；勾选作品合并为一个任务）
+    // 形态一：卡片勾选（items + novel_fmt）——直接透传后端。
+    // （2026-09-13 实锤：此前本分支只读 user_ids/illust_ids/novel_ids，
+    //   卡片勾选的 items 载荷三数组全空 → 静默 return → 后端永远收不到命令、
+    //   下载管理里没有任何任务产生）
+    if (Array.isArray(e.items) && e.items.length) {
+      pixivBatchRunning.value = true
+      pixivBatchProgress.done = 0
+      pixivBatchProgress.total = e.items.length
+      pixivBatchProgress.message = '准备中...'
+      window.api.sendCommand({
+        cmd: 'pixiv_batch_download',
+        items: JSON.parse(JSON.stringify(e.items)),
+        novel_fmt: e.novel_fmt || 'txt',
+      })
+      return
+    }
+    // 形态二：用户列表批量（user_ids + content）
     const userIds = (e.user_ids || []).map(String).filter(Boolean)
     const illustIds = (e.illust_ids || []).map(String).filter(Boolean)
     const novelIds = (e.novel_ids || []).map(String).filter(Boolean)
@@ -4169,14 +5852,61 @@ function handlePixivCommand(e) {
     addLog('下载', `Pixiv 批量下载：${userIds.length} 个用户、${illustIds.length + novelIds.length} 个作品`)
     return
   }
+  if (cmd === 'pixiv_series_download') {
+    // 下载全部系列（连载：书名目录 + 每话章节），novel_fmt 供小说章节选择 txt/word
+    pixivBatchRunning.value = true
+    pixivBatchProgress.done = 0
+    pixivBatchProgress.total = 0
+    pixivBatchProgress.message = '正在获取系列章节...'
+    window.api.sendCommand({
+      cmd: 'pixiv_series_download',
+      series_id: e.series_id,
+      kind: e.kind || 'novel',
+      novel_fmt: e.novel_fmt || 'txt',
+      options: JSON.parse(JSON.stringify(settings)),
+    })
+    addLog('下载', `Pixiv 全部系列下载：${e.title || e.series_id}（${e.kind === 'illust' ? '漫画' : '小说'}）`)
+    return
+  }
+  if (cmd === 'pixiv_following_download_all') {
+    // 下载全部关注用户的作品：后端遍历关注列表全部分页，每人一个下载任务
+    pixivBatchRunning.value = true
+    pixivBatchProgress.done = 0
+    pixivBatchProgress.total = 0
+    pixivBatchProgress.message = '正在获取关注列表...'
+    window.api.sendCommand({
+      cmd: 'pixiv_following_download_all',
+      content: e.content || 'illust',
+      options: JSON.parse(JSON.stringify(settings)),
+    })
+    addLog('下载', `Pixiv 下载全部关注用户作品（${e.content === 'novel' ? '小说' : '插画/漫画'}）`)
+    return
+  }
+  if (cmd === 'pixiv_bookmarks_download_all') {
+    // 下载全部收藏：后端遍历全部分页 + 跨记录查重跳过已下载，统一归档 我的插画/漫画/小说收藏
+    pixivBatchRunning.value = true
+    pixivBatchProgress.done = 0
+    pixivBatchProgress.total = 0
+    pixivBatchProgress.message = '正在获取收藏列表...'
+    window.api.sendCommand({
+      cmd: 'pixiv_bookmarks_download_all',
+      content: e.content || 'illust',
+      restrict: e.restrict || 'public',
+      allow_r18: e.allow_r18 !== false,
+      options: JSON.parse(JSON.stringify(settings)),
+    })
+    addLog('下载', `Pixiv 下载全部收藏（${{ illust: '插画', manga: '漫画', novel: '小说' }[e.content] || '插画'}）`)
+    return
+  }
   // 其余命令直接透传后端（pixiv_related / pixiv_action / pixiv_notification / pixiv_bookmark_tags / pixiv_upload / pixiv_user_novels）
-  const { cmd: _c, ...payload } = e
-  window.api.sendCommand(payload)
+  // 注意必须带上 cmd——此前解构剥掉 cmd 只发 payload，这批命令全部静默失效
+  window.api.sendCommand(e)
 }
 
 // H站主页：各分区视频（进入站点时自动加载）
 function handleHaHome() {
   if (!window.api) return
+  navPushView('hanime1', 'home')
   haView.value = 'home'
   searchResults.value = []
   window.api.sendCommand({ cmd: 'hanime_home' })
@@ -4185,12 +5915,21 @@ function handleHaHome() {
 // 打开视频详情
 function handleHanimeOpenDetail(videoId) {
   if (!window.api) return
+  // 链式详情（详情内相關影片点开下一个）：快照当前详情，返回时逐级恢复
+  if (haView.value === 'detail' && haDetail.value) {
+    detailSnapPush('hanime1', { detail: haDetail.value, comments: haComments.value })
+  }
   window.api.sendCommand({ cmd: 'hanime_video_detail', video_id: videoId })
 }
 
-// 关闭视频详情（返回上一层：有主页内容回主页，否则回搜索态）
+// 关闭视频详情（先弹链式详情快照逐级恢复；弹空后回上一层：有主页内容回主页，否则回搜索态）
 function handleHaDetailBack() {
-  haView.value = haSections.value.length ? 'home' : ''
+  const snap = detailSnapPop('hanime1')
+  if (snap) { haDetail.value = snap.detail; haComments.value = snap.comments; return }
+  if (detailFromSearch.value === 'hanime1') { detailFromSearch.value = ''; haView.value = ''; haDetail.value = null; haComments.value = []; return }
+  const prev = navPopView('hanime1')
+  if (prev) haView.value = prev
+  else haView.value = haSections.value.length ? 'home' : ''
   haDetail.value = null
   haComments.value = []
 }
@@ -4214,6 +5953,7 @@ function handleHanimeSaveVideo(videoId, saved) {
 // 用户中心：觀看紀錄/稍後觀看/讚好的影片/上傳的影片/審核中的影片
 function handleHanimeUserVideos(tab, page = 1) {
   if (!window.api) return
+  navPushView('hanime1', 'user')
   haView.value = 'user'
   haUserTab.value = tab
   searchResults.value = []
@@ -4257,12 +5997,23 @@ function handleHanimeGenreBrowse(page = 1) {
   })
 }
 
-// 点击 tag 搜索（填入搜索框并搜索）
+// 点击 tag 搜索：走 tags[] 精确过滤（broad=on 兼容模糊），此前按 query 全文搜常返回 0 结果
 function handleHanimeSearchTag(tag) {
-  if (!tag) return
+  if (!tag || !window.api) return
+  navPushView('hanime1', '')
   haView.value = ''
   searchQuery.value = tag
-  handleSearch()
+  searchResults.value = []
+  searchPage.value = 1
+  window.api.sendCommand({
+    cmd: 'hanime_search',
+    query: '',
+    page: 1,
+    genre: settings.hanime_genre || '',
+    sort: settings.hanime_sort || '',
+    tags: [tag],
+    broad: 'on',
+  })
 }
 
 // 批量解析下载：勾选的视频 → 后端逐个解析最高画质并提交下载任务
@@ -4278,6 +6029,11 @@ function handleHanimeBatchDownload(videoIds) {
     options: JSON.parse(JSON.stringify(settings)),
   })
   addLog('下载', `H站批量解析下载：${videoIds.length} 个视频`)
+  // 批量任务已提交：自动打开下载管理面板（后台任务可视化，防"没反应"体感）
+  if (!detailVisible.value) {
+    detailVisible.value = true
+    message.info('批量下载任务已提交，已为你打开下载管理')
+  }
 }
 
 // ============================
@@ -4295,6 +6051,7 @@ function handleOrenoSetProxy(proxy, siteKeyArg) {
 // O3D / E站 主页/列表（进入站点时自动加载，sort 使用设置持久化）
 function handleOrHome(page = 1, sort) {
   if (!window.api) return
+  navPushView('oreno', 'home')
   orView.value = 'home'
   if (page <= 1) {
     orHomeItems.value = []
@@ -4332,13 +6089,17 @@ function handleOrenoOpenDetail(movieId, siteKeyArg) {
 
 // 关闭视频详情（返回上一层：列表态回列表，否则回主页）
 function handleOrDetailBack() {
-  orView.value = orList.items.length ? 'list' : (orHomeItems.value.length ? 'home' : '')
+  if (detailFromSearch.value === 'oreno') { detailFromSearch.value = ''; orView.value = ''; orDetail.value = null; return }
+  const prev = navPopView('oreno')
+  if (prev) orView.value = prev
+  else orView.value = orList.items.length ? 'list' : (orHomeItems.value.length ? 'home' : '')
   orDetail.value = null
 }
 
 // 标签页视频列表
 function handleOrenoTag(tagId, page = 1, sort) {
   if (!window.api) return
+  navPushView('oreno', 'list')
   orView.value = 'list'
   if (page <= 1) {
     orList.items = []
@@ -4356,6 +6117,7 @@ function handleOrenoTag(tagId, page = 1, sort) {
 // 作者页视频列表
 function handleOrenoAuthor(authorId, page = 1, sort) {
   if (!window.api) return
+  navPushView('oreno', 'list')
   orView.value = 'list'
   if (page <= 1) {
     orList.items = []
@@ -4373,6 +6135,7 @@ function handleOrenoAuthor(authorId, page = 1, sort) {
 // 角色页视频列表
 function handleOrenoCharacter(characterId, page = 1, sort) {
   if (!window.api) return
+  navPushView('oreno', 'list')
   orView.value = 'list'
   if (page <= 1) {
     orList.items = []
@@ -4390,6 +6153,7 @@ function handleOrenoCharacter(characterId, page = 1, sort) {
 // 原作页视频列表
 function handleOrenoOrigin(originId, page = 1, sort) {
   if (!window.api) return
+  navPushView('oreno', 'list')
   orView.value = 'list'
   if (page <= 1) {
     orList.items = []
@@ -4414,18 +6178,23 @@ function handleOrListMore() {
 
 // 列表返回主页
 function handleOrListBack() {
-  orView.value = orHomeItems.value.length ? 'home' : ''
+  const prev = navPopView('oreno')
+  if (prev) orView.value = prev
+  else orView.value = orHomeItems.value.length ? 'home' : ''
   orList.items = []
 }
 
-// 角色/作者浏览视图返回主页
+// 角色/作者浏览视图返回（历史栈上一步）
 function handleOrBrowseBack() {
-  orView.value = orHomeItems.value.length ? 'home' : ''
+  const prev = navPopView('oreno')
+  if (prev) orView.value = prev
+  else orView.value = orHomeItems.value.length ? 'home' : ''
 }
 
 // 角色列表视图（人気角色 + 五十音分组）
 function handleOrenoCharacters() {
   if (!window.api) return
+  navPushView('oreno', 'characters')
   orView.value = 'characters'
   searchResults.value = []
   window.api.sendCommand({ cmd: 'oreno_characters', site_key: siteKey.value })
@@ -4434,6 +6203,7 @@ function handleOrenoCharacters() {
 // 人気作者列表视图（分页）
 function handleOrenoAuthorsIndex(page = 1) {
   if (!window.api) return
+  navPushView('oreno', 'authors')
   orView.value = 'authors'
   searchResults.value = []
   window.api.sendCommand({ cmd: 'oreno_authors_index', page, site_key: siteKey.value })
@@ -4506,7 +6276,7 @@ const asmrListPrevView = ref('')
 
 function handleAsmrLogin(username, password) {
   if (!window.api || !username.trim() || !password) return
-  asmrLoginLoading.value = true
+  setLoginLoading('asmr', true)
   window.api.sendCommand({ cmd: 'asmr_login', username: username.trim(), password })
 }
 
@@ -4527,23 +6297,48 @@ function handleAsmrSetProxy(proxy) {
 // 识图（反向图片搜索）：拖拽/选择图片 → 后端并发查询全部识图网站 → 展示结果
 // ============================
 // 识图视图开关（左侧识图按钮触发；占用/退出右侧展示区）
+// 退出时若在搜索中，顺带取消，避免后台请求继续占用带宽
 function handleReverseToggle(active) {
   reverseActive.value = !!active
+  if (!active && reverseRunning.value) handleReverseCancel()
 }
 
 // 开始识图（图片本地路径 → 后端 reverse_search 并发查询全部网站）
 function handleReverseSearch(path) {
   if (!window.api || !path) return
-  reverseRunning.value = true
+  // 先作废上一轮 session，上一轮的迟到回传会被 reverse_site_update 过滤掉
+  reverseSession.value = ''
+  reverseMerged.value = []
+  reverseCached.value = false
   reverseSites.value = []
+  reverseRunning.value = true
   window.api.sendCommand({ cmd: 'reverse_search', path })
   addLog('识图', `开始以图搜源: ${path}`)
 }
 
+// 取消进行中的识图（已发出的请求在后台结束，结果一律丢弃）
+function handleReverseCancel() {
+  if (!window.api || !reverseRunning.value) return
+  reverseSession.value = ''
+  reverseRunning.value = false
+  window.api.sendCommand({ cmd: 'reverse_cancel' })
+  addLog('识图', '已请求取消搜索')
+}
+
 // 清空结果回到拖拽框（重新识图）
 function handleReverseReset() {
+  if (reverseRunning.value) handleReverseCancel()
   reverseSites.value = []
+  reverseMerged.value = []
+  reverseCached.value = false
   reverseRunning.value = false
+}
+
+// 把识图结果链接交给下载器（后端内部解析成文件列表后直接建任务）
+function handleReverseDownload(url) {
+  if (!window.api || !url) return
+  window.api.sendCommand({ cmd: 'reverse_download', url })
+  addLog('识图', `请求下载: ${url}`)
 }
 
 // 保存左侧粘贴板内容（cache/reverse_paste.txt 长期记录）
@@ -4551,13 +6346,29 @@ function handleReversePasteSave(text) {
   if (window.api) window.api.sendCommand({ cmd: 'reverse_paste_save', text: text || '' })
 }
 
-// 识图代理修改（Google / Yandex 国内必须；其他站一般直连）
-function handleReverseSetProxy(proxy) {
-  updateSettings({ reverse_proxy: proxy })
+// 识图代理修改（默认只给 Google / Yandex / Lenso.ai 用；开关打开则全站生效）
+function handleReverseSetProxy(proxy, allSites) {
+  const payload = { reverse_proxy: proxy || '' }
+  if (allSites !== undefined) payload.reverse_proxy_all = !!allSites
+  updateSettings(payload)
   if (window.api) {
-    window.api.sendCommand({ cmd: 'reverse_set_proxy', proxy: proxy || '' })
+    window.api.sendCommand({
+      cmd: 'reverse_set_proxy',
+      proxy: proxy || '',
+      all_sites: allSites !== undefined ? !!allSites : !!settings.reverse_proxy_all,
+    })
   }
 }
+
+// 代理作用域开关变化：不改代理地址，只切换"是否所有站点都走代理"
+watch(() => settings.reverse_proxy_all, (v) => {
+  if (!window.api) return
+  window.api.sendCommand({
+    cmd: 'reverse_set_proxy',
+    proxy: settings.reverse_proxy || '',
+    all_sites: !!v,
+  })
+})
 
 // ============================
 // 通用 webview 浏览器登录（twitter/xhamster/pornhub/xvideos 等与 EX 站相同的操作）
@@ -4638,13 +6449,39 @@ function handleSiteOAuthLogin(siteKey, creds) {
       captchaPatterns: [/challenge|captcha|areyouhuman|cdn\.xvideos/i],
       manualConfirm: true,
     },
+    leakedzone: {
+      loginUrl: 'https://leakedzone.com/',
+      homeUrl: 'https://leakedzone.com/',
+      partition: 'persist:leakedzone',
+      successPatterns: [],
+      captchaPatterns: [/challenge|captcha|just a moment/i],
+      manualConfirm: true,
+      confirmHint: '请在弹窗内完成 Cloudflare 人机验证（复选框→转圈→出现网站内容）后，点「确认」保存过盾会话（cookie+UA 一起保存）',
+      confirmText: '确认并保存会话',
+    },
+    fc2: {
+      // FC2 ID 登录（免费邮箱注册）；未登录也可浏览/看免费视频，登录后付费内容可见
+      loginUrl: 'https://secure.id.fc2.com/?done=video&switch_language=ja',
+      homeUrl: 'https://video.fc2.com/a/',
+      partition: 'persist:fc2',
+      successPatterns: [],
+      captchaPatterns: [],
+      manualConfirm: true,
+      confirmHint: '请完成 FC2 登录（登录成功会跳回视频页），然后点"确定"抓取 cookie。',
+      confirmText: '确定',
+    },
     javdb: {
       // JavDB 邮箱密码登录：webview 内完成 Cloudflare 人机验证；"记住此装置"后 cookie 约 7 天有效
-      loginUrl: 'https://javdb.com/zh/login',
-      homeUrl: 'https://javdb.com/zh/',
+      // 手动确认模式：自动抓取会在"同意条款"页提前触发导致 cookie 不完整，
+      // 改为用户完成登录+点"同意"后，自己点底部"确定"再抓取，保证 cookie 完整准确
+      loginUrl: 'https://javdb.com/login/',
+      homeUrl: 'https://javdb.com/',
       partition: 'persist:javdb',
-      successPatterns: [/javdb\.com\/(zh\/)?(users\/home|logout)/i, /javdb\.com\/zh\/?$/i],
+      successPatterns: [],
       captchaPatterns: [/challenge|captcha|cdn-cgi|turnstile/i],
+      manualConfirm: true,
+      confirmHint: '请完成登录并点击"同意"，然后点"确定"抓取 cookie。',
+      confirmText: '确定',
     },
     exhentai: {
       // EX 登录：弹窗内打开 e-hentai 论坛登录页（EX 账号即论坛账号）；
@@ -4695,6 +6532,9 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.successPatterns = cfg.successPatterns
   wvLogin.captchaPatterns = cfg.captchaPatterns
   wvLogin.manualConfirm = !!cfg.manualConfirm
+  wvLogin.confirmHint = cfg.confirmHint
+  wvLogin.confirmText = cfg.confirmText
+  wvLogin.autoGrabPattern = cfg.autoGrabPattern || null
   wvLogin.codeRegex = null
   wvLogin.watchLoginUrl = false
   // 账号密码登录站：webview 登录页自动预填（用户只需完成真人验证并点登录）
@@ -4705,7 +6545,10 @@ function handleSiteOAuthLogin(siteKey, creds) {
   wvLogin.visible = true
   // 同时设置 webview 会话代理（复用站点代理设置；EX 站用 exhentai_proxy）
   const proxyKey = siteKey === 'exhentai' ? 'exhentai_proxy' : `${siteKey}_proxy`
-  const proxyUrl = settings[proxyKey] || ''
+  // fc2/leakedzone 缺省即给通用代理（webview 打不开登录页/CF 按 IP 信誉循环挑战 =
+  // 登录失败的常见根因；默认值可改，settings.common_proxy 优先）
+  const proxyUrl = settings[proxyKey]
+    || (['fc2', 'leakedzone'].includes(siteKey) ? (settings.common_proxy || COMMON_PROXY_DEFAULT) : '')
   if (window.api && proxyUrl) {
     window.api.siteSetProxy(siteKey, proxyUrl)
   }
@@ -4740,7 +6583,9 @@ function handleSiteLoginSuccess({ cookieStr, count, userAgent }) {
   }
   const payload = { cmd: `${wvLogin.site}_set_cookies`, cookie_str: cookieStr }
   if (wvLogin.site === 'exhentai' || wvLogin.site === 'twitter') payload.cookies = cookieStr
+  // javdb/leakedzone 附带 webview UA：cf_clearance 等 Cloudflare cookie 绑定 UA，后端请求需同 UA
   if (wvLogin.site === 'javdb' && userAgent) payload.user_agent = userAgent
+  if (wvLogin.site === 'leakedzone' && userAgent) payload.user_agent = userAgent
   if (wvLogin.site === 'javdb' && wvLogin.credentials) {
     payload.email = wvLogin.credentials.email || ''
     payload.password = wvLogin.credentials.password || ''
@@ -4805,6 +6650,10 @@ function handleGoogleDeleteAccount(email) {
 function handleSiteLogout(siteKey) {
   if (!window.api) return
   window.api.sendCommand({ cmd: `${siteKey}_logout` })
+  // FC2：同步清除内置浏览器分区 cookie，保证下次 webview 打开是干净会话
+  if (siteKey === 'fc2' && window.api.siteClearCookies) {
+    window.api.siteClearCookies('fc2').catch(() => {})
+  }
 }
 
 // O3D / E站 账号密码保存（加密存本机，登录会话与 cookie 互相验证）
@@ -4862,9 +6711,12 @@ function handleJavdbOpenDetail(item) {
   if (!item || !item.album_url) return
   javdbDetail.value = null
   url.value = item.album_url
-  searchQuery.value = item.album_url
-  cameFromSearch.value = true
-  handleInspect()
+  // 走 javdb_video_info 专用命令（由 javdb_detail_loading/javdb_video_detail 事件驱动详情区转圈）。
+  // 此前走通用 inspect 命令，但 JavDB 后端流程不发 inspect 终止事件，
+  // 导致全局解析转圈 inspecting 卡满 120s 看门狗才解除（表现为"点开后一直加载"）。
+  if (!window.api) return
+  const options = JSON.parse(JSON.stringify(settings))
+  window.api.sendCommand({ cmd: 'javdb_video_info', url: item.album_url, options })
 }
 
 // 关闭详情返回搜索结果
@@ -4890,9 +6742,136 @@ function handleJavdbBatchDownload(urls) {
   exBatchFolderVisible.value = true
 }
 
+// JavDB 首页最新影片（无需关键词，进入站点即有内容；翻页走 javdb_home）
+function handleJavdbHome(page = 1) {
+  if (!window.api) return
+  javdbListCtx.mode = 'home'
+  javdbListCtx.url = ''
+  javdbListCtx.label = ''
+  javdbDir.kind = ''
+  javdbDetail.value = null
+  if (page <= 1) {
+    searchResults.value = []
+    searchPage.value = 1
+  }
+  searchQuery.value = '最新影片'
+  window.api.sendCommand({ cmd: 'javdb_home', page })
+}
+
+// JavDB 演员主页全部作品（详情页点演员名进入；翻页走 javdb_actor）
+function handleJavdbOpenActor(actorUrl, page = 1) {
+  if (!window.api || !actorUrl) return
+  javdbListCtx.mode = 'actor'
+  javdbListCtx.url = actorUrl
+  javdbListCtx.label = ''
+  javdbDir.kind = ''
+  javdbDetail.value = null
+  if (page <= 1) {
+    searchResults.value = []
+    searchPage.value = 1
+  }
+  window.api.sendCommand({ cmd: 'javdb_actor', url: actorUrl, page })
+}
+
+// JavDB 详情点标签 → 按标签名搜索（f=tag，回到普通搜索流程）
+function handleJavdbSearchTag(tag, field = 'tag') {
+  if (!tag) return
+  javdbSearchField.value = field
+  searchQuery.value = tag
+  doSearch(tag, 1)
+}
+
+// ---------- JavDB 第一~五行工具栏 ----------
+
+// 第一行：搜索类型切换（影片/演员/系列/片商/导演/番号）；
+// 有搜索词时立即按新类型重搜（否则点击无任何反馈）
+function setJavdbSearchField(f) {
+  javdbSearchField.value = f
+  const q = (searchQuery.value || '').trim()
+  if (q && !searching.value) doSearch(q, 1)
+}
+
+// 第三行/第四行词条：热搜词走 f=all，标签词走 f=tag
+function handleJavdbHotSearch(kw) {
+  if (!kw) return
+  javdbSearchField.value = 'all'
+  searchQuery.value = kw
+  doSearch(kw, 1)
+}
+
+// 通用列表页（类别 /uc、排行榜 /ranking、年份筛选等）：翻页走 javdb_open_url
+function handleJavdbOpenList(url, label, page = 1) {
+  if (!window.api || !url) return
+  javdbDir.kind = ''
+  javdbListCtx.mode = 'url'
+  javdbListCtx.url = url
+  javdbListCtx.label = label || 'JavDB 列表'
+  javdbDetail.value = null
+  if (page <= 1) {
+    searchResults.value = []
+    searchPage.value = 1
+  }
+  window.api.sendCommand({ cmd: 'javdb_open_url', url, label: javdbListCtx.label, page })
+}
+
+// 第二行：目录导航（演员 / 系列 / 片商），目录页解析名称列表；params 支持 vft 分类参数
+function handleJavdbDir(kind, page = 1, params = '') {
+  if (!window.api || !kind) return
+  javdbListCtx.mode = ''
+  javdbDetail.value = null
+  if (page <= 1) {
+    searchResults.value = []
+    searchPage.value = 1
+  }
+  window.api.sendCommand({ cmd: 'javdb_directory', kind, page, params })
+}
+
+// 目录翻页 / 返回
+function handleJavdbDirPage(page) {
+  handleJavdbDir(javdbDir.kind, page, javdbDir.params)
+}
+function handleJavdbDirClear() {
+  javdbDir.kind = ''
+  javdbDir.items = []
+}
+
+// 第四行：标签页模式切换（有码/无码/欧美/FC2/动漫）并加载对应列表；
+// 列表结果同时作为第五行「模式推荐作品」数据源
+function handleJavdbTagsMode(mode) {
+  if (!mode || !mode.key) return
+  javdbTagsMode.value = mode.key
+  if (mode.vft) {
+    javdbRecommendPending.mode = mode.key
+    javdbRecommendPending.label = `${mode.label}影片`
+    // 类别真实结构：/{censored|uncensored|western}?vft=1（含磁鏈过滤；Google 索引证实 vft 用法）
+    handleJavdbOpenList(`/${mode.key}?vft=${mode.vft}`, `${mode.label}影片`)
+  } else if (mode.key === 'fc2' || mode.key === 'anime') {
+    // FC2/動漫分区：/tags/{key}?c10=1（导航 HTML 实测 2026-09-01：'FC2' -> /tags/fc2?c10=1；
+    // 该路径需登录可见。此前误走关键词搜索 fallback，导致 FC2 无内容/動漫错位）
+    javdbRecommendPending.mode = mode.key
+    javdbRecommendPending.label = mode.label
+    handleJavdbOpenList(`/tags/${mode.key}?c10=1`, mode.label)
+  } else {
+    javdbSearchField.value = 'all'
+    searchQuery.value = mode.fallback_q || mode.label
+    javdbRecommendPending.mode = mode.key
+    javdbRecommendPending.label = mode.fallback_q || mode.label
+    doSearch(mode.fallback_q || mode.label, 1)
+  }
+}
+
+// JavDB 退出登录（清空用户态；cookie 由后端删除）
+function handleJavdbLogout() {
+  if (!window.api) return
+  window.api.sendCommand({ cmd: 'javdb_logout' })
+  javdbUser.value = ''
+  message.info('已退出 JavDB 登录')
+}
+
 // 热门作品（每页 100，进入站点时自动加载）
 function handleAsmrPopular(page = 1) {
   if (!window.api) return
+  navPushView('asmr', 'popular')
   asmrView.value = 'popular'
   asmrFilter.kind = ''
   asmrFilter.id = ''
@@ -4909,6 +6888,7 @@ function handleAsmrPopular(page = 1) {
 function handleAsmrWorks(page = 1, filter) {
   if (!window.api) return
   const f = filter || asmrFilter
+  navPushView('asmr', 'works')
   asmrView.value = 'works'
   if (f && f.id) {
     asmrFilter.kind = f.kind
@@ -4962,6 +6942,7 @@ function handleAsmrFavorites(page = 1) {
     message.warning('请先在左侧登录 ASMR 账号')
     return
   }
+  navPushView('asmr', 'favorites')
   asmrView.value = 'favorites'
   asmrFilter.kind = ''
   asmrFilter.id = ''
@@ -4999,16 +6980,46 @@ function handleAsmrOpenDetail(item) {
   if (!window.api || !item) return
   const wid = item.video_id || (item.album_url || '').match(/work\/(\d+)/)?.[1]
   if (!wid) return
+  // 链式详情（详情内相似作品点开下一个）：快照当前详情，返回时逐级恢复
+  if (asmrView.value === 'detail' && asmrDetail.value) {
+    detailSnapPush('asmr', {
+      detail: asmrDetail.value, files: asmrFiles.value, related: asmrRelated.value,
+      relatedPending: asmrRelatedPending.value,
+    })
+  }
   asmrDetail.value = null
   asmrFiles.value = []
+  asmrRelated.value = []
+  asmrRelatedPending.value = false
   window.api.sendCommand({ cmd: 'asmr_work_detail', work_id: String(wid) })
 }
 
-// 关闭详情返回上一层（有列表回列表，否则回搜索态）
+// 迷你播放器"回到作品"：切回音声站并重开当前播放作品的详情（后台播放不受影响）
+function handleAsmrMiniJumpBack() {
+  const w = audioPlayer.work
+  if (!w) return
+  if ((settings.site || 'bunkr') !== 'asmr') updateSite('asmr')
+  handleAsmrOpenDetail(w)
+}
+
+// 关闭详情返回上一层（先弹链式详情快照逐级恢复；弹空后有列表回列表，否则回搜索态）
 function handleAsmrDetailBack() {
-  asmrView.value = asmrItems.value.length ? (asmrListPrevView.value || 'popular') : ''
+  const snap = detailSnapPop('asmr')
+  if (snap) {
+    asmrDetail.value = snap.detail
+    asmrFiles.value = snap.files
+    asmrRelated.value = snap.related
+    asmrRelatedPending.value = snap.relatedPending
+    return
+  }
+  if (detailFromSearch.value === 'asmr') { detailFromSearch.value = ''; asmrView.value = ''; asmrDetail.value = null; asmrFiles.value = []; return }
+  const prev = navPopView('asmr')
+  if (prev) asmrView.value = prev
+  else asmrView.value = asmrItems.value.length ? (asmrListPrevView.value || 'popular') : ''
   asmrDetail.value = null
   asmrFiles.value = []
+  asmrRelated.value = []
+  asmrRelatedPending.value = false
 }
 
 // 收藏/取消收藏作品
@@ -5066,13 +7077,89 @@ function handleAsmrBatchDownload(workIds) {
     options: JSON.parse(JSON.stringify(settings)),
   })
   addLog('下载', `音声站批量下载：${workIds.length} 个作品`)
+  // 批量任务已提交：自动打开下载管理面板（后台任务可视化，防"没反应"体感）
+  if (!detailVisible.value) {
+    detailVisible.value = true
+    message.info('批量下载任务已提交，已为你打开下载管理')
+  }
+}
+
+// 右键下载单个/多个音轨文件（提交下载管理器，保留文件夹路径）
+function handleAsmrDownloadFiles(files) {
+  if (!window.api || !asmrDetail.value || !files || !files.length) return
+  const d = asmrDetail.value
+  const wid = String(d.video_id || (d.album_url || '').match(/work\/(\d+)/)?.[1] || '')
+  if (!wid) return
+  window.api.sendCommand({
+    cmd: 'asmr_file_download',
+    work_id: wid,
+    work: { title: d.album_name || d.title || '', source_id: d.source_id || '', release: d.post_date || '', name: d.author || '' },
+    files: files.map(f => ({ title: f.title, path: f.path, size: f.size, media_url: f.media_url })),
+    options: JSON.parse(JSON.stringify(settings)),
+  })
+  addLog('下载', `音声站文件下载：${files.length} 个文件（${files.map(f => f.title).join('、').slice(0, 80)}）`)
 }
 
 // 进入 Iwara / Hanime1 / Oreno3D / EroMMDTube / ASMR 站点（或启动时停留在该站）自动加载主页
 // 真人验证站点提示（每次会话只提示一次；解决方案 = 内置浏览器登录弹窗内完成验证）
 const humanVerifyPrompted = new Set()
 
+// ============================
+// 全局站点视图导航历史栈（"← 返回" = 上一步）
+// ============================
+// 每站点独立栈，栈顶 = 当前视图；进入视图时 push（同视图去重，翻页/切 tab 不产生历史），
+// 返回时 pop 弹掉当前视图回到上一步；栈空时走各站原有兜底逻辑（回主页/清空态）
+const viewNavStacks = {}
+
+function navPushView(siteKey, view) {
+  if (!view) return
+  const stack = viewNavStacks[siteKey] || (viewNavStacks[siteKey] = [])
+  if (stack[stack.length - 1] !== view) stack.push(view)
+  if (stack.length > 30) stack.shift()
+}
+
+// 返回上一步：弹出当前视图，返回新的栈顶视图；栈空返回 ''（调用方走兜底）
+function navPopView(siteKey) {
+  const stack = viewNavStacks[siteKey] || []
+  stack.pop()
+  return stack.length ? stack[stack.length - 1] : ''
+}
+
+// 站点栈清空（切换站点时重置返回链）
+function navClearView(siteKey) {
+  viewNavStacks[siteKey] = []
+  detailSnapClear(siteKey)
+}
+
+// ============================
+// 链式详情内容栈：详情内"相关推荐/相似作品"逐级点开（详情→详情）时，通用视图栈按
+// 视图类型去重不会加深——返回会一次跳回列表、跳过中间详情。推入新详情前把当前详情
+// 快照压栈，返回时逐级恢复；快照栈弹空后才走视图栈/搜索来源兜底。
+// ============================
+const detailSnapStacks = {}
+
+function detailSnapPush(site, snap) {
+  const st = detailSnapStacks[site] || (detailSnapStacks[site] = [])
+  st.push(snap)
+  if (st.length > 30) st.shift()
+}
+
+function detailSnapPop(site) {
+  const st = detailSnapStacks[site]
+  return (st && st.length) ? st.pop() : null
+}
+
+function detailSnapClear(site) {
+  if (site) delete detailSnapStacks[site]
+}
+
 watch(() => settings.site, (s) => {
+  navClearView(s)
+  if (s === 'oreno3d' || s === 'erommdtube') navClearView('oreno')
+  // xHamster：切入站点自动加载浏览首页（浏览不需登录；已有内容/二级视图时不打扰）
+  if (s === 'xhamster' && !xhView.value && !xhHomeItems.value.length) {
+    handleXhHome(1)
+  }
   if (s === 'iwara' && !iwHomeItems.value.length) {
     handleIwHome(1)
   } else if (s === 'hanime' && !haSections.value.length) {
@@ -5093,6 +7180,27 @@ watch(() => settings.site, (s) => {
       humanVerifyPrompted.add('pixiv')
       message.warning('P站 (Pixiv) 推荐流/收藏/关注更新等功能需要登录：请点左侧「打开内置浏览器登录」完成 Refresh Token 登录', { duration: 6000 })
     }
+  } else if (s === 'javdb' && !searchResults.value.length) {
+    // 进入 JavDB：加载当前 tags 模式的推荐作品（第五行数据源 = 模式列表）
+    // 词库已到直接加载；未到则由 javdb_tags_vocab 事件回调自动加载
+    if (javdbTagsVocab.value && javdbTagsVocab.value.length) {
+      const m = javdbTagsVocab.value.find(x => x.key === javdbTagsMode.value) || javdbTagsVocab.value[0]
+      if (m) handleJavdbTagsMode(m)
+    }
+  }
+  // JavDB：首次进入请求标签词库（5 模式词表）+ 热搜关键词（功能栏常显）
+  if (s === 'javdb' && window.api) {
+    if (!javdbTagsVocab.value) window.api.sendCommand({ cmd: 'javdb_tags_vocab' })
+    if (!javdbHotKeywords.value.length) window.api.sendCommand({ cmd: 'javdb_hot_search' })
+  }
+  // EX：进入站点自动加载首页推荐（与主站首页相同；已有结果/收藏视图时不打扰）
+  if (s === 'exhentai' && !searchResults.value.length && !exFavMode.value && !exPopularMode.value
+      && cameFromSearch.value === false) {
+    handleExPopular(1)
+  }
+  // X 站：进入默认进入浏览模式（已登录且当前不在任何 X 视图时；未登录不打扰）
+  if (s === 'twitter' && twitterUser.value && !twFollowMode.value) {
+    handleTwBrowse()
   }
   // Hanime1 真人验证提示：使用前告知用户（未登录时弹提示，推荐内置浏览器登录完成验证）
   if (s === 'hanime' && !humanVerifyPrompted.has('hanime')) {
@@ -5122,6 +7230,10 @@ function twPushNav() {
 }
 
 // 打开关注视图：'following'=关注列表 | 'followers'=关注我的人 | 'follows'=我的分类 | ''=返回
+function handleTwGetFollows() {
+  if (window.api) window.api.sendCommand({ cmd: 'twitter_get_follows' })
+}
+
 function handleTwFollowList(mode) {
   if (!window.api) return
   if (!mode) {
@@ -5287,7 +7399,8 @@ function handleTwBrowse() {
     message.warning('请先在左侧登录 X (Twitter)')
     return
   }
-  twPushNav()
+  // 常驻工具栏下，已在浏览模式内重复点击 = 刷新，不叠加导航栈
+  if (twFollowMode.value !== 'browse') twPushNav()
   // 退出本地搜索态
   twSearchSnapshot.value = null
   twSearchTweets.value = []
@@ -5523,15 +7636,17 @@ function toggleDownloadManager() {
   }
 }
 
-// 打开任务保存文件夹（后端在任务启动时记录 save_dir）
+// 打开任务保存文件夹的上层目录
+// 打开任务文件夹：直接打开后端为该任务创建的目录（task.save_dir，与下载时
+// build_album_directory 创建的一致——"我们怎么创建的就打开哪个目录"）
 function handleOpenTaskFolder(task) {
-  const dir = task && task.save_dir
-  if (!dir) {
+  const target = task && task.save_dir
+  if (!target) {
     message.warning('任务尚未开始下载，暂无保存文件夹')
     return
   }
   if (window.api && window.api.openPath) {
-    window.api.openPath(dir).then(r => {
+    window.api.openPath(target).then(r => {
       if (r && r.ok === false) {
         message.error(`打开文件夹失败: ${r.error || '未知错误'}`)
       }
@@ -5600,8 +7715,13 @@ function cancelTask(taskId) {
   if (window.api) window.api.sendCommand({ cmd: 'cancel_task', task_id: taskId })
 }
 
-function removeTask(taskId) {
-  if (window.api) window.api.sendCommand({ cmd: 'remove_task', task_id: taskId })
+function removeTask(taskId, deleteFiles = false) {
+  if (window.api) window.api.sendCommand({ cmd: 'remove_task', task_id: taskId, delete_files: !!deleteFiles })
+}
+
+// 清除所有任务（下载管理面板「清除所有任务」按钮；deleteFiles = 同时删除本地文件）
+function clearAllTasks(deleteFiles = false) {
+  if (window.api) window.api.sendCommand({ cmd: 'clear_tasks', delete_files: !!deleteFiles })
 }
 
 function toggleShutdown(v) {
@@ -5777,6 +7897,14 @@ onMounted(() => {
       openDownloadDetail(taskId)
     })
   }
+  // Leakedzone：Edge 过盾流程状态（专用 Edge 实例开/关 + 抓取结果提示）
+  if (window.api && window.api.onLeakEdgeState) {
+    window.api.onLeakEdgeState((payload) => {
+      leakEdgeRunning.value = !!payload.running
+      if (payload.error) message.error(payload.error)
+      else if (payload.message) message.info(payload.message, 6000)
+    })
+  }
   // 主动查询后端启动错误（事件可能在本组件挂载前就已发出）
   if (window.api && window.api.getBackendError) {
     window.api.getBackendError().then((err) => {
@@ -5795,6 +7923,17 @@ onUnmounted(() => {
 </script>
 
 <style>
+/* 批量下载入口按钮：增大增粗高亮（全站统一） */
+.n-button.batch-cta {
+  font-weight: 700;
+  font-size: 13px;
+  padding: 0 14px;
+}
+.n-button.batch-cta.n-button--primary-type {
+  box-shadow: 0 0 8px rgba(99, 226, 183, 0.45);
+}
+</style>
+<style>
 * {
   margin: 0;
   padding: 0;
@@ -5804,7 +7943,69 @@ onUnmounted(() => {
 html, body, #app {
   height: 100%;
   overflow: hidden;
-  background: #18181c;
+  background: transparent;  /* 里/美好世界：透明窗口，圆角由界面容器绘制 */
+}
+
+/* ---------- 里/美好世界自定义标题栏（随模式变色；单按 Alt 不再弹菜单栏） ---------- */
+.win-titlebar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 16px;
+  z-index: 3000;
+  -webkit-app-region: drag;
+  backdrop-filter: blur(18px);
+}
+.win-titlebar.tb-dark {
+  background: rgba(16, 19, 26, 0.82);
+  border-bottom: 1px solid rgba(108, 140, 255, 0.18);
+}
+.win-titlebar.tb-light {
+  background: rgba(246, 247, 251, 0.78);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+}
+.tb-badge {
+  font-size: 11.5px; font-weight: 700; letter-spacing: 1px;
+  padding: 3px 12px; border-radius: 999px;
+}
+.tb-dark .tb-badge { background: rgba(108, 140, 255, 0.16); color: #8fa4ff; border: 1px solid rgba(108, 140, 255, 0.35); }
+.tb-light .tb-badge { background: rgba(108, 140, 255, 0.14); color: #4a54a8; border: 1px solid rgba(108, 140, 255, 0.3); }
+.tb-app { font-size: 12.5px; font-weight: 600; }
+.tb-dark .tb-app { color: #c6cede; }
+.tb-light .tb-app { color: #3c415c; }
+.tb-controls {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 4px;
+  -webkit-app-region: no-drag;
+}
+.tb-controls button {
+  width: 38px; height: 26px;
+  border: none; cursor: pointer;
+  font-size: 12px;
+  border-radius: 8px;
+  transition: background .12s;
+}
+.tb-dark .tb-controls button { background: rgba(255,255,255,.06); color: #aeb7c9; }
+.tb-dark .tb-controls button:hover { background: rgba(255,255,255,.14); }
+.tb-light .tb-controls button { background: rgba(35,38,47,.06); color: #5a6072; }
+.tb-light .tb-controls button:hover { background: rgba(35,38,47,.14); }
+.tb-controls .tb-close:hover { background: #ff5f57 !important; color: #fff !important; }
+
+/* ---------- 圆角窗口容器（经典/美好世界共用；最大化时贴边去圆角） ---------- */
+.win-frame {
+  position: absolute;
+  top: 38px; left: 10px; right: 10px; bottom: 12px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+.win-frame.win-maxed {
+  top: 38px; left: 0; right: 0; bottom: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* 让 naive-ui 的 provider 包裹层也占满高度，否则内部 height:100% 会失效 */
@@ -5816,8 +8017,8 @@ html, body, #app {
 
 .app-layout {
   display: flex;
-  height: 100vh;
-  background: #18181c;
+  height: 100%;
+  background: #18181c;  /* 里世界：暗色（黑模式） */
 }
 
 /* 重名文件手动改名弹窗 */
@@ -5909,7 +8110,7 @@ html, body, #app {
 /* ============================ */
 html.light-mode body,
 html.light-mode #app {
-  background: #f2f3f5;
+  background: transparent;  /* 透明窗口：圆角外不可有底色 */
 }
 
 html.light-mode .app-layout {
