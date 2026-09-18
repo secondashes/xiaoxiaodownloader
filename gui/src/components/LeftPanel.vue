@@ -901,6 +901,14 @@
           </svg>
         </n-icon>
       </button>
+      <!-- BT 下载：独立窗口（磁力链接批量粘贴 + .torrent 种子拖拽） -->
+      <button
+        class="round-btn bt-btn"
+        title="BT 下载（磁力/种子）"
+        @click="$emit('bt-open')"
+      >
+        <span class="bt-btn-emoji">🧲</span>
+      </button>
       <!-- 热门平台里模式：无界面按钮，连按 3 次 Alt 切换（App 全局手势） -->
     </div>
 
@@ -2273,6 +2281,8 @@ const emit = defineEmits([
   'install-update',        // 运行已下载的更新安装包（覆盖安装即更新）
   // P3 设置功能
   'shortcut-change',        // 快捷键录入变更（参数：action, accelerator）
+  // BT 下载
+  'bt-open',               // 打开独立 BT 下载窗口（磁力链接批量粘贴 + .torrent 种子拖拽）
 ])
 
 const message = useMessage()
@@ -3789,6 +3799,12 @@ html.light-mode .site-help-modal .site-help-pre {
 .round-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* BT 下载圆钮：emoji 图标（与 n-icon 20px 观感对齐） */
+.bt-btn-emoji {
+  font-size: 19px;
+  line-height: 1;
 }
 
 .round-btn:disabled:hover {

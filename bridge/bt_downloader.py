@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -201,6 +202,61 @@ def _bt_cmd_download(command: dict) -> None:
     })
 
 
+def _bt_cmd_download_file(command: dict) -> None:
+    """前端拖入 .torrent 文件入口：base64 种子内容 → 占位任务 → 启动。
+
+    payload：{b64: <.torrent 文件内容的 base64 字符串>, album: str, world?: str}
+    种子内容直接随命令注入任务条目（_bt_torrent_b64），worker 不再发 HTTP 拉取。
+    """
+    b64 = str(command.get("b64") or "").strip()
+    album = (command.get("album") or "").strip() or "BT 下载"
+    options = command.get("options") or {}
+    if command.get("world"):
+        options["world"] = command["world"]
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        emit({"event": "bt_result", "ok": False, "message": "种子文件解码失败（base64 内容无效）"})  # noqa: F821
+        return
+    # torrent 文件是 bencode 字典，必以 "d" 开头（快速校验，避免把任意文件当种子提交）
+    if not raw.startswith(b"d"):
+        emit({"event": "bt_result", "ok": False, "message": "不是有效的种子文件"})  # noqa: F821
+        return
+    # 占位 btih：真实 info-hash 是 info 字典的 sha1，此处仅用作任务分组标识
+    btih12 = hashlib.sha1(raw).hexdigest()[:12]
+    item = {
+        "filename": f"{btih12}.bt",
+        "size": None,
+        "item_page": "bt:file",
+        "status": "ok",
+        "thumbnail": "",
+        "media_url": "bt:file",
+        "site": "bt",
+        "media_type": "bt",
+        "post_title": album,
+        "btih": btih12,
+        "_bt_torrent_b64": b64,
+    }
+    task_id = download_manager.submit(  # noqa: F821
+        "bt:file", [item], options, album, f"bt:{btih12}",
+    )
+    # _task_file_entry 只按 TASK_FILE_FIELDS 白名单构造条目，"_bt_torrent_b64" 会被
+    # 丢弃——直接补写进任务文件条目（worker 的 item 就是该条目的引用），
+    # 并落盘持久化（重启续传时仍在）
+    try:
+        t = download_manager.tasks.get(task_id)  # noqa: F821
+        if t and t.get("files"):
+            t["files"][0]["_bt_torrent_b64"] = b64
+            download_manager._save()  # noqa: F821
+    except Exception:
+        pass
+    download_manager.start(task_id)  # noqa: F821
+    emit({  # noqa: F821
+        "event": "bt_result", "ok": True, "task_id": task_id,
+        "btih": btih12, "message": "种子任务已提交，可在下载管理中查看进度",
+    })
+
+
 # ============================
 # 下载 worker（download_manager site=="bt" 分支调用）
 # ============================
@@ -324,7 +380,13 @@ async def bt_download_one(task, item, album_path, task_id, max_retries):
 
     try:
         # 解析 + 提交到 aria2（阻塞网络，to_thread）
-        info = bt_parse(url)
+        # bt:file = 拖入 .torrent 注入的 base64 种子（_bt_cmd_download_file），
+        # URL 无法过 bt_parse，直接按 torrent 处理
+        b64_inline = str(item.get("_bt_torrent_b64") or "")
+        if b64_inline:
+            info = {"kind": "torrent", "btih": str(item.get("btih") or ""), "raw": url}
+        else:
+            info = bt_parse(url)
         album_dir = str(album_path)
         os.makedirs(album_dir, exist_ok=True)
         rpc_base, token = _bt_ensure_daemon()
@@ -332,22 +394,29 @@ async def bt_download_one(task, item, album_path, task_id, max_retries):
             # aria2 addUri/addTorrent 的 result 直接是 gid 字符串（非 dict）
             gid = str(_bt_rpc("aria2.addUri", [[url], {"dir": album_dir}]))
         else:
-            # .torrent URL：拉种子文件（走通用代理，磁力站种子直链常需代理）→ base64 addTorrent
-            from curl_cffi import requests as _creq
-            proxy = "http://127.0.0.1:10809"
-            try:
-                cfg = globals().get("_github_proxy_cfg")  # noqa: F821
-                if callable(cfg):
-                    proxy = (cfg() or {}).get("proxy") or proxy
-            except Exception:
-                pass
-            r = _creq.get(url, impersonate="chrome", timeout=60,
-                          proxies={"http": proxy, "https": proxy})
-            r.raise_for_status()
-            if len(r.content) < 20 or not r.content.startswith(b"d"):
+            if b64_inline:
+                # 种子内容已随命令注入（前端拖入 .torrent 文件场景）——直接解码使用，
+                # 不再发 HTTP 拉取；解码/校验异常走通用失败分支
+                torrent_raw = base64.b64decode(b64_inline, validate=True)
+            else:
+                # .torrent URL：拉种子文件（走通用代理，磁力站种子直链常需代理）
+                from curl_cffi import requests as _creq
+                proxy = "http://127.0.0.1:10809"
+                try:
+                    cfg = globals().get("_github_proxy_cfg")  # noqa: F821
+                    if callable(cfg):
+                        proxy = (cfg() or {}).get("proxy") or proxy
+                except Exception:
+                    pass
+                r = _creq.get(url, impersonate="chrome", timeout=60,
+                              proxies={"http": proxy, "https": proxy})
+                r.raise_for_status()
+                torrent_raw = r.content
+            if len(torrent_raw) < 20 or not torrent_raw.startswith(b"d"):
                 raise RuntimeError("下载到的 .torrent 内容不是有效种子文件")
+            # aria2 addTorrent 的 result 直接是 gid 字符串（非 dict）
             gid = str(_bt_rpc("aria2.addTorrent",
-                              [base64.b64encode(r.content).decode(), [],
+                              [base64.b64encode(torrent_raw).decode(), [],
                                {"dir": album_dir}]))
         item["_bt_gid"] = gid
         live_manager.update_log(event="BT 任务", details=f"gid={gid}")
@@ -381,4 +450,5 @@ atexit.register(_bt_kill_daemon)
 
 BT_COMMANDS = {
     "bt_download": _bt_cmd_download,
+    "bt_download_file": _bt_cmd_download_file,
 }

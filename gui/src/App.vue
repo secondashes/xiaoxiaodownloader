@@ -90,6 +90,7 @@
             :follow-tags="twFollowTags"
             @common-proxy="handleCommonProxy"
             @sniffer-open="handleSnifferOpen"
+            @bt-open="handleBtOpen"
             @leak-edge-login="handleLeakEdgeLogin"
             @leak-edge-harvest="handleLeakEdgeHarvest"
             :leak-edge-running="leakEdgeRunning"
@@ -4616,6 +4617,11 @@ function handleCommonProxy(v) {
 // 手动抓取（资源嗅探）：打开独立全量窗口（内置浏览器 + 实时媒体捕获，复刻 res-downloader）
 function handleSnifferOpen() {
   if (window.api && window.api.snifferOpen) window.api.snifferOpen()
+}
+
+// BT 下载：打开独立 BT 窗口（磁力链接批量粘贴 + .torrent 种子拖拽）
+function handleBtOpen() {
+  if (window.api && window.api.btOpen) window.api.btOpen()
 }
 
 // Leakedzone：Edge 过盾登录（真实浏览器引擎过 Turnstile；CDP 抓 Cookie+UA 保存）

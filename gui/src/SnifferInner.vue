@@ -207,13 +207,31 @@
         </n-scrollbar>
       </div>
     </div>
+
+    <!-- BT 下载弹窗：替代 window.prompt（Electron 不支持 prompt，调用会静默失败） -->
+    <n-modal v-model:show="btShow" preset="dialog" title="🧲 BT 下载（磁力链接 / 种子）" style="width: 580px">
+      <div class="sn-bt-body">
+        <n-input v-model:value="btText" type="textarea" :rows="6"
+                 placeholder="每行一条磁力链接（magnet:?xt=urn:btih:…）或 .torrent 种子地址，支持多行批量" />
+        <div class="sn-bt-drop" @dragover.prevent @drop.prevent="onBtDrop">
+          🧲 把 .torrent 种子文件拖到这里提交（可多个）
+        </div>
+        <div class="sn-bt-foot">
+          <label class="sn-bt-auto" title="开启后，在网页里点磁力链接不再弹确认，直接加入下载">
+            <n-switch v-model:value="btAuto" size="small" />
+            自动接管磁力链接
+          </label>
+          <n-button type="primary" @click="submitBtBatch">批量下载</n-button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import {
-  NButton, NInput, NRadioButton, NRadioGroup, NScrollbar, NSelect, NTag, useMessage,
+  NButton, NInput, NModal, NRadioButton, NRadioGroup, NScrollbar, NSelect, NSwitch, NTag, useMessage,
 } from 'naive-ui'
 
 const message = useMessage()
@@ -231,6 +249,8 @@ const currentUrl = ref('')
 const wvRef = ref(null)
 const downloaded = ref(new Set()) // 已提交下载的 URL
 const MAX_ITEMS = 500
+// 截尾一次性提醒：首次触发截尾时弹一次（之后静默截断，不刷屏）
+let truncatedHinted = false
 
 // 系统代理模式（mitm）状态
 const proxyRunning = ref(false)
@@ -383,7 +403,13 @@ function addItem(data) {
       cmd: 'probe_duration', url: data.url, referer: currentUrl.value || '',
     })
   }
-  if (items.value.length > MAX_ITEMS) items.value.length = MAX_ITEMS
+  if (items.value.length > MAX_ITEMS) {
+    items.value.length = MAX_ITEMS
+    if (!truncatedHinted) {
+      truncatedHinted = true
+      message.info('捕获已超过 500 条，早前的条目已被移除；需要的话请及时下载或用「复制全部」备份', { duration: 6000 })
+    }
+  }
 }
 
 onMounted(() => {
@@ -945,17 +971,75 @@ function submitBt(url) {
   window.api && window.api.sendCommand({
     cmd: 'bt_download',
     url: u,
-    album: hostOf(currentUrl.value || '') || 'BT 下载',
+    album: btAlbum(),
   })
 }
-function btPromptSubmit() {
-  const u = window.prompt('粘贴磁力链接（magnet:?xt=urn:btih:…）或 .torrent 种子地址：', '')
-  if (u && u.trim()) submitBt(u.trim())
+function btAlbum() {
+  return hostOf(currentUrl.value || '') || 'BT 下载'
 }
-// 磁力站页面点击 magnet: 链接（主进程协议拦截转发）→ 确认后进 BT 下载
+// ---- BT 弹窗：Electron 不支持 window.prompt（调用会静默失败），改用 n-modal ----
+// 里世界口径：不带 world 字段（任务落 Downloads），album 用当前页 host
+const btShow = ref(false)
+const btText = ref('')
+function btPromptSubmit() {
+  btShow.value = true
+}
+// 自动接管磁力链接：开启后网页里点 magnet: 不再弹确认，直接提交（偏好持久化）
+const btAuto = ref(false)
+try { btAuto.value = localStorage.getItem('bt_auto_takeover') === '1' } catch (e) { /* 隐私模式 */ }
+watch(btAuto, v => {
+  try { localStorage.setItem('bt_auto_takeover', v ? '1' : '0') } catch (e) { /* 隐私模式 */ }
+})
+function submitBtBatch() {
+  const lines = (btText.value || '').split('\n').map(s => s.trim()).filter(Boolean)
+  if (!lines.length) {
+    message.warning('请先粘贴至少一条磁力链接或种子地址')
+    return
+  }
+  lines.forEach(u => submitBt(u))
+  message.success(`已提交 ${lines.length} 条 BT 任务`)
+  btText.value = ''
+  btShow.value = false
+}
+// .torrent 种子文件拖拽：读文件 → base64 → bt_download_file
+async function onBtDrop(e) {
+  const files = Array.from((e.dataTransfer && e.dataTransfer.files) || [])
+  const torrents = files.filter(f => /\.torrent$/i.test(f.name || ''))
+  if (!torrents.length) {
+    message.warning('请拖入 .torrent 种子文件（磁力链接请粘贴到上方输入框）')
+    return
+  }
+  for (const f of torrents) {
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer())
+      let bin = ''
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+      }
+      window.api && window.api.sendCommand({
+        cmd: 'bt_download_file',
+        b64: btoa(bin),
+        album: btAlbum(),
+      })
+      message.success(`已提交种子：${f.name}`)
+    } catch (err) {
+      message.error(`读取种子失败：${f.name}`)
+    }
+  }
+}
+// 磁力站页面点击 magnet: 链接（主进程协议拦截转发）
+// → 开启「自动接管」直接提交；否则确认后进 BT 下载
 if (window.api && window.api.onBtMagnetClick) {
   window.api.onBtMagnetClick(({ url }) => {
     if (!url) return
+    let auto = false
+    try { auto = localStorage.getItem('bt_auto_takeover') === '1' } catch (e) { /* 隐私模式 */ }
+    if (auto) {
+      submitBt(url)
+      message.success('已自动加入 BT 下载（进度在下载管理查看）')
+      return
+    }
     if (window.confirm(`检测到磁力链接，加入 BT 下载？\n\n${url.slice(0, 120)}`)) submitBt(url)
   })
 }
@@ -1186,4 +1270,17 @@ function clearAll() {
   flex-shrink: 0;
 }
 .sn-mini:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* BT 下载弹窗（暗色风格，对齐嗅探窗配色） */
+.sn-bt-body { display: flex; flex-direction: column; gap: 10px; }
+.sn-bt-drop {
+  border: 1.5px dashed #3a3a44; border-radius: 10px;
+  padding: 14px 10px; text-align: center;
+  font-size: 12.5px; color: #9aa0b2;
+  background: #1d1d24; cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.sn-bt-drop:hover { border-color: #5a5a6e; background: #23232c; }
+.sn-bt-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sn-bt-auto { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #b9bdc9; cursor: pointer; }
 </style>

@@ -499,6 +499,11 @@ function startPythonBackend() {
           if (snifferWindow && !snifferWindow.isDestroyed() && String(evName || '').startsWith('sniff')) {
             snifferWindow.webContents.send('python-event', event)
           }
+          // BT 下载窗口：只转发 BT 相关事件（提交结果）与任务快照（任务进度列表）
+          if (btWindow && !btWindow.isDestroyed()
+              && (evName === 'tasks_snapshot' || String(evName || '').startsWith('bt_'))) {
+            btWindow.webContents.send('python-event', event)
+          }
           // 同步给独立下载管理器窗口
           if (downloadsWindow && !downloadsWindow.isDestroyed()) {
             downloadsWindow.webContents.send('downloads-event', event)
@@ -927,6 +932,43 @@ function createSnifferWindow() {
 
 ipcMain.on('sniffer-open', () => {
   createSnifferWindow()
+})
+
+// ============================
+// BT 下载窗口 —— 独立窗口（磁力链接批量粘贴 + .torrent 拖拽 + BT 任务进度），
+// 复刻嗅探窗模式：独立 BrowserWindow 加载 dist/bt.html（vite 多入口），单例守卫
+// ============================
+let btWindow = null
+
+function createBtWindow() {
+  if (btWindow && !btWindow.isDestroyed()) {
+    btWindow.show()
+    btWindow.focus()
+    return
+  }
+  btWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    title: '🧲 BT 下载',
+    backgroundColor: '#16161a',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webviewTag: true,
+    },
+  })
+  btWindow.loadFile(path.join(__dirname, '../dist/bt.html'))
+  btWindow.on('closed', () => {
+    btWindow = null
+  })
+  debugLog('BT 下载窗口创建成功')
+}
+
+ipcMain.on('bt-open', () => {
+  createBtWindow()
 })
 
 // ============================
@@ -2168,7 +2210,7 @@ app.on('web-contents-created', (_e, wc) => {
       debugLog(`magnet 点击拦截: ${url.slice(0, 90)}`)
       const payload = { url }
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('bt-magnet-click', payload)
-      if (snifferWin && !snifferWin.isDestroyed()) snifferWin.webContents.send('bt-magnet-click', payload)
+      if (snifferWindow && !snifferWindow.isDestroyed()) snifferWindow.webContents.send('bt-magnet-click', payload)
     }
   })
   wc.setWindowOpenHandler(({ url }) => {
@@ -2178,7 +2220,7 @@ app.on('web-contents-created', (_e, wc) => {
       debugLog(`magnet 弹窗拦截: ${url.slice(0, 90)}`)
       const payload = { url }
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('bt-magnet-click', payload)
-      if (snifferWin && !snifferWin.isDestroyed()) snifferWin.webContents.send('bt-magnet-click', payload)
+      if (snifferWindow && !snifferWindow.isDestroyed()) snifferWindow.webContents.send('bt-magnet-click', payload)
       return { action: 'deny' }
     }
     // 热门平台界面的 webview：target=_blank 链接改在当前 webview 内打开。

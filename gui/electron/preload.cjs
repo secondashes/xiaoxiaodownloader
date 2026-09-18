@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // 手动抓取（资源嗅探）：打开独立嗅探窗口（内置浏览器 + webRequest 媒体捕获）
   snifferOpen: () => ipcRenderer.send('sniffer-open'),
+  // BT 下载：打开独立 BT 窗口（磁力链接批量粘贴 + .torrent 拖拽）
+  btOpen: () => ipcRenderer.send('bt-open'),
   // 热门平台主界面（ModernHome）：挂载 persist:hotplatform 会话的媒体捕获
   hotCaptureAttach: () => ipcRenderer.send('hot-capture-attach'),
   // 重启应用（还原嗅探网络→杀后端→relaunch；界面模式随设置持久化恢复）

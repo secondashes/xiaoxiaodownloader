@@ -84,7 +84,11 @@
       <div class="mh-dl-head">
         <button class="mh-nav-btn" :title="canGoBack() ? '返回上一个界面（不中断播放）' : '返回平台选择'" @click="goBack">↩</button>
         <span class="mh-dl-title">下载管理</span>
-        <span class="mh-dl-sub">仅记录本界面的下载 · 保存位置见设置「表世界保存位置」</span>
+        <span class="mh-dl-sub">仅记录本界面的下载</span>
+        <span class="mh-save-pill" :title="surfaceSavePath || '默认保存到系统下载文件夹；点「修改」可选其他目录，新任务即时生效'">📁 保存位置：{{ surfaceSavePath || '默认（用户下载夹）' }}</span>
+        <button class="mh-mini" title="修改表世界下载保存位置（新任务即时生效）" @click="pickSaveDir">修改</button>
+        <n-checkbox v-model:checked="delFiles" class="mh-del-chk"
+                    title="勾选后，点「清除记录」会连同任务对应的本地文件一起删除（首次使用会二次确认，偏好自动记住）">同时删除本地文件</n-checkbox>
         <button class="mh-nav-btn" style="margin-left:auto" :title="canGoBack() ? '返回上一个界面（不中断播放）' : '返回平台选择'" @click="goBack">⊞</button>
       </div>
       <div class="mh-dl-body">
@@ -262,12 +266,30 @@
     </div>
 
     </div><!-- /.mh-body -->
+
+    <!-- BT 下载弹窗：替代 window.prompt（Electron 不支持 prompt，调用会静默失败） -->
+    <n-modal v-model:show="btShow" preset="dialog" title="🧲 BT 下载（磁力链接 / 种子）" style="width: 580px">
+      <div class="mh-bt-body">
+        <n-input v-model:value="btText" type="textarea" :rows="6"
+                 placeholder="每行一条磁力链接（magnet:?xt=urn:btih:…）或 .torrent 种子地址，支持多行批量" />
+        <div class="mh-bt-drop" @dragover.prevent @drop.prevent="onBtDrop">
+          🧲 把 .torrent 种子文件拖到这里提交（可多个）
+        </div>
+        <div class="mh-bt-foot">
+          <label class="mh-bt-auto" title="开启后，在网页里点磁力链接不再弹确认，直接加入下载">
+            <n-switch v-model:value="btAuto" size="small" />
+            自动接管磁力链接
+          </label>
+          <n-button type="primary" @click="submitBtBatch">批量下载</n-button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, onUnmounted, nextTick } from 'vue'
-import { NTag, useMessage } from 'naive-ui'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, onUnmounted, nextTick, watch } from 'vue'
+import { NButton, NCheckbox, NInput, NModal, NSwitch, NTag, useMessage } from 'naive-ui'
 // 站点注册表（唯一数据源）：分类/说明/图标兜底/GitHub 校验合并都在 surfaceSites.js
 import { PLATFORMS as PLATFORM_BASELINE, BUNDLED_REGISTRY, mergeRegistry, tileVisual, visibleCategories, visibleSubs, freqSites, trackSiteClick } from '../surfaceSites.js'
 
@@ -305,6 +327,8 @@ const SEG_KEEP = 50
 const filter = ref('all')
 const downloaded = ref(new Set())
 const MAX_ITEMS = 500
+// 截尾一次性提醒：首次触发截尾时弹一次（之后静默截断，不刷屏）
+let truncatedHinted = false
 
 // ---- 视图返回栈：浏览态 → 下载管理 → 返回仍回到刚才浏览的平台与页面 ----
 // 关键改动：下载管理现在是「覆盖层」（showDownloads），浏览态的 webview 全程保持挂载。
@@ -457,7 +481,13 @@ function addItem(data) {
       cmd: 'hls_probe', url: data.url, referer: currentUrl.value || '',
     })
   }
-  if (items.value.length > MAX_ITEMS) items.value.length = MAX_ITEMS
+  if (items.value.length > MAX_ITEMS) {
+    items.value.length = MAX_ITEMS
+    if (!truncatedHinted) {
+      truncatedHinted = true
+      message.info('捕获已超过 500 条，早前的条目已被移除；需要的话请及时下载或用「复制全部」备份', { duration: 6000 })
+    }
+  }
 }
 function newItem(data, type) {
   return {
@@ -515,6 +545,25 @@ function tileTip(p) {
 
 const surfaceTasks = ref([])
 
+// ---- 保存位置显示/修改 + 「同时删除本地文件」偏好 ----
+// surface_save_path 留空 = 后端默认落用户下载夹；修改走 save_settings（后端合并保存，只动这一个键）
+const surfaceSavePath = ref('')
+const delFiles = ref(false)   // 清除记录时是否连本地文件一起删（默认不勾，localStorage 记住偏好）
+try { delFiles.value = localStorage.getItem('mh_del_files') === '1' } catch (e) { /* 隐私模式 */ }
+watch(delFiles, v => {
+  try { localStorage.setItem('mh_del_files', v ? '1' : '0') } catch (e) { /* 隐私模式 */ }
+})
+async function pickSaveDir() {
+  if (!window.api || !window.api.pickDirectory) return
+  try {
+    const dir = await window.api.pickDirectory()
+    if (!dir) return                    // 用户取消
+    window.api.sendCommand({ cmd: 'save_settings', settings: { surface_save_path: dir } })
+    surfaceSavePath.value = dir
+    message.success('保存位置已更新，新任务即时生效')
+  } catch (e) { /* 目录选择器异常：忽略 */ }
+}
+
 // 注：下载管理入口 openDownloads 定义在上方「视图返回栈」处（进入前压栈，返回即回原界面）
 
 // ===== BT 下载（磁力链接/.torrent）：aria2 内核；world=surface 落「保存位置」 =====
@@ -528,14 +577,69 @@ function submitBt(url) {
     world: 'surface',
   })
 }
+// ---- BT 弹窗：Electron 不支持 window.prompt（调用会静默失败），改用 n-modal ----
+const btShow = ref(false)
+const btText = ref('')
 function btPromptSubmit() {
-  const u = window.prompt('粘贴磁力链接（magnet:?xt=urn:btih:…）或 .torrent 种子地址：', '')
-  if (u && u.trim()) submitBt(u.trim())
+  btShow.value = true
 }
-// 磁力站页面点击 magnet: 链接（主进程协议拦截转发）→ 确认后进 BT 下载
+// 自动接管磁力链接：开启后网页里点 magnet: 不再弹确认，直接提交（偏好持久化）
+const btAuto = ref(false)
+try { btAuto.value = localStorage.getItem('bt_auto_takeover') === '1' } catch (e) { /* 隐私模式 */ }
+watch(btAuto, v => {
+  try { localStorage.setItem('bt_auto_takeover', v ? '1' : '0') } catch (e) { /* 隐私模式 */ }
+})
+function submitBtBatch() {
+  const lines = (btText.value || '').split('\n').map(s => s.trim()).filter(Boolean)
+  if (!lines.length) {
+    message.warning('请先粘贴至少一条磁力链接或种子地址')
+    return
+  }
+  lines.forEach(u => submitBt(u))
+  message.success(`已提交 ${lines.length} 条 BT 任务`)
+  btText.value = ''
+  btShow.value = false
+}
+// .torrent 种子文件拖拽：读文件 → base64 → bt_download_file（world=surface 落保存位置）
+async function onBtDrop(e) {
+  const files = Array.from((e.dataTransfer && e.dataTransfer.files) || [])
+  const torrents = files.filter(f => /\.torrent$/i.test(f.name || ''))
+  if (!torrents.length) {
+    message.warning('请拖入 .torrent 种子文件（磁力链接请粘贴到上方输入框）')
+    return
+  }
+  for (const f of torrents) {
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer())
+      let bin = ''
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+      }
+      window.api && window.api.sendCommand({
+        cmd: 'bt_download_file',
+        b64: btoa(bin),
+        album: 'BT 下载',
+        world: 'surface',
+      })
+      message.success(`已提交种子：${f.name}`)
+    } catch (err) {
+      message.error(`读取种子失败：${f.name}`)
+    }
+  }
+}
+// 磁力站页面点击 magnet: 链接（主进程协议拦截转发）
+// → 开启「自动接管」直接提交；否则确认后进 BT 下载
 if (window.api && window.api.onBtMagnetClick) {
   window.api.onBtMagnetClick(({ url }) => {
     if (!url) return
+    let auto = false
+    try { auto = localStorage.getItem('bt_auto_takeover') === '1' } catch (e) { /* 隐私模式 */ }
+    if (auto) {
+      submitBt(url)
+      message.success('已自动加入 BT 下载（进度在下载管理查看）')
+      return
+    }
     if (window.confirm(`检测到磁力链接，加入 BT 下载？\n\n${url.slice(0, 120)}`)) submitBt(url)
   })
 }
@@ -705,9 +809,15 @@ function openTaskFolder(t) {
 }
 
 function clearRecord(taskId) {
-  window.api && window.api.sendCommand({ cmd: 'remove_task', task_id: taskId })
+  const del = delFiles.value
+  // 首次勾选删除时二次确认；确认一次后记住，之后不再问
+  if (del && localStorage.getItem('mh_del_files_confirmed') !== '1') {
+    if (!window.confirm('将同时删除任务对应的本地文件，确定？')) return
+    try { localStorage.setItem('mh_del_files_confirmed', '1') } catch (e) { /* 隐私模式 */ }
+  }
+  window.api && window.api.sendCommand({ cmd: 'remove_task', task_id: taskId, delete_files: del })
   surfaceTasks.value = surfaceTasks.value.filter(t => t.id !== taskId)
-  message.success('已清除该下载记录')
+  message.success(del ? '已删除该任务及其本地文件' : '已清除该下载记录')
 }
 
 // ---- 美好世界下载管理的任务进度与控制（流媒体任务尤其需要：几百个分片，
@@ -1054,6 +1164,8 @@ async function restartApp() {
 let offResource = null
 let offHotPopup = null
 onMounted(() => {
+  // 拉取后端设置（settings 事件回流，onEvent 里读 surface_save_path 显示当前保存位置）
+  window.api && window.api.sendCommand({ cmd: 'get_settings' })
   if (window.api && window.api.onSnifferResource) {
     offResource = window.api.onSnifferResource(addItem)
   }
@@ -1068,6 +1180,11 @@ onMounted(() => {
   if (window.api && window.api.onEvent) {
     window.api.onEvent((ev) => {
       if (!ev || !ev.event) return
+      if (ev.event === 'settings') {
+        // 保存位置回流（App 层也处理同一事件，互不影响）
+        surfaceSavePath.value = (ev.settings && ev.settings.surface_save_path) || ''
+        return
+      }
       if (ev.event === 'word_result') {
         if (wordTimer) { clearTimeout(wordTimer); wordTimer = null }
         exportingWord.value = false
@@ -1613,6 +1730,29 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .mh-mini:hover { background: #f0f1f7; }
+
+/* 下载管理顶栏：保存位置 pill + 「同时删除本地文件」勾选 */
+.mh-save-pill {
+  font-size: 12px; color: #5a6072;
+  background: #f3f4fb; border: 1px solid #e4e7f2;
+  padding: 4px 10px; border-radius: 999px;
+  max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.mh-del-chk { font-size: 12.5px; flex-shrink: 0; }
+
+/* BT 下载弹窗（亮色风格） */
+.mh-bt-body { display: flex; flex-direction: column; gap: 10px; }
+.mh-bt-drop {
+  border: 1.5px dashed #c4cbe0; border-radius: 10px;
+  padding: 14px 10px; text-align: center;
+  font-size: 12.5px; color: #8a90a6;
+  background: #fafbff; cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.mh-bt-drop:hover { border-color: #9aa8d8; background: #f4f6ff; }
+.mh-bt-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mh-bt-auto { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #5a6072; cursor: pointer; }
 
 /* 经典界面的浅色主题也能容纳（新界面自带亮色，不依赖主题变量） */
 
