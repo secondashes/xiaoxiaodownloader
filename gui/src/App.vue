@@ -189,6 +189,13 @@
             :tw-user-feed="twUserFeed"
             :tw-user-feed-loading="twUserFeedLoading"
             :tw-user-feed-has-more="twUserFeedHasMore"
+            :tw-profile-stats="twUserProfileStats"
+            :tw-user-load-all-running="twUserLoadAllRunning"
+            :tw-user-load-all-progress="twUserLoadAllProgress"
+            :tw-export-running="twExportRunning"
+            :tw-export-progress="twExportProgress"
+            :tw-browse-load-all-running="twBrowseLoadAllRunning"
+            :tw-browse-load-all-count="twBrowseLoadAllCount"
             :tw-local-search="twLocalSearch"
             :tw-search-tweets="twSearchTweets"
             :iw-view="iwView"
@@ -358,6 +365,9 @@
             @tw-browse-more="handleTwBrowseMore"
             @tw-user-feed-more="handleTwUserFeedMore"
             @tw-user-feed-download-all="handleTwUserFeedDownloadAll"
+            @tw-user-load-all="handleTwUserFeedLoadAll"
+            @tw-export-html="handleTwExportHtml"
+            @tw-browse-load-all="handleTwBrowseLoadAll"
             @tw-back="handleTwBack"
             @iw-set-site="handleIwSetSite"
             @iw-home="handleIwHome"
@@ -962,6 +972,18 @@ const twLocalSearch = ref('')
 const twSearchTweets = ref([])
 // 搜索结果视图（从搜索态返回时恢复原视图）
 const twSearchSnapshot = ref(null)
+// 用户页资料统计（twitter_user_feed 无 cursor 首包的 profile 字段：媒体/推文/粉丝/关注数）
+const twUserProfileStats = ref(null)
+// 用户页「加载全部」（load_all 模式：后端一次翻完所有页，前端只做防抖与进度显示）
+const twUserLoadAllRunning = ref(false)
+const twUserLoadAllProgress = reactive({ loaded: 0, total_media: 0 })
+// 用户页 HTML 相册导出（twitter_export_html：拉全部内容生成/增量更新「时间线.html」）
+const twExportRunning = ref(false)
+const twExportProgress = reactive({ phase: '', done: 0 })
+// 浏览模式「加载全部」（前端循环逐批发 twitter_browse 命令，1.2s 间隔防限流，可中止）
+const twBrowseLoadAllRunning = ref(false)
+const twBrowseLoadAllCount = ref(0)
+let twBrowseLoadAllAbort = false
 
 // Iwara 主页/关注/好友/视频详情（IW站与AI站共用，切换不丢状态）
 // iwView: ''=普通搜索 | 'home'=主页最近更新 | 'following'=我的关注 | 'friends'=我的好友 | 'detail'=视频详情
@@ -3337,22 +3359,58 @@ function _pyEvt_twitter_user_feed(event) {
       if (twFollowMode.value !== 'user') return
       if (event.error) {
         twUserFeed.value = []
+        twUserLoadAllRunning.value = false
         message.error(event.error)
         addLog('错误', event.error)
         return
       }
       if (twUserFeedUserId.value && event.user_id
-        && String(event.user_id) !== twUserFeedUserId.value) return
+        && String(event.user_id) !== twUserFeedUserId.value) {
+        twUserLoadAllRunning.value = false
+        return
+      }
+      // 无 cursor 首包带博主资料统计（媒体/推文/粉丝/关注数），存起来给用户页头部显示
+      if (!event.append && event.profile) {
+        twUserProfileStats.value = event.profile
+      }
       twUserFeed.value = event.append
         ? twUserFeed.value.concat(event.items || [])
         : (event.items || [])
       twUserFeedCursor.value = event.cursor || ''
       twUserFeedHasMore.value = !!event.has_more
+      // load_all 模式的最终包（has_more=false，items=全量）到达后结束「加载全部」状态
+      if (twUserLoadAllRunning.value && !twUserFeedHasMore.value) {
+        twUserLoadAllRunning.value = false
+      }
       if (!event.append) {
         addLog('X', `博主内容流：@${event.screen_name || ''} ${(event.items || []).length} 条推文`)
       }
       return
     }
+}
+
+// 用户页「加载全部」进度（load_all 模式中后端持续上报：已加载推文数 / 媒体总数）
+function _pyEvt_twitter_user_feed_progress(event) {
+  twUserLoadAllProgress.loaded = event.loaded || 0
+  twUserLoadAllProgress.total_media = event.total_media || 0
+}
+
+// HTML 相册导出进度（拉取内容阶段上报：阶段 + 已完成条数）
+function _pyEvt_twitter_export_progress(event) {
+  twExportRunning.value = true
+  twExportProgress.phase = event.phase || ''
+  twExportProgress.done = event.done || 0
+}
+
+function _pyEvt_twitter_export_done(event) {
+  twExportRunning.value = false
+  if (event.ok) {
+    message.success(`HTML 相册已保存（共 ${event.total || 0} 条，新增 ${event.new || 0} 条）：${event.path || ''}`)
+    addLog('X', `HTML 相册已保存：${event.path || ''}（共 ${event.total || 0} 条，新增 ${event.new || 0} 条）`)
+  } else {
+    message.error(event.error || 'HTML 相册导出失败')
+    addLog('错误', `HTML 相册导出失败：${event.error || '未知错误'}`)
+  }
 }
 
 function _pyEvt_twitter_browse_feed(event) {
@@ -3723,6 +3781,9 @@ const PY_EVENT_HANDLERS = {
   'twitter_browse_progress': _pyEvt_twitter_browse_progress,
   'twitter_user_feed_loading': _pyEvt_twitter_user_feed_loading,
   'twitter_user_feed': _pyEvt_twitter_user_feed,
+  'twitter_user_feed_progress': _pyEvt_twitter_user_feed_progress,
+  'twitter_export_progress': _pyEvt_twitter_export_progress,
+  'twitter_export_done': _pyEvt_twitter_export_done,
   'twitter_browse_feed': _pyEvt_twitter_browse_feed,
   'twitter_cache_cleared': _pyEvt_twitter_cache_cleared,
   'twitter_follows': _pyEvt_twitter_follows,
@@ -7290,6 +7351,8 @@ function handleTwBack() {
     twUserFeedCursor.value = ''
     twUserFeedHasMore.value = false
     twUserFeedUserId.value = ''
+    twUserProfileStats.value = null
+    twUserLoadAllRunning.value = false
     return
   }
   twFollowMode.value = prev.mode
@@ -7305,6 +7368,8 @@ function handleTwBack() {
   if (twFollowMode.value === 'user' && twViewUser.value
     && !twUserFeed.value.length && window.api) {
     twUserFeedUserId.value = String(twViewUser.value.user_id || '')
+    twUserProfileStats.value = null
+    twUserLoadAllRunning.value = false
     window.api.sendCommand({
       cmd: 'twitter_user_feed',
       screen_name: twViewUser.value.screen_name,
@@ -7330,6 +7395,8 @@ function handleTwOpenUser(u) {
   twUserFeedCursor.value = ''
   twUserFeedHasMore.value = false
   twUserFeedUserId.value = String(u.user_id || '')
+  twUserProfileStats.value = null
+  twUserLoadAllRunning.value = false
   if (window.api) {
     window.api.sendCommand({
       cmd: 'twitter_user_feed',
@@ -7349,6 +7416,45 @@ function handleTwUserFeedMore() {
     screen_name: u.screen_name || '',
     user_id: String(u.user_id || twUserFeedUserId.value || ''),
     cursor: twUserFeedCursor.value || '',
+  })
+}
+
+// 博主内容流：一次加载全部（load_all 模式，后端自动翻完所有页，最终包 items=全量）
+// 前端不循环，只做防抖；进度由 twitter_user_feed_progress 事件驱动
+function handleTwUserFeedLoadAll() {
+  if (!window.api) return
+  if (twUserLoadAllRunning.value || twUserFeedLoading.value) return // 防重复点击
+  const u = twViewUser.value || {}
+  if (!u.screen_name && !twUserFeedUserId.value) return
+  twUserLoadAllRunning.value = true
+  twUserLoadAllProgress.loaded = twUserFeed.value.length
+  twUserLoadAllProgress.total_media = twUserProfileStats.value?.media_count || 0
+  window.api.sendCommand({
+    cmd: 'twitter_user_feed',
+    screen_name: u.screen_name || '',
+    user_id: String(u.user_id || twUserFeedUserId.value || ''),
+    cursor: '',
+    load_all: true,
+  })
+}
+
+// 用户页：生成/增量更新博主 HTML 相册（后端拉全部内容，已下载视频本地引用，存为「时间线.html」）
+function handleTwExportHtml(payload) {
+  if (!window.api) return
+  if (twExportRunning.value) {
+    message.info('HTML 相册正在导出中，请稍候…')
+    return
+  }
+  const u = payload || twViewUser.value || {}
+  if (!u.screen_name) return
+  twExportRunning.value = true
+  twExportProgress.phase = '准备'
+  twExportProgress.done = 0
+  message.info('正在拉取全部内容并生成/更新 HTML 相册…')
+  window.api.sendCommand({
+    cmd: 'twitter_export_html',
+    screen_name: u.screen_name,
+    user_id: String(u.user_id || ''),
   })
 }
 
@@ -7421,8 +7527,69 @@ function handleTwBrowse() {
 
 // 浏览模式：加载更多（下一批关注博主，后端追加合并去重）
 function handleTwBrowseMore() {
-  if (!window.api || twBrowseLoading.value) return
+  if (!window.api || twBrowseLoading.value || twBrowseLoadAllRunning.value) return
   window.api.sendCommand({ cmd: 'twitter_browse', offset: twBrowseNextOffset.value || 0 })
+}
+
+// 等待浏览模式当前一批拉取结束：loading 出现过再消失，或 offset 变化 / 无下一批；超时兜底
+function waitTwBrowseRoundDone(prevOffset, timeoutMs = 90000) {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    let seenLoading = false
+    const timer = setInterval(() => {
+      if (Date.now() - started > timeoutMs) { clearInterval(timer); resolve(); return }
+      if (twBrowseLoading.value) seenLoading = true
+      else if (seenLoading
+        || twBrowseNextOffset.value !== prevOffset
+        || !twBrowseHasMore.value) {
+        clearInterval(timer)
+        resolve()
+      }
+    }, 150)
+  })
+}
+
+// 浏览模式：自动连续翻页加载全部（每批间隔 1.2s 防限流；再点一次按钮 = 中止）
+async function handleTwBrowseLoadAll() {
+  if (!window.api) return
+  // 运行中再点 = 置中止标志，循环每轮检查
+  if (twBrowseLoadAllRunning.value) {
+    twBrowseLoadAllAbort = true
+    return
+  }
+  if (!twBrowseHasMore.value) {
+    message.info('已加载全部关注博主的动态')
+    return
+  }
+  twBrowseLoadAllRunning.value = true
+  twBrowseLoadAllAbort = false
+  twBrowseLoadAllCount.value = twBrowseFeed.value.length
+  let aborted = false
+  try {
+    // 上限 50 批，防后端 offset 异常导致无限循环
+    for (let round = 0; round < 50; round++) {
+      if (twBrowseLoadAllAbort || twFollowMode.value !== 'browse') { aborted = true; break }
+      if (twBrowseLoading.value) {
+        // 上一批还没回来（或手动刷新中）：等它结束再发下一批
+        await waitTwBrowseRoundDone(twBrowseNextOffset.value)
+        continue
+      }
+      const prevOffset = twBrowseNextOffset.value
+      window.api.sendCommand({ cmd: 'twitter_browse', offset: twBrowseNextOffset.value || 0 })
+      await waitTwBrowseRoundDone(prevOffset)
+      twBrowseLoadAllCount.value = twBrowseFeed.value.length
+      if (twBrowseLoadAllAbort || twFollowMode.value !== 'browse') { aborted = true; break }
+      if (!twBrowseHasMore.value) break // 后端已无下一批
+      // 防限流：每批之间隔 1.2s（期间响应中止）
+      for (let i = 0; i < 12 && !twBrowseLoadAllAbort; i++) {
+        await new Promise(r => setTimeout(r, 100))
+      }
+    }
+  } finally {
+    twBrowseLoadAllRunning.value = false
+    twBrowseLoadAllAbort = false
+  }
+  if (aborted) message.info('已停止加载全部')
 }
 
 // X 本地搜索：在已缓存内容中过滤（浏览信息流 / 关注列表 / 我的分类）

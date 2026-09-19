@@ -15,7 +15,7 @@ import logging
 import os
 import random
 import re
-from html import unescape as html_unescape
+from html import escape as html_escape, unescape as html_unescape
 import secrets
 import shutil
 import sys
@@ -742,6 +742,64 @@ async def twitter_follow_list(mode: str, cursor: str = "",
     label = "关注我的人" if mode == "followers" else "关注列表"
     if screen_name:
         label = f"@{screen_name.lstrip('@')} 的{label}"
+    # ---------- 我的分类：与左侧「分类管理」同一数据源（follow_tags/follows 存储） ----------
+    # 此前 follows 落进 else 被当 following 拉全量关注列表，显示与左侧分类管理对不上。
+    # 现改为直接从归类存储构建「已归类用户」列表：分类 chip、成员与左侧面板完全同源。
+    if mode == "follows":
+        try:
+            tags = _load_twitter_follow_tags()
+            follows = _load_twitter_follows()
+            valid_parents = {p.get("name") for p in tags if p.get("name")}
+            items: list[dict] = []
+            for uid, rec in follows.items():
+                parent = rec.get("parent") or ""
+                child = rec.get("child") or ""
+                # 归类已被删除的母类/子类的用户不显示（与左侧面板口径一致）
+                if parent not in valid_parents:
+                    continue
+                if child and child not in [c for p2 in tags
+                                           if p2.get("name") == parent
+                                           for c in (p2.get("children") or [])]:
+                    continue
+                name = rec.get("name") or rec.get("screen_name") or uid
+                handle = rec.get("screen_name") or ""
+                avatar = rec.get("avatar") or ""
+                home = rec.get("url") or (f"https://x.com/{handle}" if handle else "")
+                items.append({
+                    "user_id": str(uid),
+                    "screen_name": handle,
+                    "name": name,
+                    "album_name": name,
+                    "avatar": avatar,
+                    "thumbnail": avatar,
+                    "url": home,
+                    "album_url": home,
+                    "files": 0,
+                    "bio": "",
+                    "follow_tag": f"{parent}/{child}".strip("/"),
+                    "has_tag": True,
+                    "saved_at": rec.get("saved_at") or 0,
+                })
+            items.sort(key=lambda x: x.get("saved_at") or 0, reverse=True)
+            _apply_cached_thumbnails(items)
+            asyncio.create_task(_cache_thumbnails(items))
+            emit({
+                "event": "twitter_follow_list",
+                "mode": "follows",
+                "label": "我的分类（已归类的关注）",
+                "items": items,
+                "next_cursor": "",
+                "has_more": False,
+                "append": False,
+            })
+        except Exception as exc:
+            logging.exception("我的分类构建失败")
+            emit({"event": "twitter_follow_list", "mode": "follows", "items": [],
+                  "next_cursor": "", "has_more": False, "append": False,
+                  "error": f"构建我的分类失败: {exc}"})
+        finally:
+            emit({"event": "twitter_follow_loading", "mode": "follows", "loading": False})
+        return
     # 先发缓存（仅首页），让界面立即有内容
     if not cursor:
         cached = _load_twitter_user_list(mode, screen_name)
@@ -1865,116 +1923,199 @@ async def twitter_inspect(url: str, options: dict) -> None:
         logging.exception("Twitter 解析过程出错")
 
 
+async def _twitter_feed_resolve_user(screen_name: str, user_id: str) -> tuple[str, str, str, dict]:
+    """解析博主身份：缺 user_id 时经 UserByScreenName 换取，并带出个人资料。
+
+    返回 (user_id, screen_name, display_name, profile)；解析失败抛
+    ValueError（message 可直接给前端）。
+    profile 仅在走了 UserByScreenName 时非空：
+      {media_count, statuses_count, followers_count, friends_count}。
+    """
+    screen_name = (screen_name or "").strip().lstrip("@")
+    display_name = screen_name
+    profile: dict = {}
+    if not user_id:
+        if not screen_name:
+            raise ValueError("缺少博主信息")
+        # user_id 缺失时用 UserByScreenName 换取
+        data = await asyncio.to_thread(
+            _twitter_api_get,
+            _twitter_qid("UserByScreenName"), "UserByScreenName",
+            _TW_USER_FEATURES,
+            {"screen_name": screen_name, "withSafetyModeUserFields": True},
+            {"fieldToggles": json.dumps({"withAuxiliaryUserLabels": False})},
+        )
+        user_result = ((data.get("data") or {}).get("user") or {}).get("result") or {}
+        user_id = user_result.get("rest_id") or ""
+        legacy_u = user_result.get("legacy") or {}
+        screen_name = legacy_u.get("screen_name") or screen_name
+        display_name = legacy_u.get("name") or screen_name
+        if not user_id:
+            raise ValueError(f"找不到用户 @{screen_name}")
+        profile = {
+            "media_count": legacy_u.get("media_count"),
+            "statuses_count": legacy_u.get("statuses_count"),
+            "followers_count": legacy_u.get("followers_count"),
+            "friends_count": legacy_u.get("friends_count"),
+        }
+    return user_id, screen_name, display_name, profile
+
+
+async def _twitter_user_feed_page(user_id: str, screen_name: str,
+                                  cursor: str = "") -> tuple[list[dict], str]:
+    """拉取 UserMedia 时间线一页并映射为推文卡片（共用内部函数）。
+
+    返回 (cards, next_cursor)；cards 按发布时间倒序，页内按首图 URL 去重，
+    卡片自带 media_items（与文件列表同构的下载条目）。
+    twitter_user_feed（单页/加载全部）与 twitter_export_html 共用。
+    """
+    variables = {
+        "userId": user_id, "count": 20,
+        "includePromotedContent": False,
+        "withClientEventToken": False, "withBirdwatchNotes": False,
+        "withVoice": True, "withV2Timeline": True,
+    }
+    if cursor:
+        variables["cursor"] = cursor
+    data = await asyncio.to_thread(
+        _twitter_api_get,
+        _twitter_qid("UserMedia"), "UserMedia",
+        _TW_MEDIA_FEATURES, variables,
+    )
+    instructions = _tw_user_instructions(data)
+    posts = _twitter_extract_posts(instructions)
+
+    cards: list[dict] = []
+    seen_urls: set[str] = set()
+    for post in posts:
+        legacy = post.get("legacy") or {}
+        if legacy.get("retweeted_status_result"):
+            continue  # 跳过转推
+        media_items = _twitter_map_tweet(post)
+        if not media_items:
+            continue
+        key = media_items[0].get("media_url") or ""
+        if key in seen_urls:
+            continue  # 跨页/线程重复推文去重
+        seen_urls.add(key)
+        created_at = legacy.get("created_at") or ""
+        post_date = ""
+        if created_at:
+            try:
+                post_date = datetime.strptime(
+                    created_at, "%a %b %d %H:%M:%S %z %Y",
+                ).strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                pass
+        tweet_id = post.get("rest_id") or legacy.get("id_str") or ""
+        full_text = (legacy.get("full_text") or "").strip()
+        cards.append({
+            "tweet_id": tweet_id,
+            "item_page": media_items[0].get("item_page") or "",
+            "text": full_text[:200],
+            "post_date": post_date,
+            "created_ts": _tw_created_ts(created_at),
+            "media": [
+                {
+                    "media_url": it.get("media_url") or "",
+                    "thumbnail": it.get("thumbnail") or "",
+                    "type": it.get("media_type") or "photo",
+                    "index": idx,
+                }
+                for idx, it in enumerate(media_items, start=1)
+            ],
+            # 与文件列表同构的下载条目（含 filename/site/media_url 等）
+            "media_items": media_items,
+            "user": {"user_id": user_id, "screen_name": screen_name},
+        })
+    cards.sort(key=lambda x: x.get("created_ts") or 0, reverse=True)
+    # 提取底部游标（翻页用）
+    next_cursor = ""
+    for inst in instructions:
+        if inst.get("type") != "TimelineAddEntries":
+            continue
+        for entry in inst.get("entries") or []:
+            c = entry.get("content") or {}
+            if c.get("cursorType") == "Bottom" and c.get("value"):
+                next_cursor = c["value"]
+    return cards, next_cursor
+
+
 async def twitter_user_feed(screen_name: str = "", user_id: str = "",
-                            cursor: str = "") -> None:
-    """博主内容流：拉取指定博主 UserMedia 时间线一页（20 条带媒体推文）。
+                            cursor: str = "", load_all: bool = False) -> None:
+    """博主内容流：拉取指定博主 UserMedia 时间线（20 条/页带媒体推文）。
 
     点开博主后前端自动调用，在用户详情页下方直接展示推文卡片
     （缩略图 + 内容），支持 cursor 翻页；卡片自带 media_items（与文件列表
     同构的下载条目），前端可一键批量下载当前已加载的全部媒体。
+
+    load_all=True 为「加载全部」模式：循环翻页（上限 100 页）合并去重后
+    一次性回传全部卡片（append=False、has_more=False，带 total_pages/loaded
+    计数），期间每页发 twitter_user_feed_progress 进度。首次调用还随包带
+    profile（media_count/statuses_count/followers_count/friends_count）。
     """
     emit({"event": "twitter_user_feed_loading", "loading": True})
     try:
-        screen_name = (screen_name or "").strip().lstrip("@")
-        if not user_id:
-            if not screen_name:
-                emit({"event": "twitter_user_feed", "items": [], "error": "缺少博主信息"})
-                return
-            # user_id 缺失时用 UserByScreenName 换取
-            data = await asyncio.to_thread(
-                _twitter_api_get,
-                _twitter_qid("UserByScreenName"), "UserByScreenName",
-                _TW_USER_FEATURES,
-                {"screen_name": screen_name, "withSafetyModeUserFields": True},
-                {"fieldToggles": json.dumps({"withAuxiliaryUserLabels": False})},
-            )
-            user_result = ((data.get("data") or {}).get("user") or {}).get("result") or {}
-            user_id = user_result.get("rest_id") or ""
-            legacy_u = user_result.get("legacy") or {}
-            screen_name = legacy_u.get("screen_name") or screen_name
-            if not user_id:
-                emit({"event": "twitter_user_feed",
-                      "items": [], "error": f"找不到用户 @{screen_name}"})
-                return
-        variables = {
-            "userId": user_id, "count": 20,
-            "includePromotedContent": False,
-            "withClientEventToken": False, "withBirdwatchNotes": False,
-            "withVoice": True, "withV2Timeline": True,
-        }
-        if cursor:
-            variables["cursor"] = cursor
-        data = await asyncio.to_thread(
-            _twitter_api_get,
-            _twitter_qid("UserMedia"), "UserMedia",
-            _TW_MEDIA_FEATURES, variables,
-        )
-        instructions = _tw_user_instructions(data)
-        posts = _twitter_extract_posts(instructions)
+        user_id, screen_name, _display_name, profile = await _twitter_feed_resolve_user(
+            screen_name, user_id)
 
-        cards: list[dict] = []
-        seen_urls: set[str] = set()
-        for post in posts:
-            legacy = post.get("legacy") or {}
-            if legacy.get("retweeted_status_result"):
-                continue  # 跳过转推
-            media_items = _twitter_map_tweet(post)
-            if not media_items:
-                continue
-            key = media_items[0].get("media_url") or ""
-            if key in seen_urls:
-                continue  # 跨页/线程重复推文去重
-            seen_urls.add(key)
-            created_at = legacy.get("created_at") or ""
-            post_date = ""
-            if created_at:
-                try:
-                    post_date = datetime.strptime(
-                        created_at, "%a %b %d %H:%M:%S %z %Y",
-                    ).strftime("%Y-%m-%d %H:%M")
-                except ValueError:
-                    pass
-            tweet_id = post.get("rest_id") or legacy.get("id_str") or ""
-            full_text = (legacy.get("full_text") or "").strip()
-            cards.append({
-                "tweet_id": tweet_id,
-                "item_page": media_items[0].get("item_page") or "",
-                "text": full_text[:200],
-                "post_date": post_date,
-                "created_ts": _tw_created_ts(created_at),
-                "media": [
-                    {
-                        "media_url": it.get("media_url") or "",
-                        "thumbnail": it.get("thumbnail") or "",
-                        "type": it.get("media_type") or "photo",
-                        "index": idx,
-                    }
-                    for idx, it in enumerate(media_items, start=1)
-                ],
-                # 与文件列表同构的下载条目（含 filename/site/media_url 等）
-                "media_items": media_items,
-                "user": {"user_id": user_id, "screen_name": screen_name},
-            })
-        cards.sort(key=lambda x: x.get("created_ts") or 0, reverse=True)
-        # 提取底部游标（翻页用）
-        next_cursor = ""
-        for inst in instructions:
-            if inst.get("type") != "TimelineAddEntries":
-                continue
-            for entry in inst.get("entries") or []:
-                c = entry.get("content") or {}
-                if c.get("cursorType") == "Bottom" and c.get("value"):
-                    next_cursor = c["value"]
+        if load_all:
+            # 加载全部：翻页合并（tweet_id 去重），上限 100 页防死循环
+            all_cards: list[dict] = []
+            seen_ids: set[str] = set()
+            seen_cursors: set[str] = set()
+            cur = ""
+            total_pages = 0
+            while total_pages < 100:
+                cards, next_cursor = await _twitter_user_feed_page(user_id, screen_name, cur)
+                total_pages += 1
+                for c in cards:
+                    tid = c.get("tweet_id") or ""
+                    if tid and tid in seen_ids:
+                        continue
+                    if tid:
+                        seen_ids.add(tid)
+                    all_cards.append(c)
+                emit({
+                    "event": "twitter_user_feed_progress",
+                    "loaded": len(all_cards),
+                    "total_media": sum(len(c.get("media") or []) for c in all_cards),
+                })
+                if not next_cursor or next_cursor in seen_cursors or not cards:
+                    break
+                seen_cursors.add(next_cursor)
+                cur = next_cursor
+            all_cards.sort(key=lambda x: x.get("created_ts") or 0, reverse=True)
+            if all_cards:
+                all_media = [m for c in all_cards for m in c["media"]]
+                _apply_cached_thumbnails(all_media)
+                asyncio.create_task(_cache_thumbnails(all_media))
+            payload = {
+                "event": "twitter_user_feed", "items": all_cards,
+                "user_id": user_id, "screen_name": screen_name,
+                "cursor": "", "has_more": False, "append": False,
+                "total_pages": total_pages, "loaded": len(all_cards),
+            }
+            if profile:
+                payload["profile"] = profile
+            emit(payload)
+            return
+
+        # 常规单页模式（首包带 profile，翻页包不带）
+        cards, next_cursor = await _twitter_user_feed_page(user_id, screen_name, cursor)
         if cards:
             all_media = [m for c in cards for m in c["media"]]
             _apply_cached_thumbnails(all_media)
             asyncio.create_task(_cache_thumbnails(all_media))
-        emit({
+        payload = {
             "event": "twitter_user_feed", "items": cards,
             "user_id": user_id, "screen_name": screen_name,
             "cursor": next_cursor, "has_more": bool(next_cursor),
             "append": bool(cursor),
-        })
+        }
+        if profile and not cursor:
+            payload["profile"] = profile
+        emit(payload)
     except PermissionError as exc:
         emit({"event": "twitter_user_feed", "items": [], "error": str(exc)})
     except Exception as exc:
@@ -1983,6 +2124,306 @@ async def twitter_user_feed(screen_name: str = "", user_id: str = "",
               "error": f"获取博主内容失败: {exc}（请检查登录状态与代理）"})
     finally:
         emit({"event": "twitter_user_feed_loading", "loading": False})
+
+
+# ---- X 博主媒体「全部更新保存」为本地 HTML 相册（增量） ----
+
+_TW_EXPORT_HTML_NAME = "时间线.html"
+
+
+def _twitter_download_roots() -> list[Path]:
+    """候选下载根目录（务实实现，按优先级）。
+
+    与 build_album_directory/create_download_directory 的规则对齐：
+      - settings.json 的 custom_path（下载默认落在 custom/Downloads；
+        勾选「不建 Downloads 子文件夹」时直接落在 custom）
+      - 默认根 Path("Downloads")（后端工作目录相对路径，同 download_manager）
+    """
+    roots: list[Path] = []
+    custom = ""
+    try:
+        with Path("settings.json").open("r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, dict):
+                custom = (data.get("custom_path") or "").strip()
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+    if custom:
+        base = Path(custom)
+        roots.append(base / "Downloads")
+        roots.append(base)
+    roots.append(Path("Downloads"))
+    uniq: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key not in seen:
+            seen.add(key)
+            uniq.append(root)
+    return uniq
+
+
+def _twitter_export_album_dirs(screen_name: str, display_name: str) -> list[Path]:
+    """列出博主下载目录候选（各候选根 × 展示名/handle，含同名前缀变体）。
+
+    相册目录由下载时的 album_name（博主昵称 display_name）决定，落到
+    sanitize_directory_name 之后的名字；再 glob 前缀变体兜底
+    （如 date_stamp 会在名字后拼 _YYYYMMDD）。
+    """
+    names: list[str] = []
+    for raw in (display_name, screen_name):
+        safe = sanitize_directory_name((raw or "").strip())
+        if safe and safe not in names:
+            names.append(safe)
+    dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def _push(p: Path) -> None:
+        key = str(p)
+        if key not in seen:
+            seen.add(key)
+            dirs.append(p)
+
+    for root in _twitter_download_roots():
+        for name in names:
+            _push(root / name)
+            try:
+                for p in sorted(root.glob(f"{name}*")):
+                    if p.is_dir():
+                        _push(p)
+            except (OSError, ValueError):
+                continue
+    return dirs
+
+
+def _twitter_export_build_index(album_dirs: list[Path]) -> dict[str, str]:
+    """把候选博主目录内全部已落盘文件按文件名建索引（文件名→绝对路径）。"""
+    index: dict[str, str] = {}
+    for d in album_dirs:
+        if not d.is_dir():
+            continue
+        try:
+            for p in d.rglob("*"):
+                if p.is_file():
+                    index.setdefault(p.name, str(p))
+        except OSError:
+            continue
+    return index
+
+
+def _twitter_export_media_src(item: dict, file_index: dict[str, str],
+                              html_dir: Path) -> tuple[str, bool]:
+    """解析一个媒体条目在 HTML 里的 src：本地命中用相对路径，否则远程 URL。
+
+    返回 (src, is_local)。相对路径做 URL 编码（文件名可含空格/中文）。
+    """
+    filename = (item.get("filename") or "").strip()
+    if filename:
+        found = file_index.get(filename)
+        if found:
+            try:
+                rel = Path(os.path.relpath(found, str(html_dir))).as_posix()
+            except (OSError, ValueError):
+                rel = Path(found).name
+            return urllib.parse.quote(rel), True
+    return item.get("media_url") or item.get("thumbnail") or "", False
+
+
+def _twitter_export_read_meta_ids(html_path: Path) -> list[str]:
+    """读取已有 HTML 相册末尾 tw-export-meta 里的 tweet_ids（增量合并用）。"""
+    try:
+        text = html_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    m = re.search(
+        r'<script type="application/json" id="tw-export-meta">(.*?)</script>',
+        text, re.S,
+    )
+    if not m:
+        return []
+    try:
+        data = json.loads(html_unescape(m.group(1)))
+        ids = data.get("tweet_ids") or []
+        return [str(i) for i in ids if str(i).strip()]
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+
+def _twitter_export_card_html(card: dict, display_name: str, screen_name: str,
+                              file_index: dict[str, str], html_dir: Path) -> str:
+    """渲染单条推文卡片（昵称/@handle、时间、正文、媒体原位排布）。"""
+    tweet_id = card.get("tweet_id") or ""
+    post_date = card.get("post_date") or ""
+    item_page = card.get("item_page") or ""
+    who = f"{html_escape(display_name)} (@{html_escape(screen_name)})" if screen_name \
+        else html_escape(display_name)
+    head = f'<div class="who">{who}</div>'
+    sub = f"tweet_id: {html_escape(tweet_id)}"
+    if post_date:
+        sub += f" · 发布于 {html_escape(post_date)}"
+    link_open, link_close = "", ""
+    if item_page:
+        link_open = f'<a class="link" href="{html_escape(item_page, quote=True)}" target="_blank" rel="noreferrer">'
+        link_close = "</a>"
+    media_html: list[str] = []
+    for it in card.get("media_items") or []:
+        src, _local = _twitter_export_media_src(it, file_index, html_dir)
+        if not src:
+            continue
+        esc_src = html_escape(src, quote=True)
+        thumb = (it.get("thumbnail") or "").strip()
+        poster = (f' poster="{html_escape(thumb, quote=True)}"' if thumb else "")
+        if (it.get("media_type") or "photo") == "video":
+            media_html.append(
+                f'<video controls preload="metadata" src="{esc_src}"{poster}></video>')
+        else:
+            media_html.append(f'<img loading="lazy" src="{esc_src}" alt="">')
+    text = html_escape(card.get("text") or "")
+    return (
+        f'<article class="card">{link_open}{head}{link_close}'
+        f'<div class="sub">{html_escape(sub)}</div>'
+        f'<div class="text">{text}</div>'
+        f'<div class="media">{"".join(media_html)}</div>'
+        f"</article>"
+    )
+
+
+def _twitter_export_render(cards: list[dict], screen_name: str, display_name: str,
+                           html_dir: Path, file_index: dict[str, str],
+                           old_ids: list[str]) -> str:
+    """渲染暗色自包含 HTML 相册全文（含末尾 tw-export-meta 增量数据块）。"""
+    cards_html = "".join(
+        _twitter_export_card_html(c, display_name, screen_name, file_index, html_dir)
+        for c in cards
+    )
+    # 增量 meta：本次拉到的推文 + 旧 meta 的推文（并集，去重保序）
+    merged_ids = [c.get("tweet_id") or "" for c in cards]
+    merged_ids += [i for i in old_ids if i not in set(merged_ids)]
+    merged_ids = [i for i in merged_ids if i]
+    meta_json = json.dumps(
+        {
+            "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "tweet_ids": merged_ids,
+        },
+        ensure_ascii=False,
+    )
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html_escape(display_name or screen_name)} · 时间线</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin: 0; background: #0d1117; color: #e6edf3;
+         font: 15px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }}
+  header {{ position: sticky; top: 0; z-index: 2; background: #161b22ee;
+            border-bottom: 1px solid #30363d; padding: 14px 20px; }}
+  header h1 {{ margin: 0; font-size: 18px; }}
+  header p {{ margin: 2px 0 0; color: #8b949e; font-size: 12px; }}
+  main {{ max-width: 640px; margin: 0 auto; padding: 16px 12px 60px; }}
+  .card {{ background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+           padding: 14px 16px; margin: 14px 0; }}
+  .who {{ font-weight: 600; }}
+  .who a {{ color: inherit; text-decoration: none; }}
+  .sub {{ color: #8b949e; font-size: 12px; margin: 2px 0 6px; }}
+  .text {{ white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; }}
+  .media {{ display: grid; gap: 8px; }}
+  .media img, .media video {{ width: 100%; max-height: 560px; object-fit: contain;
+           border-radius: 10px; background: #0d1117; border: 1px solid #21262d; }}
+  a.link {{ color: #58a6ff; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>{html_escape(display_name or screen_name)} · 时间线</h1>
+  <p>共 {len(cards)} 条推文 · 本地相册（媒体命中本机文件则离线可看，未命中走远程链接）</p>
+</header>
+<main>
+{cards_html}
+</main>
+<script type="application/json" id="tw-export-meta">{meta_json}</script>
+</body>
+</html>
+"""
+
+
+async def twitter_export_html(screen_name: str = "", user_id: str = "") -> None:
+    """博主媒体「全部更新保存」：全量拉取时间线生成本地 HTML 相册（增量）。
+
+    流程：循环翻页拉全部（上限 100 页，每页发拉取进度）→ 在博主下载目录
+    匹配已落盘媒体（命中用相对 HTML 的本地路径，未命中用远程 media_url）
+    → 在博主目录生成/增量重写 时间线.html（暗色自包含页面，旧 meta 的
+    tweet_ids 与本次并集合并）。完成后发 twitter_export_done。
+    """
+    try:
+        user_id, screen_name, display_name, _profile = await _twitter_feed_resolve_user(
+            screen_name, user_id)
+
+        # ---- 全量拉取（tweet_id 去重，上限 100 页防死循环） ----
+        all_cards: list[dict] = []
+        seen_ids: set[str] = set()
+        seen_cursors: set[str] = set()
+        cur = ""
+        pages = 0
+        while pages < 100:
+            cards, next_cursor = await _twitter_user_feed_page(user_id, screen_name, cur)
+            pages += 1
+            for c in cards:
+                tid = c.get("tweet_id") or ""
+                if tid and tid in seen_ids:
+                    continue
+                if tid:
+                    seen_ids.add(tid)
+                all_cards.append(c)
+            emit({"event": "twitter_export_progress",
+                  "done": len(all_cards), "phase": "拉取"})
+            if not next_cursor or next_cursor in seen_cursors or not cards:
+                break
+            seen_cursors.add(next_cursor)
+            cur = next_cursor
+        all_cards.sort(key=lambda x: x.get("created_ts") or 0, reverse=True)
+
+        # ---- 定位博主下载目录：优先已存在的候选，拿不到就建默认目录 ----
+        album_dirs = _twitter_export_album_dirs(screen_name, display_name)
+        target_dir = next((d for d in album_dirs if d.is_dir()), None)
+        existing_html = ""
+        if target_dir:
+            probe = target_dir / _TW_EXPORT_HTML_NAME
+            if probe.exists():
+                existing_html = str(probe)
+        if target_dir is None:
+            fallback_name = sanitize_directory_name(
+                screen_name or display_name or f"user_{user_id}") or user_id
+            target_dir = _twitter_download_roots()[0] / fallback_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+        old_ids = _twitter_export_read_meta_ids(Path(existing_html)) if existing_html else []
+
+        # ---- 已落盘媒体索引 + 生成 HTML ----
+        index_dirs = list(album_dirs)
+        if target_dir not in index_dirs:
+            index_dirs.append(target_dir)
+        file_index = _twitter_export_build_index(index_dirs)
+        emit({"event": "twitter_export_progress",
+              "phase": "生成HTML", "done": len(all_cards)})
+        html_text = _twitter_export_render(
+            all_cards, screen_name, display_name, target_dir, file_index, old_ids)
+        out_path = target_dir / _TW_EXPORT_HTML_NAME
+        out_path.write_text(html_text, encoding="utf-8")
+        old_set = set(old_ids)
+        new_count = sum(
+            1 for c in all_cards
+            if (c.get("tweet_id") or "") and c["tweet_id"] not in old_set
+        )
+        emit({
+            "event": "twitter_export_done", "ok": True,
+            "path": str(out_path.resolve()),
+            "total": len(all_cards), "new": new_count,
+        })
+    except Exception as exc:
+        logging.exception("Twitter HTML 相册导出失败")
+        emit({"event": "twitter_export_done", "ok": False, "error": str(exc)})
 
 
 def _twitter_subfolder(item: dict, options: dict) -> str:

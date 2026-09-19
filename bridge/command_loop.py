@@ -539,7 +539,14 @@ async def command_loop() -> None:
                     command.get("screen_name", ""),
                     str(command.get("user_id") or ""),
                     command.get("cursor", ""),
+                    bool(command.get("load_all", False)),
                 )
+
+            elif cmd == "twitter_export_html":
+                _spawn_bg("twitter_export_html", twitter_export_html(
+                    command.get("screen_name", ""),
+                    str(command.get("user_id") or ""),
+                ))
 
             elif cmd == "twitter_clear_cache":
                 twitter_clear_cache()

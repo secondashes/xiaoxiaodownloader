@@ -1129,6 +1129,7 @@
           <span v-if="twBrowseUpdatedAt" class="tw-follow-count">
             更新于 {{ formatTwTime(twBrowseUpdatedAt) }}
           </span>
+          <span class="tw-follow-count">已加载 {{ twBrowseFeed.length }} 条</span>
           <n-button
             size="tiny"
             quaternary
@@ -1183,7 +1184,7 @@
               <span v-if="t.media.length > 4" class="tw-tweet-more">+{{ t.media.length - 4 }}</span>
             </div>
           </div>
-          <!-- 点击继续更新：加载下一批关注博主动态 -->
+          <!-- 点击继续更新：加载下一批关注博主动态；「加载全部」自动连续翻页（App 内循环，再点一次停止） -->
           <div v-if="twBrowseFeed.length" class="tw-browse-more">
             <n-button
               v-if="twBrowseHasMore"
@@ -1194,6 +1195,17 @@
               @click="$emit('tw-browse-more')"
             >↓ 点击继续更新（下一批博主）</n-button>
             <div v-else class="tw-browse-end">已加载全部关注博主的动态</div>
+            <n-button
+              v-if="twBrowseHasMore || twBrowseLoadAllRunning"
+              size="small"
+              block
+              :type="twBrowseLoadAllRunning ? 'error' : 'default'"
+              :title="twBrowseLoadAllRunning ? '点击停止加载全部' : '自动连续翻页加载全部关注博主动态（每批间隔 1.2 秒防限流）'"
+              @click="$emit('tw-browse-load-all')"
+            >{{ twBrowseLoadAllRunning ? '■ 停止加载全部' : '⏩ 加载全部' }}</n-button>
+            <div v-if="twBrowseLoadAllRunning" class="tw-loadall-hint">
+              加载全部中：已 {{ twBrowseLoadAllCount }} 条
+            </div>
           </div>
         </n-scrollbar>
       </div>
@@ -1290,6 +1302,13 @@
                 <span v-if="twViewUser.verified" class="tw-verified" title="认证账号">✔</span>
                 <span class="tw-user-handle">@{{ twViewUser.screen_name }}</span>
                 <n-tag v-if="twViewUser.follow_tag || twViewUser.tag" size="tiny" type="info" round>{{ twViewUser.follow_tag || twViewUser.tag }}</n-tag>
+                <!-- 媒体总数（后端首包 profile）与已加载卡片数；总数缺失时只显示已加载数 -->
+                <span class="tw-feed-stats-hint">
+                  <template v-if="twProfileStats && twProfileStats.media_count != null">
+                    共 {{ formatCount(twProfileStats.media_count) }} 条媒体 · 已加载 {{ twUserFeed.length }} 条
+                  </template>
+                  <template v-else-if="twUserFeed.length">已加载 {{ twUserFeed.length }} 条</template>
+                </span>
               </div>
               <div v-if="twViewUser.description" class="tw-user-desc">{{ twViewUser.description }}</div>
               <div v-if="twViewUser.followers_count != null" class="tw-user-stats">
@@ -1326,6 +1345,18 @@
               :type="twViewUser.following ? 'error' : 'primary'"
               @click="$emit(twViewUser.following ? 'tw-unfollow' : 'tw-follow', twViewUser)"
             >{{ twViewUser.following ? '取消关注' : '关注' }}</n-button>
+            <n-button
+              size="small"
+              type="warning"
+              ghost
+              :loading="twExportRunning"
+              title="拉取该博主全部内容，已下载的视频在 HTML 中对应位置本地引用，保存为「时间线.html」；再次点击在原文件上增量更新"
+              @click="$emit('tw-export-html', { screen_name: twViewUser.screen_name, user_id: twViewUser.user_id })"
+            >💾 全部更新保存</n-button>
+          </div>
+          <!-- HTML 相册导出进度（拉取内容阶段的小字提示） -->
+          <div v-if="twExportRunning" class="tw-export-progress">
+            导出中：{{ twExportProgress.phase }} {{ twExportProgress.done }} 条
           </div>
 
           <!-- 博主内容流：点开博主自动解析，内容卡片直接展示在下方（可查看、可一键下载） -->
@@ -1345,6 +1376,18 @@
               :loading="twUserFeedLoading"
               @click="$emit('tw-user-feed-more')"
             >{{ twUserFeedHasMore ? '加载更多' : '刷新加载' }}</n-button>
+            <n-button
+              v-if="twUserFeedHasMore || twUserLoadAllRunning"
+              size="small"
+              quaternary
+              :loading="twUserLoadAllRunning"
+              title="一次拉取该博主的全部时间线内容（后端自动翻完所有页，耗时视内容量而定）"
+              @click="$emit('tw-user-load-all')"
+            >{{ twUserLoadAllRunning ? '加载全部中…' : '⏩ 加载全部' }}</n-button>
+            <!-- 加载全部进度（twitter_user_feed_progress 事件驱动） -->
+            <span v-if="twUserLoadAllRunning" class="tw-loadall-hint">
+              已加载 {{ twUserLoadAllProgress.loaded || twUserFeed.length }} 条推文<template v-if="twUserLoadAllProgress.total_media"> / {{ twUserLoadAllProgress.total_media }} 媒体</template>
+            </span>
           </div>
           <div v-if="twUserFeedLoading && twUserFeed.length === 0" class="tw-user-feed-loading">
             <n-spin size="medium" />
@@ -1390,7 +1433,16 @@
               :loading="twUserFeedLoading"
               @click="$emit('tw-user-feed-more')"
             >↓ 加载更多内容</n-button>
-            <div v-else class="tw-browse-end">已加载全部内容（已翻到时间线底部）</div>
+            <n-button
+              v-if="twUserFeedHasMore || twUserLoadAllRunning"
+              size="small"
+              block
+              quaternary
+              :loading="twUserLoadAllRunning"
+              title="一次拉取该博主的全部时间线内容（后端自动翻完所有页）"
+              @click="$emit('tw-user-load-all')"
+            >{{ twUserLoadAllRunning ? '加载全部中…' : '⏩ 加载全部' }}</n-button>
+            <div v-else-if="!twUserLoadAllRunning" class="tw-browse-end">已加载全部内容（已翻到时间线底部）</div>
           </div>
         </n-scrollbar>
       </div>
@@ -3221,6 +3273,17 @@ const props = defineProps({
   twUserFeed: { type: Array, default: () => [] },      // [{tweet_id, item_page, text, post_date, media: [], media_items: []}]
   twUserFeedLoading: { type: Boolean, default: false },
   twUserFeedHasMore: { type: Boolean, default: false },
+  // X 用户页资料统计（twitter_user_feed 首包 profile：媒体/推文/粉丝/关注数）
+  twProfileStats: { type: Object, default: null },
+  // X 用户页「加载全部」（后端 load_all 模式）状态与进度
+  twUserLoadAllRunning: { type: Boolean, default: false },
+  twUserLoadAllProgress: { type: Object, default: () => ({ loaded: 0, total_media: 0 }) },
+  // X 用户页 HTML 相册导出（twitter_export_html）状态与进度
+  twExportRunning: { type: Boolean, default: false },
+  twExportProgress: { type: Object, default: () => ({ phase: '', done: 0 }) },
+  // X 浏览模式「加载全部」（App 内循环逐批翻页，可中止）
+  twBrowseLoadAllRunning: { type: Boolean, default: false },
+  twBrowseLoadAllCount: { type: Number, default: 0 },
   // X 本地搜索（搜缓存内容）
   twLocalSearch: { type: String, default: '' },
   twSearchTweets: { type: Array, default: () => [] }, // 搜索命中的推文卡片
@@ -3445,6 +3508,9 @@ const emit = defineEmits([  'select-ha-batch',       // 批量全选/反选/清�
   'tw-browse-more',         // 浏览模式加载下一批博主
   'tw-user-feed-more',      // 博主内容流加载更多（下一页时间线）
   'tw-user-feed-download-all', // 一键下载博主内容流已加载的全部媒体
+  'tw-user-load-all',       // 博主内容流一次加载全部（后端 load_all 模式翻完所有页）
+  'tw-export-html',         // 生成/增量更新博主 HTML 相册（参数：{screen_name, user_id}）
+  'tw-browse-load-all',     // 浏览模式自动连续翻页加载全部（运行中再触发 = 中止）
   'update:tw-local-search', // X 本地搜索关键词（v-model 式）
   'tw-back',                // X 视图内返回上一层
   // Iwara 事件（由 App.vue 转发给 Python 后端）
@@ -7349,6 +7415,24 @@ html.light-mode .tw-toolbar-sticky {
   font-size: 12px;
   color: #7a7a85;
   padding: 10px 0;
+}
+
+/* 加载全部 / 导出进度的小字提示（用户页 + 浏览模式） */
+.tw-loadall-hint {
+  font-size: 12px;
+  color: #7a7a85;
+}
+
+.tw-export-progress {
+  margin: 4px 16px 8px;
+  font-size: 12px;
+  color: #e6a23c;
+}
+
+/* 用户页资料区：媒体总数与已加载数小字（跟在用户名一行） */
+.tw-feed-stats-hint {
+  font-size: 11px;
+  color: #7a7a85;
 }
 
 /* 工具栏本地搜索框 */
