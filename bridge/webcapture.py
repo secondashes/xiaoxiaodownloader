@@ -1436,6 +1436,32 @@ def _web_word_download_image(sess, url, page_url, timeout=WEB_WORD_IMG_TIMEOUT):
     return None, last_reason, kind
 
 
+def _web_word_is_ad_text(text: str) -> bool:
+    """短文本块的广告特征词防御过滤（前端已滤一道，这里是后端兜底）。
+
+    判据：文本较短（<120 字）且命中广告行为词——正文段落极少出现这些组合。
+    """
+    t = (text or "").strip()
+    if not t or len(t) > 120:
+        return False
+    hits = ("广告", "赞助", "赞助商", "推广", "扫码关注", "下载app", "下载 app",
+            "打开app", "打开 app", "立即抢购", "限时优惠", "免费注册",
+            "关注公众号", "微信公众号", "点击了解", "推广链接", "合作热线",
+            "bit.ly/", "t.cn/", "扫码下载")
+    low = t.lower()
+    return any(k in low for k in hits)
+
+
+_AD_SRC_RE = re.compile(
+    r"/ad(?:s|vert|server)?[/-]|/ads/|advert|sponsor|promo|banner"
+    r"|doubleclick|googlesyndication|adserver|tracking|/pixel", re.I)
+
+
+def _web_word_is_ad_img(src: str) -> bool:
+    """图片地址的广告特征防御过滤（CDN 广告位/tracking 像素）。"""
+    return bool(_AD_SRC_RE.search(src or ""))
+
+
 def _web_to_word_impl(command):
     """前端页内提取的元素序列 → python-docx 按原位生成 Word。
 
@@ -1517,6 +1543,11 @@ def _web_to_word_impl(command):
             if t == "img":
                 img_seen += 1
                 src = str(el.get("src") or "").strip()
+                # 广告图防御过滤（前端已滤一道；tracking/广告 CDN 兜底）
+                if _web_word_is_ad_img(src):
+                    img_fail += 1
+                    img_kinds["ad"] = img_kinds.get("ad", 0) + 1
+                    continue
                 kind, val = _web_word_img_kind(src, page_url)
                 data = None
                 reason = ""
@@ -1583,6 +1614,11 @@ def _web_to_word_impl(command):
                 continue          # 空文本块无内容可写
             elif text == last_text:
                 continue          # 连续完全相同的段落只写一次
+            elif _web_word_is_ad_text(text):
+                # 短文本广告词防御过滤（"下载APP/扫码关注/限时优惠"等行为词）
+                img_kinds["ad_text"] = img_kinds.get("ad_text", 0) + 1
+                last_text = None
+                continue
             else:
                 # 未知 t 值同样按普通段落处理，绝不丢内容
                 if t == "pre":

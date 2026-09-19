@@ -2350,16 +2350,59 @@ def _twitter_export_render(cards: list[dict], screen_name: str, display_name: st
 
 
 async def twitter_export_html(screen_name: str = "", user_id: str = "") -> None:
-    """博主媒体「全部更新保存」：全量拉取时间线生成本地 HTML 相册（增量）。
+    """博主媒体「全部推文保存为html」：全量拉取时间线生成本地 HTML 相册（增量）。
 
     流程：循环翻页拉全部（上限 100 页，每页发拉取进度）→ 在博主下载目录
     匹配已落盘媒体（命中用相对 HTML 的本地路径，未命中用远程 media_url）
     → 在博主目录生成/增量重写 时间线.html（暗色自包含页面，旧 meta 的
     tweet_ids 与本次并集合并）。完成后发 twitter_export_done。
+
+    全程登记为一个下载管理任务（占位→进度→完成指向 html 文件），
+    用户可在下载管理里看到「时间线.html」并一键打开文件夹。
     """
+    export_task_id = ""
+    export_item = None
+    export_task = None
     try:
         user_id, screen_name, display_name, _profile = await _twitter_feed_resolve_user(
             screen_name, user_id)
+
+        # ---- 登记占位任务（下载管理立即可见，对齐 BT 导出模式） ----
+        import sys as _sys
+        _dm = _sys.modules["bridge.download_manager"].download_manager
+        export_task_id = _dm.submit(
+            f"https://x.com/{screen_name}",
+            [{
+                "filename": f"{screen_name or display_name or user_id}_时间线.html",
+                "size": None,
+                "item_page": f"https://x.com/{screen_name}",
+                "status": "ok",
+                "thumbnail": "",
+                "media_url": "",
+                "site": "twitter_export",
+                "media_type": "html",
+                "post_title": f"@{screen_name} 时间线归档",
+            }],
+            {}, f"@{screen_name} 时间线归档", f"tw_export:{screen_name or user_id}",
+        )
+        _dm.start(export_task_id)
+        export_task = _dm.tasks.get(export_task_id) or {}
+        export_item = (export_task.get("files") or [{}])[0]
+        emit({"event": "log", "type": "下载",
+              "message": f"@{screen_name} 时间线归档任务已建立，进度见下载管理"})
+
+        def _task_progress(pct: int, note: str = "") -> None:
+            """把导出进度同步进下载管理任务（限频由调用方控制）。"""
+            try:
+                if export_item is not None:
+                    export_item["status"] = "downloading"
+                    export_item["completed"] = max(0, min(99, int(pct)))
+                    if note:
+                        export_item["error"] = note[:120]
+                _dm._save()
+                _dm.emit_snapshot()
+            except Exception:
+                pass
 
         # ---- 全量拉取（tweet_id 去重，上限 100 页防死循环） ----
         all_cards: list[dict] = []
@@ -2379,6 +2422,8 @@ async def twitter_export_html(screen_name: str = "", user_id: str = "") -> None:
                 all_cards.append(c)
             emit({"event": "twitter_export_progress",
                   "done": len(all_cards), "phase": "拉取"})
+            _task_progress(min(10 + pages * 2, 70),
+                           f"拉取时间线 {len(all_cards)} 条（第 {pages} 页）")
             if not next_cursor or next_cursor in seen_cursors or not cards:
                 break
             seen_cursors.add(next_cursor)
@@ -2407,6 +2452,7 @@ async def twitter_export_html(screen_name: str = "", user_id: str = "") -> None:
         file_index = _twitter_export_build_index(index_dirs)
         emit({"event": "twitter_export_progress",
               "phase": "生成HTML", "done": len(all_cards)})
+        _task_progress(80, f"生成 HTML（{len(all_cards)} 条推文）")
         html_text = _twitter_export_render(
             all_cards, screen_name, display_name, target_dir, file_index, old_ids)
         out_path = target_dir / _TW_EXPORT_HTML_NAME
@@ -2416,6 +2462,22 @@ async def twitter_export_html(screen_name: str = "", user_id: str = "") -> None:
             1 for c in all_cards
             if (c.get("tweet_id") or "") and c["tweet_id"] not in old_set
         )
+        # ---- 任务完成：指向 html 文件（下载管理「📂 打开文件夹」直达） ----
+        try:
+            export_item["status"] = "completed"
+            export_item["completed"] = 100
+            export_item["_final_path"] = str(out_path.resolve())
+            export_item["_final_name"] = out_path.name
+            export_item["filename"] = out_path.name
+            export_task["done"] = export_task.get("done", 0) + 1
+            export_task["completed"] = export_task.get("completed", 0) + 1
+            _dm._save()
+            _dm.emit_snapshot()
+            emit({"event": "file_complete", "filename": out_path.name,
+                  "success": True, "task_id": export_task_id,
+                  "path": str(out_path.resolve())})
+        except Exception:
+            pass
         emit({
             "event": "twitter_export_done", "ok": True,
             "path": str(out_path.resolve()),
@@ -2423,6 +2485,18 @@ async def twitter_export_html(screen_name: str = "", user_id: str = "") -> None:
         })
     except Exception as exc:
         logging.exception("Twitter HTML 相册导出失败")
+        # 占位任务标失败（下载管理可见失败原因）
+        try:
+            if export_item is not None:
+                export_item["status"] = "failed"
+                export_item["error"] = str(exc)[:200]
+                export_task["failed"] = export_task.get("failed", 0) + 1
+                import sys as _sys2
+                _dm2 = _sys2.modules["bridge.download_manager"].download_manager
+                _dm2._save()
+                _dm2.emit_snapshot()
+        except Exception:
+            pass
         emit({"event": "twitter_export_done", "ok": False, "error": str(exc)})
 
 

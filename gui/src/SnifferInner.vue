@@ -649,8 +649,15 @@ async function exportPageWord() {
 
     const js = `(async () => {
       const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-      const BAD = new Set(['script','style','noscript','svg','template','iframe','form','button','select','textarea']);
-      const NOISE_SEL = 'nav,footer,aside,header,.nav,.footer,.sidebar,.comment,#comments,.ad,.advert';
+      const BAD = new Set(['script','style','noscript','svg','template','form','button','select','textarea']);
+      // 广告/噪声区大全（用户要求：尽量去广告，只留正文和视频）——宁滥勿缺
+      const NOISE_SEL = 'nav,footer,aside,header,.nav,.footer,.sidebar,.comment,#comments,.ad,.ads,.advert,.advertisement'
+        + ',[class*="advert"],[class*="sponsor"],[class*="promo"],[class*="banner"],[class*="recommend"],[class*="related"]'
+        + ',[class*="share"],[class*="social"],[class*="subscribe"],[class*="newsletter"],[class*="popup"],[class*="coupon"]'
+        + ',[class*="download-app"],[class*="open-app"],[class*="ad-box"],[class*="ad-wrap"],[class*="ad-area"],[class*="ads-"]'
+        + ',[class*="-ads"],[id*="ad-"],[id*="ads-"],[role="banner"],[role="complementary"],[aria-label*="广告"],[data-ad]';
+      // 图片地址广告特征（CDN 广告位/tracking 像素）
+      const AD_SRC = /\\/ad(?:s|vert|server)?[\\/-]|\\/ads\\/|advert|sponsor|promo|banner|doubleclick|googlesyndication|adserver|tracking|pixel(?=\\.)/i;
 
       const visible = el => {
         try {
@@ -672,15 +679,46 @@ async function exportPageWord() {
       };
       const root = document.querySelector('main, article, [role=main]') || document.body;
 
-      // ---- 第一轮：语义标签（标题/段落/列表/引用/代码块/表格/图片） ----
+      // ---- 第一轮：语义标签（标题/段落/列表/引用/代码块/表格/图片/视频/嵌入播放器） ----
       const inNoise = el => { try { return !!(el.closest && el.closest(NOISE_SEL)) } catch (e) { return false } };
-      root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table,figure,img').forEach(el => {
+      root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table,figure,img,video,iframe').forEach(el => {
         const tag = el.tagName.toLowerCase();
+        if (tag === 'iframe') {
+          // 嵌入播放器：YouTube 提取官方缩略图；B站等给占位说明（视频本体无法入 Word）
+          const isrc = el.src || '';
+          if (!isrc) return;
+          const ym = isrc.match(/youtube(?:-nocookie)?\\.com\\/embed\\/([\\w-]{6,})/i);
+          if (ym && imgCount < 40) {
+            imgCount++; push({ t: 'img', src: ('https://i.ytimg.com/vi/' + ym[1] + '/hqdefault.jpg').slice(0, 2000) });
+            push({ t: 'p', text: '（视频：YouTube ' + ym[1] + '）' });
+          } else if (/bilibili\\.com\\/player/i.test(isrc) && imgCount < 40) {
+            push({ t: 'p', text: '（视频：B站嵌入播放器 ' + isrc.slice(0, 120) + '）' });
+          }
+          return;
+        }
         if (BAD.has(tag)) return;
+        if (tag === 'video') {
+          // 视频：提取 poster 封面帧入文档原位，并留视频占位说明
+          if (imgCount >= 40) return;
+          if (!visible(el) || inNoise(el)) return;
+          const poster = el.getAttribute('poster') || '';
+          const vsrc = el.currentSrc || el.src || (el.querySelector('source') && el.querySelector('source').src) || '';
+          if (!poster && !vsrc) return;
+          const w = el.getBoundingClientRect().width || 0;
+          if (w && w < 80) return;
+          imgCount++;
+          if (poster && (/^https?:/i.test(poster) || poster.indexOf('data:') === 0)) {
+            push({ t: 'img', src: poster.slice(0, 2000) });
+          }
+          const vlabel = el.getAttribute('title') || String(vsrc || '视频').split('/').pop().split('?')[0];
+          push({ t: 'p', text: '（视频：' + clean(vlabel).slice(0, 120) + '）' });
+          return;
+        }
         if (tag === 'img') {
           if (imgCount >= 40) return;
           const src = el.currentSrc || el.src || el.getAttribute('data-src') || el.getAttribute('data-original') || '';
           if (!src || src.indexOf('data:') !== 0 && !/^https?:\\/\\//i.test(src)) return;
+          if (AD_SRC.test(src)) return;            // 广告/tracking 图直接丢
           const w = el.naturalWidth || el.getBoundingClientRect().width || 0;
           if (w && w < 80) return;             // 图标/像素占位忽略
           imgCount++; push({ t: 'img', src: src.slice(0, 2000) });
@@ -692,6 +730,16 @@ async function exportPageWord() {
           if (!txt) return;
           push({ t: 'table', html: (el.outerHTML || '').slice(0, 300000), text: txt.slice(0, 20000) });
           return;
+        }
+        // 链接密度启发式：段落里几乎全是链接（导航卡片/广告位列表）→ 丢
+        if (tag === 'p' || tag === 'li') {
+          const links = el.querySelectorAll ? el.querySelectorAll('a[href]') : [];
+          if (links.length >= 3) {
+            let lt = 0;
+            links.forEach(a => { lt += (a.innerText || '').length; });
+            const total = (el.innerText || '').length || 1;
+            if (lt / total > 0.65) return;
+          }
         }
         const txt = clean(el.innerText || el.textContent || '');
         if (!txt || txt.length < (tag.startsWith('h') ? 2 : 6)) return;   // 太短的碎片（导航项、按钮文案）丢掉

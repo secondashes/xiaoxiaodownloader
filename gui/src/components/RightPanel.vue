@@ -1350,9 +1350,9 @@
               type="warning"
               ghost
               :loading="twExportRunning"
-              title="拉取该博主全部内容，已下载的视频在 HTML 中对应位置本地引用，保存为「时间线.html」；再次点击在原文件上增量更新"
+              title="把该博主全部推文（图文/视频）保存为一个本地网页「时间线.html」：图片视频按推文原位排布，已下载的视频本地引用，方便归档和以后查阅；再次点击在原文件上增量更新，任务进度见下载管理"
               @click="$emit('tw-export-html', { screen_name: twViewUser.screen_name, user_id: twViewUser.user_id })"
-            >💾 全部更新保存</n-button>
+            >📄 全部推文保存为html</n-button>
           </div>
           <!-- HTML 相册导出进度（拉取内容阶段的小字提示） -->
           <div v-if="twExportRunning" class="tw-export-progress">
