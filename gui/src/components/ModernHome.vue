@@ -274,6 +274,59 @@
     </div><!-- /.mh-body -->
 
     <!-- BT 下载弹窗：替代 window.prompt（Electron 不支持 prompt，调用会静默失败） -->
+    <!-- 自动更新弹窗：三态 info（发现新版）→ downloading（进度/速度/缓存目录）→ done（立即安装） -->
+    <n-modal v-model:show="updModal" preset="card" title="⬆ 软件更新" style="width: 560px">
+      <!-- 态一：发现新版 -->
+      <template v-if="updStage === 'info'">
+        <div class="mh-upd-head">
+          <span class="mh-upd-ver">{{ (updInfo && updInfo.tag) || '新版本' }}</span>
+          <span v-if="updAsset && updAsset.size" class="mh-upd-size">{{ fmtMB(updAsset.size) }}</span>
+        </div>
+        <pre v-if="updBody" class="mh-upd-body">{{ updBody }}</pre>
+        <div class="mh-upd-row">
+          <n-switch v-model:value="updAuto" size="small" />
+          <span class="mh-upd-hint">自动检查更新（每次启动检查一次）</span>
+        </div>
+        <div class="mh-upd-actions">
+          <n-button size="small" quaternary @click="updModal = false">稍后再说</n-button>
+          <n-button size="small" type="primary" @click="startUpdateDownload">⬇ 开始下载</n-button>
+        </div>
+      </template>
+      <!-- 态二：下载中（进度条 + 速度 + 缓存目录） -->
+      <template v-else-if="updStage === 'downloading'">
+        <div class="mh-upd-head">
+          <span class="mh-upd-ver">正在下载 {{ (updAsset && updAsset.name) || '更新包' }}</span>
+          <span class="mh-upd-pct">{{ updProgress }}%</span>
+        </div>
+        <n-progress type="line" :percentage="updProgress" :show-indicator="false" :height="14" style="margin: 12px 0 10px" />
+        <div class="mh-upd-stats">
+          <span>⬇ {{ fmtMB(updReceived) }} / {{ updTotal ? fmtMB(updTotal) : '未知大小' }}</span>
+          <span>速度 {{ fmtMB(updSpeed) }}/s</span>
+        </div>
+        <div class="mh-upd-path" :title="updSavePath">📁 保存目录：{{ updSavePath || '系统下载文件夹' }}</div>
+        <div class="mh-upd-row" style="margin-top: 10px">
+          <span class="mh-upd-hint">下载在后台进行，关闭此窗不影响进度；完成后会自动弹回。</span>
+        </div>
+        <div class="mh-upd-actions">
+          <n-button size="small" quaternary @click="updModal = false">隐藏窗口</n-button>
+        </div>
+      </template>
+      <!-- 态三：下载完成 → 安装确认 -->
+      <template v-else-if="updStage === 'done'">
+        <div class="mh-upd-head">
+          <span class="mh-upd-ver">✅ 更新包下载完成</span>
+        </div>
+        <div class="mh-upd-path" :title="updDonePath">📦 {{ updDonePath }}</div>
+        <div class="mh-upd-row" style="margin-top: 10px">
+          <span class="mh-upd-hint">立即安装将关闭应用并启动安装程序（覆盖安装，配置与已下载内容保留）。</span>
+        </div>
+        <div class="mh-upd-actions">
+          <n-button size="small" quaternary @click="updModal = false">稍后安装（安装包已保留）</n-button>
+          <n-button size="small" type="primary" @click="installUpdateNow">▶ 立即安装</n-button>
+        </div>
+      </template>
+    </n-modal>
+
     <n-modal v-model:show="btShow" preset="dialog" title="🧲 BT 下载（磁力链接 / 种子）" style="width: 580px">
       <div class="mh-bt-body">
         <n-input v-model:value="btText" type="textarea" :rows="6"
@@ -295,7 +348,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, onUnmounted, nextTick, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSwitch, NTag, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NModal, NProgress, NSwitch, NTag, useMessage } from 'naive-ui'
 // 站点注册表（唯一数据源）：分类/说明/图标兜底/GitHub 校验合并都在 surfaceSites.js
 import { PLATFORMS as PLATFORM_BASELINE, BUNDLED_REGISTRY, mergeRegistry, tileVisual, visibleCategories, visibleSubs, freqSites, trackSiteClick } from '../surfaceSites.js'
 
@@ -651,6 +704,7 @@ if (window.api && window.api.onBtMagnetClick) {
 }
 
 // ===== 自动更新（表世界单独设置；统一从 GitHub Release 获取最新安装包） =====
+// 三段式弹窗：info（发现新版）→ downloading（进度条/速度/缓存目录）→ done（立即安装/稍后）
 const updCurrent = ref('')
 const updChecking = ref(false)
 const updHasNew = ref(false)
@@ -658,13 +712,33 @@ const updInfo = ref(null)          // github_update_info 的 release 部分
 const updDownloading = ref(false)
 const updProgress = ref(0)         // 下载百分比
 const updDonePath = ref('')        // 下载完成的安装包路径
+const updModal = ref(false)        // 更新弹窗
+const updStage = ref('info')       // info | downloading | done
+const updAsset = ref(null)         // 选中的安装包附件 {name, url, size}
+const updBody = ref('')            // release 说明（截断展示）
+const updSpeed = ref(0)            // B/s
+const updReceived = ref(0)         // B
+const updTotal = ref(0)            // B
+const updSavePath = ref('')        // 安装包保存目录
 // 自动检查开关（表世界单独设置，默认开）
 const updAuto = ref(localStorage.getItem('mh_auto_update') !== '0')
 watch(updAuto, v => { try { localStorage.setItem('mh_auto_update', v ? '1' : '0') } catch (e) { /* 忽略 */ } })
 const updSilent = ref(false)       // 自动检查=静默；手动点击=有反馈
 
+function fmtMB(bytes) {
+  const n = Number(bytes) || 0
+  if (n >= 1048576 * 1024) return (n / 1048576 / 1024).toFixed(2) + ' GB'
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB'
+  return n + ' B'
+}
+
 async function checkUpdate(silent = false) {
-  if (updChecking.value || !window.api) return
+  if (!window.api) return
+  // 下载中/已有新版：重开弹窗看进度，不重复请求
+  if (updDownloading.value || updStage.value === 'done') { updModal.value = true; return }
+  if (updHasNew.value) { updStage.value = 'info'; updModal.value = true; return }
+  if (updChecking.value) return
   updChecking.value = true
   updSilent.value = !!silent
   if (!updCurrent.value) {
@@ -678,22 +752,38 @@ async function checkUpdate(silent = false) {
   setTimeout(() => { updChecking.value = false }, 20000)   // 超时兜底解除按钮
 }
 
-function confirmInstallUpdate() {
+// 发现新版 → 打开信息弹窗（替代原 window.confirm 阻塞式确认）
+function openUpdateModal() {
   const r = updInfo.value || {}
-  const asset = (r.assets && r.assets[0]) || {}
-  const lines = [
-    `发现新版本 ${r.tag || ''}${r.name ? ' · ' + r.name : ''}`,
-    asset.name ? `安装包：${asset.name}（${asset.size ? (asset.size / 1048576).toFixed(0) + ' MB' : '大小未知'}）` : '',
-    (r.body || '').slice(0, 400),
-    '',
-    '将开始下载安装包，下载完成后会询问是否立即安装。',
-  ].filter(Boolean)
-  if (window.confirm(lines.join('\n'))) {
-    if (!asset.url) { message.error('该版本没有可下载的安装包附件'); return }
-    updDownloading.value = true
-    updProgress.value = 0
-    window.api.sendCommand({ cmd: 'download_update', url: asset.url, file_name: asset.name })
+  const asset = (r.assets && r.assets[0]) || null
+  if (!asset || !asset.url) {
+    message.error('该版本没有可下载的安装包附件')
+    return
   }
+  updAsset.value = asset
+  updBody.value = (r.body || '').slice(0, 500)
+  updStage.value = 'info'
+  updModal.value = true
+}
+
+// 弹窗内「开始下载」→ 切进度态并提交后端（进度经 update_download_progress 回流）
+function startUpdateDownload() {
+  const asset = updAsset.value || {}
+  if (!asset.url) { message.error('下载地址为空'); return }
+  updStage.value = 'downloading'
+  updDownloading.value = true
+  updProgress.value = 0
+  updReceived.value = 0
+  updTotal.value = Number(asset.size) || 0
+  window.api.sendCommand({ cmd: 'download_update', url: asset.url, file_name: asset.name })
+}
+
+// 下载完成态「立即安装」：运行安装包（NSIS 覆盖安装，应用会关闭）
+function installUpdateNow() {
+  if (!updDonePath.value) { message.error('安装包路径丢失，请重新下载'); return }
+  window.api.sendCommand({ cmd: 'open_update_installer', path: updDonePath.value })
+  updModal.value = false
+  message.info('安装程序已启动，应用即将关闭升级…')
 }
 
 // ===== 当前页面存为 Word（页内提取正文元素，图片表格按原位置写入文档） =====
@@ -1240,34 +1330,38 @@ onMounted(() => {
         return
       }
       if (ev.event === 'github_update_info') {
-        // 更新检查回流：has_new_release → 弹确认（版本+说明+大小）
+        // 更新检查回流：has_new_release → 打开信息弹窗（版本+说明+大小，弹窗内点「开始下载」）
         updChecking.value = false
         if (ev.current_version) updCurrent.value = ev.current_version
         const rel = ev.release || null
         updHasNew.value = !!ev.has_new_release
         updInfo.value = rel
-        if (ev.has_new_release && rel) confirmInstallUpdate()
+        if (ev.has_new_release && rel) openUpdateModal()
         else if (!updSilent.value) message.info(`当前已是最新版本（v${updCurrent.value || ev.current_version}）`)
         return
       }
       if (ev.event === 'update_download_progress') {
         updProgress.value = ev.percent || 0
+        updReceived.value = ev.received || 0
+        updTotal.value = ev.total || updTotal.value || 0
+        updSpeed.value = ev.speed || 0
+        if (ev.path) updSavePath.value = ev.path
+        if (updModal.value && updStage.value !== 'downloading') updStage.value = 'downloading'
         return
       }
       if (ev.event === 'update_download_done') {
         updDownloading.value = false
         updDonePath.value = ev.path || ''
+        updSavePath.value = ev.path || updSavePath.value
+        updProgress.value = 100
+        updStage.value = 'done'
+        updModal.value = true   // 无论弹窗是否被关掉都拉起来：安装确认环节不可错过
         message.success(`更新包已下载：${ev.file_name || ''}（${((ev.size || 0) / 1048576).toFixed(0)} MB）`)
-        // 安装确认环节：用户确认后才运行安装包（NSIS 覆盖安装即更新）
-        if (window.confirm(`新版本安装包已就绪：\n${ev.path}\n\n立即运行安装程序？（安装过程中应用会关闭）`)) {
-          window.api.sendCommand({ cmd: 'open_update_installer', path: updDonePath.value })
-        } else {
-          message.info('已取消安装；安装包保留在下载文件夹，可稍后手动运行')
-        }
         return
       }
       if (ev.event === 'update_download_error') {
         updDownloading.value = false
+        updStage.value = 'info'
         message.error(ev.error || '更新下载失败')
         return
       }
@@ -1829,6 +1923,27 @@ onUnmounted(() => {
 
 /* BT 下载弹窗（亮色风格） */
 .mh-bt-body { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------- 自动更新弹窗 ---------- */
+.mh-upd-head { display: flex; align-items: baseline; gap: 10px; }
+.mh-upd-ver { font-size: 16px; font-weight: 700; }
+.mh-upd-pct { margin-left: auto; font-size: 20px; font-weight: 800; color: #18a058; }
+.mh-upd-size { font-size: 12px; color: #8a8f9e; }
+.mh-upd-body {
+  margin: 10px 0 0; padding: 10px 14px; max-height: 200px; overflow-y: auto;
+  background: #f6f7fb; border-radius: 9px; color: #4a4f5e;
+  font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  font-family: inherit;
+}
+.mh-upd-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.mh-upd-hint { font-size: 12px; color: #8a8f9e; }
+.mh-upd-stats { display: flex; justify-content: space-between; font-size: 12.5px; color: #4a4f5e; }
+.mh-upd-path {
+  margin-top: 10px; padding: 8px 12px; font-size: 12px; color: #4a4f5e;
+  background: #f6f7fb; border-radius: 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mh-upd-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .mh-bt-drop {
   border: 1.5px dashed #c4cbe0; border-radius: 10px;
   padding: 14px 10px; text-align: center;
