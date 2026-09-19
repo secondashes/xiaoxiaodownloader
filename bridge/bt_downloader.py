@@ -405,7 +405,7 @@ async def bt_download_one(task, item, album_path, task_id, max_retries):
                 try:
                     cfg = globals().get("_github_proxy_cfg")  # noqa: F821
                     if callable(cfg):
-                        proxy = (cfg() or {}).get("proxy") or proxy
+                        proxy = (cfg() or {}).get("http") or proxy
                 except Exception:
                     pass
                 r = _creq.get(url, impersonate="chrome", timeout=60,
