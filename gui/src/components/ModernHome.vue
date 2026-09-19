@@ -33,7 +33,7 @@
                 @click="toggleHideDead">{{ hideDead ? '👁 显示失效' : '🙈 隐藏失效' }}</button>
         <button class="mh-help-btn" title="全部站点分类说明（特点/风险/换域名方法）" @click="openHelp('surface-sites.html')">🌐 站点</button>
         <button class="mh-help-btn" title="软件使用导览（可视化说明）" @click="openHelp('software-guide.html')">📖 说明</button>
-        <button class="mh-help-btn" title="本次更新可视化说明（v1.2.51 返回不重播 / B站链接 / Word 落点）" @click="openHelp('changelog-20260918d.html')">📜 更新</button>
+        <button class="mh-help-btn" title="本次更新可视化说明（v1.2.59 BT下载 / X站四件套 / 自动更新）" @click="openHelp('changelog-20260919.html')">📜 更新</button>
         <button class="mh-restart-btn" title="还原网络设置并重启应用（界面模式保持；登录卡死/网络异常时使用）"
                 @click="restartApp">🔄 重启应用</button>
       </div>

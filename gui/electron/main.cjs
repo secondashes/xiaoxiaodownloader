@@ -1637,6 +1637,7 @@ const HELP_PAGES = {
   'changelog-20260918b.html': '更新说明 · 细分板块大扩充（13 分类 + 110 新站 + 常用模块）',
   'changelog-20260918c.html': '更新说明 · 返回逻辑 / Word 导出 / 品牌显示（v1.2.48）',
   'changelog-20260918d.html': '更新说明 · 返回不重播 / B站链接 / Word 落点（v1.2.51）',
+  'changelog-20260919.html': '更新说明 · BT下载 / X站四件套 / 自动更新（v1.2.59）',
   'surface-sites.html': '美好世界 · 站点分类总览',
 }
 ipcMain.handle('open-help-window', (_e, file) => {
