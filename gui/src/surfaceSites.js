@@ -6,6 +6,7 @@
 //      （raw.githubusercontent → jsDelivr 回退），status=ok 下发新地址 /
 //      status=dead 标记失效 / extra 动态补新站（"留空位 + GitHub 验证"策略）。
 //      本地 baseline 永远可用（离线/拉取失败不受影响）。
+import chroma from 'chroma-js'
 //   4. home 为空串 = 留空位（地址待 GitHub 校验下发，磁贴置灰"待补地址"）。
 
 // 分类（磁贴区 chips 过滤 + 图标兜底 + 兜底配色）
@@ -62,19 +63,19 @@ export const CAT_FALLBACK_ICON = {
   res: '<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4Zm0 4.2 5 2.2v3.6c0 3.6-2.1 6.6-5 7.4-2.9-.8-5-3.8-5-7.4V8.4l5-2.2Z"/></svg>',
 }
 
-// 分类兜底配色（无品牌色的站点按主分类取色，视觉统一）
+// 分类兜底配色（无品牌色的站点按主分类取色，视觉统一；chroma 和谐化在 tileVisual 统一做）
 export const CAT_COLORS = {
-  video: ['#ff5f8f', '#ffb46a'],
-  music: ['#6a5bff', '#a08fff'],
-  book: ['#e8a33d', '#f0c987'],
+  video: ['#e8557f', '#e8854f'],
+  music: ['#6a5bff', '#9d8fff'],
+  book: ['#d98f2b', '#e8b25f'],
   game: ['#21b573', '#5fd9a4'],
-  ai: ['#8a4fff', '#c29bff'],
-  academic: ['#3268ac', '#7fb0e0'],
-  res: ['#4d6b8a', '#8aa8c4'],
-  art: ['#d4380d', '#ff9c6e'],
-  magnet: ['#37474f', '#78909c'],
-  news: ['#8d6e63', '#bcaaa4'],
-  science: ['#00838f', '#4dd0e1'],
+  ai: ['#8a4fff', '#b585ff'],
+  academic: ['#3268ac', '#6f9fd0'],
+  res: ['#4d6b8a', '#7f9bb8'],
+  art: ['#d4380d', '#f07040'],
+  magnet: ['#456'],
+  news: ['#8d6e63', '#b09585'],
+  science: ['#00838f', '#3dbdc9'],
 }
 
 // 站点表。字段：key唯一 / name / desc磁贴短说明 / tip完整说明 / cats分类(可多) /
@@ -1112,13 +1113,40 @@ export function mergeRegistry(baseline, remote) {
 }
 
 // 磁贴展示辅助：图标（站点专属 → 分类兜底）、颜色（品牌 → 分类兜底）
+// ---- 磁贴配色和谐化（chroma.js / LCH 色彩空间，2026-09-19）----
+// 168 站的 c1/c2 是逐站手挑的，明度/饱和度各自为政（纯红 #ff0000 与暗绿 #1d9f6e 同墙）
+// → 磁贴墙看起来杂乱。用 chroma 做 LCH 归一：保持各站品牌「色相」，把「亮度」统一进
+// 一个带（暗的提亮、刺眼的压暗）、「饱和度」只压过高的（不强行给灰调品牌加色），
+// 渐变亮端 c2 统一由归一后的 c1 派生（同色相向上亮化）——整面墙的渐变方向一致、观感和谐。
+const TILE_L_MIN = 46
+const TILE_L_MAX = 60
+const TILE_C_MAX = 66
+const _tileHarmonyCache = new Map()
+
+export function harmonizeTile(c1, c2) {
+  const key = c1 + '|' + (c2 || '')
+  const hit = _tileHarmonyCache.get(key)
+  if (hit) return hit
+  let out
+  try {
+    const [l, cc, h] = chroma(c1).lch()
+    const L = Math.max(TILE_L_MIN, Math.min(TILE_L_MAX, l))
+    const C = Math.min(TILE_C_MAX, cc)
+    const base = chroma.lch(L, C, h)
+    // 亮端：同色相向白方向亮化（lab 插值比直接 lighten 柔和），过亮会洗白 → 限制幅度
+    const light = chroma.mix(base, chroma.lch(Math.min(L + 22, 84), C * 0.8, h), 1, 'lab')
+    out = { c1: base.hex(), c2: light.hex() }
+  } catch (e) {
+    out = { c1, c2: c2 || c1 }   // 非法色值兜底原样返回
+  }
+  _tileHarmonyCache.set(key, out)
+  return out
+}
+
 export function tileVisual(p) {
   const mainCat = (p.cats && p.cats[0]) || 'res'
-  return {
-    svg: p.svg || CAT_FALLBACK_ICON[mainCat] || CAT_FALLBACK_ICON.res,
-    c1: p.c1 || (CAT_COLORS[mainCat] || CAT_COLORS.res)[0],
-    c2: p.c2 || (CAT_COLORS[mainCat] || CAT_COLORS.res)[1],
-  }
+  const fb = CAT_COLORS[mainCat] || CAT_COLORS.res
+  return harmonizeTile(p.c1 || fb[0], p.c2 || fb[1] || fb[0])
 }
 
 // ---- 「常用」模块：点击统计 + 预设 Top15 + 自动累计（细分板块：收录点击次数最多的 15 个网站） ----
